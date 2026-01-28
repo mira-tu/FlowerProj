@@ -1,0 +1,126 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;700&family=Playfair+Display:wght@700&display=swap');
+
+.special-order-page {
+    font-family: 'Poppins', sans-serif;
+}
+
+.font-playfair {
+    font-family: 'Playfair Display', serif;
+}
+
+.special-section {
+    padding-top: 140px;
+    padding-bottom: 100px;
+    min-height: 100vh;
+}
+
+.upload-box {
+    border-radius: 24px;
+    cursor: pointer;
+}
+
+.upload-box:focus,
+.upload-box:focus-within {
+    outline: 3px solid rgba(240, 123, 150, 0.6);
+    outline-offset: 4px;
+}
+
+.border-dashed {
+    border: 2px dashed rgba(0, 0, 0, 0.1);
+}
+
+.btn-pink {
+    background-color: #f07b96;
+    border: none;
+    color: #fff;
+    transition: all 0.3s ease;
+}
+
+.btn-pink:hover {
+    background-color: #d63384;
+    color: #fff;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(240, 123, 150, 0.4);
+}
+
+.btn-pink:focus,
+.btn-pink:active {
+    background-color: #f07b96;
+    color: #fff;
+    box-shadow: 0 5px 15px rgba(240, 123, 150, 0.4);
+}
+
+.addon-card {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    cursor: pointer;
+}
+
+.addon-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1) !important;
+    border-color: #f07b96 !important;
+}
+
+.form-control:focus,
+.form-select:focus {
+    box-shadow: none;
+    border: 1px solid #f07b96;
+}
+
+.form-check-input:checked+label {
+    color: #f07b96;
+    font-weight: bold;
+}
+
+.text-brown {
+    color: #8B4513;
+}
+
+@media (max-width: 767.98px) {
+    .special-section {
+        padding-top: 110px;
+        padding-bottom: 60px;
+    }
+
+    .upload-box {
+        padding: 20px !important;
+    }
+
+    .btn-pink {
+        width: 100%;
+        padding: 12px;
+    }
+
+    .addon-card {
+        margin-bottom: 15px;
+    }
+
+    .form-control,
+    .form-select {
+        font-size: 0.95rem;
+    }
+}
+
+@media (max-width: 576px) {
+    .special-section {
+        padding-top: 100px;
+        padding-bottom: 50px;
+    }
+
+    .upload-box {
+        padding: 15px !important;
+    }
+
+    .upload-box p {
+        font-size: 0.9rem;
+    }
+
+    .btn-pink {
+        padding: 10px;
+        font-size: 0.95rem;
+    }
+
+    .addon-card {
+        margin-bottom: 12px;
+    }
+}

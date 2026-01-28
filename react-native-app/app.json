@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "FlowerForge Admin",
+    "slug": "flowerforge-admin",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#ec4899"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.flowerforge.admin",
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app needs access to your camera to take photos for products and stock items.",
+        "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to select images for products and stock items."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#ec4899"
+      },
+      "package": "com.flowerforge.admin",
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {},
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "The app accesses your photos to let you select images for products and stock items.",
+          "cameraPermission": "The app accesses your camera to let you take photos for products and stock items."
+        }
+      ]
+    ]
+  }
+}

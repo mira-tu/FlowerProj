@@ -1,0 +1,263 @@
+/* About Page Styles */
+.about-hero {
+    background-color: var(--light-pink);
+    padding: 80px 0;
+    text-align: center;
+}
+
+.about-hero h1 {
+    color: var(--main-pink);
+    font-weight: 700;
+    margin-bottom: 20px;
+}
+
+.story-section {
+    padding: 80px 0;
+}
+
+.story-image-wrapper {
+    padding: 12px;
+    border-radius: 24px;
+    background: linear-gradient(135deg, rgba(240, 123, 150, 0.15), rgba(244, 167, 185, 0.15));
+}
+
+.story-img {
+    width: 100%;
+    border-radius: 18px;
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.12);
+}
+
+.story-content {
+    background: #fff;
+    border-radius: 22px;
+    padding: 45px;
+    box-shadow: 0 20px 45px rgba(0, 0, 0, 0.05);
+}
+
+.story-content p {
+    line-height: 1.8;
+}
+
+.gallery-section {
+    padding: 80px 0;
+    background-color: #fff;
+}
+
+.gallery-img {
+    width: 100%;
+    height: 250px;
+    object-fit: cover;
+    border-radius: 10px;
+    transition: transform 0.3s;
+}
+
+.gallery-img:hover {
+    transform: scale(1.03);
+}
+
+.services-section .section-title::after {
+    content: '';
+    position: absolute;
+    bottom: -15px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 80px;
+    height: 4px;
+    background: linear-gradient(135deg, #f07b96, #f4a7b9);
+    border-radius: 2px;
+}
+
+.services-section .btn-pink {
+    background: linear-gradient(135deg, #f07b96 0%, #f4a7b9 100%);
+    color: #fff;
+    border: none;
+    transition: all 0.3s ease;
+}
+
+.services-section .btn-pink:hover {
+    color: #fff;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(240, 123, 150, 0.4);
+}
+
+.services-section .hover-lift {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.services-section .hover-lift:hover {
+    transform: translateY(-10px);
+    box-shadow: 0 15px 40px rgba(0, 0, 0, 0.1) !important;
+}
+
+.services-section .img-wrapper img {
+    transition: transform 0.5s ease;
+}
+
+.services-section .card:hover .img-wrapper img {
+    transform: scale(1.1);
+}
+
+.promise-section {
+    padding: 80px 0;
+    background-color: var(--light-pink);
+}
+
+.promise-card {
+    background: white;
+    padding: 30px;
+    border-radius: 15px;
+    text-align: center;
+    height: 100%;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+    transition: transform 0.3s;
+}
+
+.promise-card:hover {
+    transform: translateY(-5px);
+}
+
+.promise-card h3 {
+    color: var(--main-pink);
+    margin-bottom: 15px;
+    font-size: 1.25rem;
+}
+
+.promise-img {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    object-fit: cover;
+    margin-bottom: 20px;
+    border: 4px solid var(--light-pink);
+    align-self: center; /* Center the image within the flex container */
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.team-section {
+    padding: 80px 0;
+    text-align: center;
+}
+
+.owner-img {
+    width: 150px;
+    height: 150px;
+    border-radius: 50%;
+    object-fit: cover;
+    margin-bottom: 20px;
+    border: 4px solid var(--light-pink);
+}
+
+.quote {
+    font-style: italic;
+    max-width: 800px;
+    margin: 0 auto;
+    font-size: 1.1rem;
+    line-height: 1.8;
+}
+
+@media (max-width: 991.98px) {
+    .story-content {
+        padding: 30px;
+    }
+
+    .story-image-wrapper {
+        margin-bottom: 30px;
+    }
+}
+
+@media (max-width: 575.98px) {
+    .story-content {
+        padding: 24px;
+    }
+}
+
+/* ============================================
+   Additional Mobile Responsive Styles
+   ============================================ */
+@media (max-width: 768px) {
+    .about-hero {
+        padding: 50px 0;
+    }
+
+    .about-hero h1 {
+        font-size: 1.8rem;
+    }
+
+    .story-section,
+    .gallery-section,
+    .promise-section,
+    .team-section {
+        padding: 50px 0;
+    }
+
+    .story-content {
+        padding: 25px;
+    }
+
+    .gallery-img {
+        height: 200px;
+        margin-bottom: 15px;
+    }
+
+    .promise-card {
+        padding: 20px;
+        margin-bottom: 20px;
+    }
+
+    .promise-card h3 {
+        font-size: 1.1rem;
+    }
+
+    .owner-img {
+        width: 120px;
+        height: 120px;
+    }
+
+    .quote {
+        font-size: 1rem;
+        padding: 0 15px;
+    }
+}
+
+@media (max-width: 576px) {
+    .about-hero {
+        padding: 40px 0;
+    }
+
+    .about-hero h1 {
+        font-size: 1.5rem;
+    }
+
+    .story-section,
+    .gallery-section,
+    .promise-section,
+    .team-section {
+        padding: 40px 0;
+    }
+
+    .story-content {
+        padding: 20px;
+    }
+
+    .gallery-img {
+        height: 180px;
+    }
+
+    .promise-card {
+        padding: 15px;
+    }
+
+    .promise-card h3 {
+        font-size: 1rem;
+    }
+
+    .owner-img {
+        width: 100px;
+        height: 100px;
+    }
+
+    .quote {
+        font-size: 0.95rem;
+    }
+}

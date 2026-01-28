@@ -1,0 +1,51 @@
+{
+  "items": [
+    {
+      "id": "custom-1767890502610",
+      "qty": 1,
+      "name": "Customized Bouquet",
+      "price": 160.5,
+      "ribbon": {
+        "id": 17,
+        "name": "black",
+        "price": 9
+      },
+      "flowers": [
+        {
+          "id": 14,
+          "name": "Rose",
+          "price": 50
+        },
+        {
+          "id": 11,
+          "name": "Marigold",
+          "price": 11
+        }
+      ],
+      "wrapper": {
+        "id": 15,
+        "name": "Dark Blue",
+        "price": 60
+      },
+      "selected": true,
+      "image_url": "https://luzcecstkebntjnfonwv.supabase.co/storage/v1/object/public/request-images/customized-bouquets/19f13a89-b2aa-4373-871e-dab7073e6a2a-1767890517764-0.6957191438776134.png",
+      "bundleSize": 3
+    }
+  ],
+  "address": {
+    "city": "City of Zamboanga",
+    "name": "Aj Romblon",
+    "phone": "09975607168",
+    "street": "709 Governor Camins Avenue",
+    "barangay": "Ayala",
+    "province": "Zamboanga Del Sur"
+  },
+  "subtotal": 160.5,
+  "address_id": 18,
+  "pickup_time": null,
+  "receipt_url": "https://luzcecstkebntjnfonwv.supabase.co/storage/v1/object/public/receipts/receipts/19f13a89-b2aa-4373-871e-dab7073e6a2a-1767890516637.png",
+  "shipping_fee": 300,
+  "payment_method": "gcash",
+  "payment_status": "waiting_for_confirmation",
+  "delivery_method": "delivery"
+}
