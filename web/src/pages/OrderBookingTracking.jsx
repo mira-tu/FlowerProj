@@ -3,25 +3,27 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabase';
 import '../styles/Shop.css';
 
-// Timeline steps for Delivery Requests
+// Timeline steps for Delivery Requests (Payment step between quoted and accepted)
 const requestDeliverySteps = [
     { id: 1, status: 'pending', title: 'Request Submitted', description: 'Your booking request has been received', icon: 'fa-clipboard-check' },
     { id: 2, status: 'quoted', title: 'Quote Provided', description: 'We have provided a quote for your request', icon: 'fa-file-invoice-dollar' },
-    { id: 3, status: 'accepted', title: 'Quote Paid and Accepted', description: 'You have paid and accepted the quote, and processing has begun', icon: 'fa-check-circle' },
-    { id: 4, status: 'processing', title: 'Processing', description: 'Our florists are preparing your request', icon: 'fa-seedling' },
-    { id: 5, status: 'ready_for_delivery', title: 'Ready for Delivery', description: 'Your request is ready to be shipped', icon: 'fa-box' },
-    { id: 6, status: 'out_for_delivery', title: 'Out for Delivery', description: 'Your request is on its way', icon: 'fa-truck' },
-    { id: 7, status: 'completed', title: 'Delivered', description: 'Your request has been delivered successfully', icon: 'fa-truck' },
+    { id: 3, status: 'payment', title: 'Payment', description: 'GCash payment for your request', icon: 'fa-credit-card' },
+    { id: 4, status: 'accepted', title: 'Quote Paid and Accepted', description: 'You have paid and accepted the quote, and processing has begun', icon: 'fa-check-circle' },
+    { id: 5, status: 'processing', title: 'Processing', description: 'Our florists are preparing your request', icon: 'fa-seedling' },
+    { id: 6, status: 'ready_for_delivery', title: 'Ready for Delivery', description: 'Your request is ready to be shipped', icon: 'fa-box' },
+    { id: 7, status: 'out_for_delivery', title: 'Out for Delivery', description: 'Your request is on its way', icon: 'fa-truck' },
+    { id: 8, status: 'completed', title: 'Delivered', description: 'Your request has been delivered successfully', icon: 'fa-truck' },
 ];
 
 // Timeline steps for Pickup Requests
 const requestPickupSteps = [
     { id: 1, status: 'pending', title: 'Request Submitted', description: 'Your booking request has been received', icon: 'fa-clipboard-check' },
     { id: 2, status: 'quoted', title: 'Quote Provided', description: 'We have provided a quote for your request', icon: 'fa-file-invoice-dollar' },
-    { id: 3, status: 'accepted', title: 'Quote Paid and Accepted', description: 'You have paid and accepted the quote, and processing has begun', icon: 'fa-check-circle' },
-    { id: 4, status: 'processing', title: 'Processing', description: 'Our florists are preparing your request', icon: 'fa-seedling' },
-    { id: 5, status: 'ready_for_pickup', title: 'Ready for Pickup', description: 'Your request is ready for pickup', icon: 'fa-store' },
-    { id: 6, status: 'completed', title: 'Picked up', description: 'Your request has been picked up', icon: 'fa-check-circle' },
+    { id: 3, status: 'payment', title: 'Payment', description: 'GCash payment for your request', icon: 'fa-credit-card' },
+    { id: 4, status: 'accepted', title: 'Quote Paid and Accepted', description: 'You have paid and accepted the quote, and processing has begun', icon: 'fa-check-circle' },
+    { id: 5, status: 'processing', title: 'Processing', description: 'Our florists are preparing your request', icon: 'fa-seedling' },
+    { id: 6, status: 'ready_for_pickup', title: 'Ready for Pickup', description: 'Your request is ready for pickup', icon: 'fa-store' },
+    { id: 7, status: 'completed', title: 'Picked up', description: 'Your request has been picked up', icon: 'fa-check-circle' },
 ];
 
 const OrderBookingTracking = () => {
@@ -84,18 +86,26 @@ const OrderBookingTracking = () => {
                 }
             }
 
+            const requestData = typeof foundRequest.data === 'string' ? JSON.parse(foundRequest.data || '{}') : (foundRequest.data || {});
+            const paymentStatus = foundRequest.payment_status ?? requestData?.payment_status ?? 'to_pay';
+            const amountPaid = parseFloat(requestData?.amount_paid ?? foundRequest.amount_paid ?? 0);
+            const totalPrice = parseFloat(foundRequest.final_price || 0);
+
             // Step 3: Combine data and set state
             const transformedRequest = {
                 ...foundRequest,
                 rider: riderDetails,
                 date: foundRequest.created_at,
-                deliveryMethod: foundRequest.delivery_method, // Changed from foundRequest.data?.delivery_method
-                pickupTime: foundRequest.pickup_time,         // Changed from foundRequest.data?.pickup_time
-                address: finalAddress, // Attach the fetched address
+                deliveryMethod: foundRequest.delivery_method,
+                pickupTime: foundRequest.pickup_time,
+                address: finalAddress,
                 type: foundRequest.type,
                 requestData: foundRequest.data,
                 imageUrl: foundRequest.image_url,
                 finalPrice: foundRequest.final_price,
+                payment_status: paymentStatus,
+                amount_paid: amountPaid,
+                total: totalPrice,
             };
             setRequest(transformedRequest);
 
@@ -106,7 +116,7 @@ const OrderBookingTracking = () => {
                 if (transformedRequest.status === 'completed' || transformedRequest.status === 'claimed') {
                     setCurrentStep(steps.length + 1);
                 } else {
-                    setCurrentStep(-1); // Special indicator for declined/cancelled
+                    setCurrentStep(-1);
                 }
             } else {
                 const statusMap = {
@@ -117,14 +127,13 @@ const OrderBookingTracking = () => {
                     'out_for_delivery': 'out_for_delivery',
                     'ready_for_pickup': 'ready_for_pickup',
                 };
-                
-                const currentTimelineStatus = statusMap[transformedRequest.status] || 'pending';
-                let stepIndex = steps.findIndex(step => step.status === currentTimelineStatus);
-
-                if (stepIndex === -1) {
-                    stepIndex = 0;
+                let currentTimelineStatus = statusMap[transformedRequest.status] || 'pending';
+                // If status is accepted but payment not confirmed, show Payment as current step
+                if (transformedRequest.status === 'accepted' && paymentStatus !== 'paid') {
+                    currentTimelineStatus = 'payment';
                 }
-
+                let stepIndex = steps.findIndex(step => step.status === currentTimelineStatus);
+                if (stepIndex === -1) stepIndex = 0;
                 setCurrentStep(stepIndex + 1);
             }
 
@@ -329,7 +338,12 @@ const OrderBookingTracking = () => {
                             </h5>
                             
                             <div className="timeline">
-                                {trackingSteps.map((step) => (
+                                {trackingSteps.map((step) => {
+                                    const isPaymentStep = step.status === 'payment';
+                                    const amountPaidByAdmin = parseFloat(request.amount_paid) || 0;
+                                    const remaining = Math.max(0, (request.total || request.finalPrice || 0) - amountPaidByAdmin);
+                                    const showRemainingAndPayLink = isPaymentStep && request.payment_status !== 'paid' && remaining > 0 && amountPaidByAdmin > 0;
+                                    return (
                                     <div 
                                         key={step.id}
                                         className={`timeline-item ${
@@ -344,6 +358,17 @@ const OrderBookingTracking = () => {
                                             <h5>{step.title}</h5>
                                             <p>
                                                 {step.description}
+                                                {isPaymentStep && request.payment_status === 'paid' && ' Payment confirmed.'}
+                                                {showRemainingAndPayLink && (
+                                                    <>
+                                                        <br />
+                                                        <span className="text-warning fw-bold">Remaining balance: ₱{remaining.toLocaleString()}</span>
+                                                        <br />
+                                                        <Link to="/profile" state={{ activeMenu: 'orders' }} className="btn btn-sm mt-2" style={{ background: 'var(--shop-pink)', color: 'white' }}>
+                                                            Pay remaining & upload receipt
+                                                        </Link>
+                                                    </>
+                                                )}
                                                 {step.status === 'out_for_delivery' && ['out_for_delivery', 'delivered', 'completed', 'claimed'].includes(request.status) && request.rider && (
                                                     <>
                                                         <br />
@@ -355,7 +380,8 @@ const OrderBookingTracking = () => {
                                             <div className="timeline-date">{getTimelineDate(step.id)}</div>
                                         </div>
                                     </div>
-                                ))}
+                                    );
+                                })}
                                 {isDeclinedOrCancelled && (
                                      <div 
                                         className="timeline-item current"

@@ -178,6 +178,10 @@ const Profile = ({ user, logout }) => {
     const [receiptFile, setReceiptFile] = useState(null);
     const [receiptPreview, setReceiptPreview] = useState(null);
     const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+    // GCash cashier-style: amount-paid modal (total + input for amount paid from receipt)
+    const [showAmountPaidModal, setShowAmountPaidModal] = useState(false);
+    const [amountPaidInput, setAmountPaidInput] = useState('');
+    const [amountPaidForCurrentPayment, setAmountPaidForCurrentPayment] = useState(null); // amount being paid in this submission
 
     const handleReceiptUpload = (e) => {
         const file = e.target.files[0];
@@ -197,13 +201,19 @@ const Profile = ({ user, logout }) => {
             return;
         }
         if (!orderForPayment) return;
+        const amountToRecord = amountPaidForCurrentPayment != null
+            ? amountPaidForCurrentPayment
+            : parseFloat(orderForPayment.total || 0);
 
         setIsProcessingPayment(true);
 
         let uploadedReceiptUrl = null;
         try {
             const fileExt = receiptFile.name.split('.').pop();
-            const fileName = `${user.id}-request-${orderForPayment.request_id}-${Date.now()}.${fileExt}`;
+            const identifier = orderForPayment.isRequest
+                ? `request-${orderForPayment.request_id}`
+                : `order-${orderForPayment.id}`;
+            const fileName = `${user.id}-${identifier}-${Date.now()}.${fileExt}`;
             const filePath = `public/${fileName}`;
 
             const { error: uploadError } = await supabase.storage
@@ -220,29 +230,81 @@ const Profile = ({ user, logout }) => {
             
             uploadedReceiptUrl = urlData.publicUrl;
 
-            // Now update the request
-            const { error: updateError } = await supabase
-                .from('requests')
-                .update({
-                    status: 'accepted',
-                    payment_status: 'waiting_for_confirmation',
-                    receipt_url: uploadedReceiptUrl,
-                })
-                .eq('id', orderForPayment.request_id);
+            let total = parseFloat(orderForPayment.total || 0);
+            let newAmountPaid = amountToRecord;
+            let remaining = 0;
 
-            if (updateError) throw updateError;
+            if (orderForPayment.isRequest) {
+                // Existing behaviour for requests: store amount_paid in request.data
+                const { data: currentRequest, error: fetchErr } = await supabase
+                    .from('requests')
+                    .select('data, final_price')
+                    .eq('id', orderForPayment.request_id)
+                    .single();
+                if (fetchErr) throw fetchErr;
+
+                const existingData = typeof currentRequest?.data === 'string'
+                    ? JSON.parse(currentRequest.data || '{}')
+                    : (currentRequest?.data || {});
+                const previousAmountPaid = parseFloat(existingData.amount_paid || 0);
+                total = parseFloat(currentRequest?.final_price || orderForPayment.total || 0);
+                newAmountPaid = previousAmountPaid + amountToRecord;
+                remaining = total - newAmountPaid;
+
+                const updatedData = { ...existingData, amount_paid: newAmountPaid };
+
+                const { error: updateError } = await supabase
+                    .from('requests')
+                    .update({
+                        status: 'accepted',
+                        payment_status: 'waiting_for_confirmation',
+                        receipt_url: uploadedReceiptUrl,
+                        data: updatedData,
+                    })
+                    .eq('id', orderForPayment.request_id);
+
+                if (updateError) throw updateError;
+            } else {
+                // New behaviour for regular ecommerce orders paid via GCash
+                const { data: currentOrder, error: fetchErr } = await supabase
+                    .from('orders')
+                    .select('amount_paid, total')
+                    .eq('id', orderForPayment.id)
+                    .single();
+                if (fetchErr) throw fetchErr;
+
+                const previousAmountPaid = parseFloat(currentOrder?.amount_paid || 0);
+                total = parseFloat(currentOrder?.total || orderForPayment.total || 0);
+                newAmountPaid = previousAmountPaid + amountToRecord;
+                remaining = total - newAmountPaid;
+
+                const { error: updateError } = await supabase
+                    .from('orders')
+                    .update({
+                        amount_paid: newAmountPaid,
+                        payment_status: 'waiting_for_confirmation',
+                        receipt_url: uploadedReceiptUrl,
+                    })
+                    .eq('id', orderForPayment.id);
+
+                if (updateError) throw updateError;
+            }
+
+            const isFullyPaid = remaining <= 0;
             
-            // Success
             setShowQRModal(false);
             setOrderForPayment(null);
             setReceiptFile(null);
             setReceiptPreview(null);
+            setAmountPaidForCurrentPayment(null);
             
             setModalContent({
                 type: 'info',
                 title: 'Payment Submitted',
-                message: 'Your payment is now being confirmed. Thank you!',
-                confirmText: 'Great!',
+                message: isFullyPaid
+                    ? 'Your payment is now being confirmed. Thank you!'
+                    : `We received ₱${amountToRecord.toLocaleString()}. Remaining balance: ₱${remaining.toLocaleString()}. You may pay the remaining amount from My Orders.`,
+                confirmText: 'OK',
                 onConfirm: () => {
                     loadOrders(user.id);
                     setModalContent(null);
@@ -343,6 +405,7 @@ const Profile = ({ user, logout }) => {
                 payment_method: order.payment_method,
                 delivery_method: order.delivery_method,
                 total: parseFloat(order.total || 0),
+                amount_paid: parseFloat(order.amount_paid || 0),
                 subtotal: parseFloat(order.subtotal || 0),
                 delivery_fee: parseFloat(order.delivery_fee || 0),
                 notes: order.notes,
@@ -383,7 +446,9 @@ const Profile = ({ user, logout }) => {
             const transformedRequests = (apiRequests || []).map(request => {
                 const requestData = typeof request.data === 'string' ? JSON.parse(request.data) : (request.data || {});
                 const address = addressesData.find(addr => addr.id === requestData?.address_id) || null;
-                
+                const paymentStatus = request.payment_status ?? requestData?.payment_status ?? 'to_pay';
+                const amountPaid = parseFloat(requestData?.amount_paid ?? request.amount_paid ?? 0);
+                const total = parseFloat(request.final_price || request.estimated_price || 0);
                 return {
                     id: `request-${request.id}`, // Prefix to avoid conflicts
                     request_id: request.id,
@@ -391,8 +456,9 @@ const Profile = ({ user, logout }) => {
                     date: request.created_at,
                     status: request.status === 'accepted' ? 'processing' : request.status, // Map accepted to processing for display
                     type: request.type, // booking, customized, special_order
-                    payment_status: 'to_pay', // Assuming requests start with 'to_pay'
-                    total: parseFloat(request.final_price || request.estimated_price || 0),
+                    payment_status: paymentStatus,
+                    amount_paid: amountPaid,
+                    total,
                     notes: request.notes || requestData.notes,
                     data: requestData,
                     image_url: request.image_url,
@@ -723,17 +789,44 @@ const Profile = ({ user, logout }) => {
     };
 
     const handleAcceptQuote = (order) => {
-        setModalContent({
-            type: 'confirm',
-            title: 'Accept Quote',
-            message: `You are about to accept a quote of ₱${(order.total || 0).toLocaleString()}. You will be directed to payment after confirming.`,
-            confirmText: 'Accept & Pay',
-            onConfirm: () => {
-                setOrderForPayment(order);
-                setShowQRModal(true);
-                setModalContent(null);
-            }
-        });
+        setOrderForPayment(order);
+        setAmountPaidInput('');
+        setAmountPaidForCurrentPayment(null);
+        setShowAmountPaidModal(true);
+        setModalContent(null);
+    };
+
+    const handleAmountPaidSubmit = () => {
+        const amount = parseFloat(amountPaidInput.replace(/,/g, ''));
+        const total = parseFloat(orderForPayment?.total || 0);
+        if (isNaN(amount) || amount < 0) {
+            alert('Please enter a valid amount paid.');
+            return;
+        }
+        setAmountPaidForCurrentPayment(amount);
+        setShowAmountPaidModal(false);
+        setShowQRModal(true);
+        setAmountPaidInput('');
+    };
+
+    const getPayAmountForQRModal = () => {
+        if (amountPaidForCurrentPayment != null) return amountPaidForCurrentPayment;
+        const total = parseFloat(orderForPayment?.total || 0);
+        const paid = parseFloat(orderForPayment?.amount_paid || 0);
+        return Math.max(0, total - paid);
+    };
+
+    const getAmountDue = (order) => {
+        const total = parseFloat(order?.total || 0);
+        const paid = parseFloat(order?.amount_paid || 0);
+        return Math.max(0, total - paid);
+    };
+
+    const handlePayRemaining = (order) => {
+        setOrderForPayment(order);
+        setAmountPaidInput('');
+        setAmountPaidForCurrentPayment(null);
+        setShowAmountPaidModal(true);
     };
 
     const handleRequestAdjustment = (order) => {
@@ -1035,6 +1128,19 @@ const Profile = ({ user, logout }) => {
                                                 </button>
                                             )}
                                             
+                                            {/* Pay remaining: only after admin has verified GCash and entered an insufficient amount (amount_paid > 0) */}
+                                            {(
+                                                (order.isRequest && order.type && ['processing'].includes(order.status)) ||
+                                                (!order.isRequest && order.payment_method === 'gcash' && ['pending', 'processing'].includes(order.status))
+                                            ) && order.payment_status !== 'paid' && getAmountDue(order) > 0 && (parseFloat(order.amount_paid) || 0) > 0 && (
+                                                <button
+                                                    className="btn-order-action"
+                                                    style={{ backgroundColor: 'var(--shop-pink)', color: 'white', border: 'none' }}
+                                                    onClick={() => handlePayRemaining(order)}
+                                                >
+                                                    Pay remaining ₱{getAmountDue(order).toLocaleString()}
+                                                </button>
+                                            )}
                                             {/* TRACK BUTTONS */}
                                             {['pending', 'processing', 'out_for_delivery', 'ready_for_pickup'].includes(order.status) && (
                                                 order.type ? ( // It's a Request
@@ -1682,6 +1788,44 @@ const Profile = ({ user, logout }) => {
                 </div>
             )}
 
+            {/* GCash amount-paid (cashier) modal: total due + input for amount paid from receipt */}
+            {showAmountPaidModal && orderForPayment && (
+                <div className="modal-overlay" onClick={() => setShowAmountPaidModal(false)}>
+                    <div className="modal-content-custom" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+                        <div className="modal-header-custom">
+                            <h4>GCash Payment</h4>
+                            <button className="modal-close" onClick={() => { setShowAmountPaidModal(false); setOrderForPayment(null); }}>
+                                <i className="fas fa-times"></i>
+                            </button>
+                        </div>
+                        <div className="modal-body-custom">
+                            <p className="mb-3">Enter the amount shown on your GCash receipt for request #{orderForPayment.request_number}.</p>
+                            <div className="mb-3 p-3 rounded" style={{ background: '#f8f9fa' }}>
+                                <div className="fw-bold mb-2">Total amount due</div>
+                                <div style={{ fontSize: '1.5rem', color: 'var(--shop-pink)' }}>₱{getAmountDue(orderForPayment).toLocaleString()}</div>
+                            </div>
+                            <label className="form-label fw-bold">Amount paid (from receipt)</label>
+                            <input
+                                type="number"
+                                className="form-control mb-3"
+                                placeholder="0.00"
+                                min="0"
+                                step="0.01"
+                                value={amountPaidInput}
+                                onChange={(e) => setAmountPaidInput(e.target.value)}
+                            />
+                            <button
+                                className="btn w-100"
+                                style={{ background: 'var(--shop-pink)', color: 'white' }}
+                                onClick={handleAmountPaidSubmit}
+                            >
+                                Continue to scan QR & upload receipt
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {showQRModal && orderForPayment && (
                 <div className="modal-overlay" onClick={() => !isProcessingPayment && setShowQRModal(false)}>
                     <div className="modal-content-custom" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
@@ -1705,7 +1849,7 @@ const Profile = ({ user, logout }) => {
                                 <ol className="text-start small" style={{ paddingLeft: '20px' }}>
                                     <li>Open your GCash app and tap "Scan QR".</li>
                                     <li>Scan this QR code.</li>
-                                    <li>Enter the amount: <strong>₱{(orderForPayment.total || 0).toLocaleString()}</strong></li>
+                                    <li>Enter the amount: <strong>₱{getPayAmountForQRModal().toLocaleString()}</strong></li>
                                     <li>Complete the payment and take a screenshot.</li>
                                     <li>Upload the screenshot below for confirmation.</li>
                                 </ol>

@@ -473,6 +473,24 @@ export const adminAPI = {
         return { data: { success: true, order: data } };
     },
 
+    /** For GCash: admin verifies amount received; updates payment_status and amount_paid. */
+    updateOrderPaymentVerified: async (id, { payment_status, amount_paid }) => {
+        const payload = { payment_status };
+        if (amount_paid != null && !isNaN(amount_paid)) payload.amount_paid = parseFloat(amount_paid);
+        const { data, error } = await supabase
+            .from('orders')
+            .update(payload)
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error updating order payment verified:', error);
+            throw error;
+        }
+        return { data: { success: true, order: data } };
+    },
+
     acceptOrder: async (id, status) => {
         const { data, error } = await supabase
             .from('orders')
@@ -707,6 +725,9 @@ export const adminAPI = {
                 paymentMethodToUse = requestData.payment_method !== undefined ? requestData.payment_method : paymentMethodToUse;
                 receiptUrlToUse = requestData.receipt_url !== undefined ? requestData.receipt_url : receiptUrlToUse;
             }
+            const amountPaid = parseFloat(requestData?.amount_paid ?? req.amount_paid ?? 0);
+            const totalAmount = parseFloat(req.final_price || 0);
+            const remainingBalance = Math.max(0, totalAmount - amountPaid);
             // For other types like 'booking' or 'special_order', if they also happen to store these in data
             // (even if there are top-level columns), this ensures `data` takes precedence if present.
             // If they are only top-level, paymentStatusToUse, paymentMethodToUse, receiptUrlToUse remain `req.payment_status`, etc.
@@ -715,19 +736,21 @@ export const adminAPI = {
             const pickupTimeFromData = requestData?.pickup_time;
 
             return {
-                ...req, // Keep all original top-level fields (including original payment_status, etc. if they exist)
+                ...req,
                 status: req.status === 'accepted' ? 'processing' : req.status,
-                // Explicitly set these to the determined values
                 payment_status: paymentStatusToUse,
                 payment_method: paymentMethodToUse,
                 receipt_url: receiptUrlToUse,
                 delivery_method: deliveryMethodFromData || req.delivery_method,
                 pickup_time: pickupTimeFromData || req.pickup_time,
+                amount_paid: amountPaid,
+                total_amount: totalAmount,
+                remaining_balance: remainingBalance,
                 user_name: userData.name,
                 user_email: userData.email,
                 user_phone: userData.phone,
                 users: userData,
-                data: requestData, // Keep the parsed data object
+                data: requestData,
             };
         });
 
@@ -798,7 +821,7 @@ export const adminAPI = {
         return { data: { success: true, request: data } };
     },
 
-    updateRequestPaymentStatus: async (requestToUpdate, newStatus) => {
+    updateRequestPaymentStatus: async (requestToUpdate, newStatus, amountVerified) => {
         const requestId = requestToUpdate.id;
         const requestType = requestToUpdate.type;
 
@@ -826,11 +849,14 @@ export const adminAPI = {
                 }
             }
             
-            // Update the payment_status within the data JSONB object
+            // Update the payment_status within the data JSONB object (optionally amount_paid when admin verifies receipt)
             const updatedData = {
                 ...requestData,
                 payment_status: newStatus,
             };
+            if (amountVerified != null && !isNaN(amountVerified)) {
+                updatedData.amount_paid = parseFloat(amountVerified);
+            }
 
             const { data, error } = await supabase
                 .from('requests')

@@ -175,6 +175,8 @@ const OrderTracking = () => {
                     date: foundOrder.created_at,
                     deliveryMethod: foundOrder.delivery_method,
                     payment_method: foundOrder.payment_method,
+                    payment_status: foundOrder.payment_status,
+                    amount_paid: parseFloat(foundOrder.amount_paid || 0),
                     shippingFee: foundOrder.shipping_fee,
                     pickupTime: foundOrder.pickup_time,
                     address: foundOrder.addresses,
@@ -195,25 +197,26 @@ const OrderTracking = () => {
                     const statusMap = {
                         'pending': 'order_received',
                         'cancelled': 'cancelled',
-                        'accepted': 'processing', // Default to processing if accepted
+                        'accepted': 'processing',
                         'processing': 'processing',
                         'ready_for_delivery': 'ready_for_delivery',
                         'out_for_delivery': 'out_for_delivery',
                         'ready_for_pickup': 'ready_for_pickup',
                     };
-                    
                     let currentTimelineStatus = statusMap[transformedOrder.status] || 'order_received';
 
-                    // Explicitly mark payment as current if accepted and not COD
-                    if (transformedOrder.status === 'accepted' && transformedOrder.payment_method !== 'cod') {
+                    // GCash: if payment not fully confirmed, payment step stays current until paid
+                    const isGcash = transformedOrder.payment_method?.toLowerCase() === 'gcash';
+                    const paymentComplete = transformedOrder.payment_status === 'paid';
+                    if (isGcash && !paymentComplete && steps.some(s => s.status === 'payment')) {
+                        currentTimelineStatus = 'payment';
+                    } else if (transformedOrder.status === 'accepted' && transformedOrder.payment_method !== 'cod' && paymentComplete) {
+                        currentTimelineStatus = 'processing';
+                    } else if (transformedOrder.status === 'accepted' && transformedOrder.payment_method !== 'cod') {
                         currentTimelineStatus = 'payment';
                     }
                     let stepIndex = steps.findIndex(step => step.status === currentTimelineStatus);
-
-                    if (stepIndex === -1) {
-                        stepIndex = 0;
-                    }
-
+                    if (stepIndex === -1) stepIndex = 0;
                     setCurrentStep(stepIndex + 1);
                 }
             }
@@ -350,7 +353,14 @@ const OrderTracking = () => {
                             </h5>
                             
                             <div className="timeline">
-                                {trackingSteps.map((step) => (
+                                {trackingSteps.map((step) => {
+                                    const isPaymentStep = step.status === 'payment';
+                                    const isGcash = order.payment_method?.toLowerCase() === 'gcash';
+                                    const paymentPaid = order.payment_status === 'paid';
+                                    const amountPaidByAdmin = parseFloat(order.amount_paid) || 0;
+                                    const remaining = isPaymentStep && isGcash ? Math.max(0, (parseFloat(order.total) || 0) - amountPaidByAdmin) : 0;
+                                    const showRemainingAndPayLink = isPaymentStep && isGcash && !paymentPaid && remaining > 0 && amountPaidByAdmin > 0;
+                                    return (
                                     <div 
                                         key={step.id}
                                         className={`timeline-item ${
@@ -365,6 +375,17 @@ const OrderTracking = () => {
                                             <h5>{step.title}</h5>
                                             <p>
                                                 {step.description}
+                                                {isPaymentStep && isGcash && paymentPaid && ' Payment confirmed.'}
+                                                {showRemainingAndPayLink && (
+                                                    <>
+                                                        <br />
+                                                        <span className="text-warning fw-bold">Remaining balance: ₱{remaining.toLocaleString()}</span>
+                                                        <br />
+                                                        <Link to="/profile" state={{ activeMenu: 'orders' }} className="btn btn-sm mt-2" style={{ background: 'var(--shop-pink)', color: 'white' }}>
+                                                            Pay remaining & upload receipt
+                                                        </Link>
+                                                    </>
+                                                )}
                                                 {step.status === 'out_for_delivery' && ['out_for_delivery', 'delivered', 'completed', 'claimed'].includes(order.status) && order.rider && (
                                                     <>
                                                         <br />
@@ -376,7 +397,8 @@ const OrderTracking = () => {
                                             <div className="timeline-date">{getTimelineDate(step.id)}</div>
                                         </div>
                                     </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
 

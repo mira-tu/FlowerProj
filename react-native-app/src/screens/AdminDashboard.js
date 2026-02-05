@@ -959,6 +959,11 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const [declineModalVisible, setDeclineModalVisible] = useState(false);
   const [orderToDecline, setOrderToDecline] = useState(null);
 
+  // GCash: admin enters amount received from receipt before accepting (cashier-style)
+  const [acceptPaymentModalVisible, setAcceptPaymentModalVisible] = useState(false);
+  const [orderForAcceptPayment, setOrderForAcceptPayment] = useState(null);
+  const [amountReceivedInput, setAmountReceivedInput] = useState('');
+
   // New state for rider assignment
   const [riders, setRiders] = useState([]);
   const [assignRiderModalVisible, setAssignRiderModalVisible] = useState(false);
@@ -1078,9 +1083,60 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     setRefreshing(false);
   };
 
+  const handleAcceptClick = (order) => {
+    const isGcash = order.payment_method?.toLowerCase() === 'gcash';
+    if (isGcash) {
+      setOrderForAcceptPayment(order);
+      setAmountReceivedInput('');
+      setAcceptPaymentModalVisible(true);
+      return;
+    }
+    handleAccept(order.id);
+  };
+
+  const handleConfirmAcceptPaymentOrder = async () => {
+    if (!orderForAcceptPayment) return;
+    const amount = parseFloat(String(amountReceivedInput).replace(/,/g, '').trim());
+    const total = parseFloat(orderForAcceptPayment.total || 0);
+    if (isNaN(amount) || amount < 0) {
+      Alert.alert('Invalid amount', 'Please enter a valid amount received from the receipt.');
+      return;
+    }
+    try {
+      const isSufficient = amount >= total;
+      const isPending = orderForAcceptPayment.status === 'pending';
+
+      if (isPending) {
+        await adminAPI.acceptOrder(orderForAcceptPayment.id, 'processing');
+      }
+
+      await adminAPI.updateOrderPaymentVerified(orderForAcceptPayment.id, {
+        payment_status: isSufficient ? 'paid' : 'waiting_for_confirmation',
+        amount_paid: amount,
+      });
+
+      if (isSufficient) {
+        Toast.show({ type: 'success', text1: 'Payment verified and marked as paid. Timeline can proceed.' });
+      } else {
+        const remaining = total - amount;
+        Toast.show({
+          type: 'info',
+          text1: isPending ? 'Order accepted. Payment partial.' : 'Payment amount updated.',
+          text2: `Remaining balance: ₱${remaining.toLocaleString()}. Customer can pay remaining from tracking.`
+        });
+      }
+      setAcceptPaymentModalVisible(false);
+      setOrderForAcceptPayment(null);
+      setAmountReceivedInput('');
+      await loadOrders();
+    } catch (error) {
+      console.error('Error accepting order or verifying payment:', error);
+      Alert.alert('Error', 'Failed to accept order or update payment status');
+    }
+  };
+
   const handleAccept = async (orderId) => {
     try {
-      // Find the order in the current state
       const orderToAccept = orders.find(order => order.id === orderId);
       if (!orderToAccept) {
         Alert.alert('Error', 'Order not found.');
@@ -1131,7 +1187,20 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const confirmStatusChange = async () => {
     if (!orderToUpdate || !selectedStatus) return;
     const orderId = orderToUpdate.id;
-    
+
+    // GCash: block advancing status until payment is fully paid
+    const isGcash = orderToUpdate.payment_method?.toLowerCase() === 'gcash';
+    const paymentPaid = orderToUpdate.payment_status === 'paid';
+    const statusesAfterPayment = ['processing', 'out_for_delivery', 'ready_for_pick_up', 'ready_for_pickup', 'claimed', 'completed'];
+    if (isGcash && !paymentPaid && statusesAfterPayment.includes(selectedStatus)) {
+      const remaining = Math.max(0, (parseFloat(orderToUpdate.total) || 0) - (parseFloat(orderToUpdate.amount_paid) || 0));
+      Alert.alert(
+        'Payment required',
+        `GCash payment is not fully paid. Remaining balance: ₱${remaining.toLocaleString()}. Please verify payment (enter amount received) before changing status to "${selectedStatus}".`
+      );
+      return;
+    }
+
     try {
       await adminAPI.updateOrderStatus(orderId, selectedStatus);
 
@@ -1187,7 +1256,13 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     return name.substring(0, 2).toUpperCase();
   };
 
-  const EnhancedOrderCard = ({ item, onMessageCustomer, onPhoneCall, onAssignRider }) => (
+  const openVerifyPaymentModal = (order) => {
+    setOrderForAcceptPayment(order);
+    setAmountReceivedInput(String(order.amount_paid || ''));
+    setAcceptPaymentModalVisible(true);
+  };
+
+  const EnhancedOrderCard = ({ item, onMessageCustomer, onPhoneCall, onAssignRider, onVerifyPayment }) => (
     <View style={styles.eoCard}>
       {/* Header */}
       <View style={styles.eoCardHeader}>
@@ -1361,7 +1436,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       <View style={styles.eoFooter}>
         {item.status === 'pending' ? (
             <View style={{flexDirection: 'row', gap: 12}}>
-                <TouchableOpacity style={[styles.eoMainBtn, {backgroundColor: '#22C55E', flex: 1}]} onPress={() => handleAccept(item.id)}>
+                <TouchableOpacity style={[styles.eoMainBtn, {backgroundColor: '#22C55E', flex: 1}]} onPress={() => handleAcceptClick(item)}>
                     <Text style={styles.eoMainBtnText}>Accept</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.eoMainBtn, {backgroundColor: '#EF4444', flex: 1}]} onPress={() => handleDecline(item)}>
@@ -1370,6 +1445,12 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
             </View>
         ) : (!['completed', 'cancelled'].includes(item.status) &&
           <View>
+            {item.payment_method?.toLowerCase() === 'gcash' && item.payment_status !== 'paid' && (
+              <TouchableOpacity style={[styles.eoMainBtn, {backgroundColor: '#F59E0B', marginBottom: 10}]} onPress={() => onVerifyPayment && onVerifyPayment(item)}>
+                <Ionicons name="card-outline" size={18} color="#fff" />
+                <Text style={styles.eoMainBtnText}>Verify payment</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={[styles.eoMainBtn, {backgroundColor: '#3B82F6'}]} onPress={() => openStatusModal(item)}>
                 <Ionicons name="time" size={18} color="#fff" />
                 <Text style={styles.eoMainBtnText}>Change Status</Text>
@@ -1429,7 +1510,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       <Text style={styles.eoTitle}>Orders Management</Text>
       <FlatList
         data={ordersWithRiderDetails}
-        renderItem={({item}) => <EnhancedOrderCard item={item} onMessageCustomer={handleMessageCustomer} onPhoneCall={handlePhoneCall} onAssignRider={handleAssignRider} />}
+        renderItem={({item}) => <EnhancedOrderCard item={item} onMessageCustomer={handleMessageCustomer} onPhoneCall={handlePhoneCall} onAssignRider={handleAssignRider} onVerifyPayment={openVerifyPaymentModal} />}
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={{ paddingBottom: 20, paddingHorizontal: 16 }}
         refreshControl={
@@ -1456,6 +1537,37 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
               </TouchableOpacity>
               <TouchableOpacity style={[styles.modalButton, styles.deleteButton]} onPress={confirmDecline}>
                 <Text style={styles.buttonText}>Confirm Decline</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* GCash: Enter amount received from receipt (cashier-style) before accepting */}
+      <Modal visible={acceptPaymentModalVisible} animationType="fade" transparent>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Verify GCash payment</Text>
+            <Text style={styles.modalText}>
+              Order total: ₱{(parseFloat(orderForAcceptPayment?.total || 0)).toLocaleString()}. Enter the amount received from the customer's receipt.
+            </Text>
+            <TextInput
+              style={[styles.input, { marginVertical: 12 }]}
+              placeholder="Amount received (e.g. 1500)"
+              placeholderTextColor="#999"
+              keyboardType="decimal-pad"
+              value={amountReceivedInput}
+              onChangeText={setAmountReceivedInput}
+            />
+            <Text style={[styles.modalText, { fontSize: 12, color: '#666', marginTop: -8 }]}>
+              If amount is less than total, order will not be accepted. Customer must pay in full first.
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={() => { setAcceptPaymentModalVisible(false); setOrderForAcceptPayment(null); setAmountReceivedInput(''); }}>
+                <Text style={styles.buttonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalButton, styles.acceptButton]} onPress={handleConfirmAcceptPaymentOrder}>
+                <Text style={styles.buttonText}>Confirm</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2390,6 +2502,11 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const [requestToAssignRider, setRequestToAssignRider] = useState(null);
   const [riderSearchQuery, setRiderSearchQuery] = useState('');
 
+  // GCash: admin enters amount received from receipt before accepting (cashier-style)
+  const [acceptPaymentModalVisible, setAcceptPaymentModalVisible] = useState(false);
+  const [requestForAcceptPayment, setRequestForAcceptPayment] = useState(null);
+  const [amountReceivedInput, setAmountReceivedInput] = useState('');
+
   const filteredAndSortedRiders = React.useMemo(() => {
     let result = riders;
     if (riderSearchQuery) {
@@ -2607,6 +2724,59 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     setRefreshing(false);
   };
 
+  const handleAcceptRequestClick = (request) => {
+    const isGcash = request.payment_method?.toLowerCase() === 'gcash';
+    if (request.type === 'customized' && isGcash) {
+      setRequestForAcceptPayment(request);
+      setAmountReceivedInput('');
+      setAcceptPaymentModalVisible(true);
+      return;
+    }
+    handleStatusChange(request.id, 'processing');
+  };
+
+  const handleConfirmAcceptPaymentRequest = async () => {
+    if (!requestForAcceptPayment) return;
+    const amount = parseFloat(String(amountReceivedInput).replace(/,/g, '').trim());
+    const total = parseFloat(requestForAcceptPayment.final_price || requestForAcceptPayment.total_amount || 0);
+    if (isNaN(amount) || amount < 0) {
+      Alert.alert('Invalid amount', 'Please enter a valid amount received from the receipt.');
+      return;
+    }
+    try {
+      const isSufficient = amount >= total;
+      const isPending = requestForAcceptPayment.status === 'pending';
+
+      if (isPending) {
+        await adminAPI.updateRequestStatus(requestForAcceptPayment.id, 'accepted');
+      }
+      await adminAPI.updateRequestPaymentStatus(
+        { ...requestForAcceptPayment, type: 'customized' },
+        isSufficient ? 'paid' : 'waiting_for_confirmation',
+        amount
+      );
+
+      if (isSufficient) {
+        Toast.show({ type: 'success', text1: 'Payment verified and marked as paid. Timeline can proceed.' });
+      } else {
+        const remaining = total - amount;
+        Toast.show({
+          type: 'info',
+          text1: isPending ? 'Request accepted. Payment partial.' : 'Payment amount updated.',
+          text2: `Remaining balance: ₱${remaining.toLocaleString()}. Customer can pay remaining from tracking.`
+        });
+      }
+      setAcceptPaymentModalVisible(false);
+      setModalVisible(false);
+      setRequestForAcceptPayment(null);
+      setAmountReceivedInput('');
+      loadRequests();
+    } catch (error) {
+      console.error('Error accepting request or verifying payment:', error);
+      Alert.alert('Error', 'Failed to accept request or update payment status');
+    }
+  };
+
   const handleStatusChange = async (id, status) => {
     try {
       await adminAPI.updateRequestStatus(id, status);
@@ -2628,6 +2798,20 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const confirmRequestStatusChange = async () => {
     if (!requestToUpdate || !selectedRequestStatus) return;
     const requestId = requestToUpdate.id;
+
+    // GCash: block advancing status until payment is fully paid
+    const isGcash = requestToUpdate.payment_method?.toLowerCase() === 'gcash';
+    const paymentPaid = requestToUpdate.payment_status === 'paid';
+    const remaining = requestToUpdate.remaining_balance ?? Math.max(0, (requestToUpdate.final_price || requestToUpdate.total_amount || 0) - (requestToUpdate.amount_paid || 0));
+    const statusesAfterPayment = ['processing', 'out_for_delivery', 'ready_for_pickup', 'completed'];
+    if (isGcash && !paymentPaid && statusesAfterPayment.includes(selectedRequestStatus)) {
+      Alert.alert(
+        'Payment required',
+        `GCash payment is not fully paid. Remaining balance: ₱${remaining.toLocaleString()}. Please verify payment (enter amount received) before changing status to "${selectedRequestStatus}".`
+      );
+      return;
+    }
+
     setRequestStatusModalVisible(false); // Close modal immediately
 
     try {
@@ -2635,13 +2819,14 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
       let toastMessage = `Request Status Updated: Request #${requestToUpdate.request_number} is now ${selectedRequestStatus}.`;
 
-      // New logic for requests: if status changes to 'processing', 'out_for_delivery', or 'ready_for_pickup'
-      // and payment method is not COD and payment is 'waiting_for_confirmation', update payment to 'paid'.
-      if (
-        (selectedRequestStatus === 'processing' || selectedRequestStatus === 'out_for_delivery' || selectedRequestStatus === 'ready_for_pickup' || selectedRequestStatus === 'completed') &&
+      // When advancing status, mark payment as paid if full amount was already received (e.g. just verified)
+      const canConfirmPayment = (
+        statusesAfterPayment.includes(selectedRequestStatus) &&
         requestToUpdate.payment_method?.toLowerCase() !== 'cod' &&
-        (requestToUpdate.payment_status !== 'paid' && requestToUpdate.payment_status !== 'cancelled') // Check if it's not already paid or cancelled
-      ) {
+        requestToUpdate.payment_status !== 'paid' &&
+        requestToUpdate.payment_status !== 'cancelled'
+      );
+      if (canConfirmPayment && remaining <= 0) {
         await adminAPI.updateRequestPaymentStatus(requestToUpdate, 'paid');
         toastMessage = `Request Status Updated and Payment Marked as Paid for Request #${requestToUpdate.request_number}.`;
       }
@@ -2878,6 +3063,26 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
                         </View>
 
+                        {(item.total_amount != null || item.final_price != null) && (
+                          <>
+                            <View style={styles.eoFlexBetween}>
+                              <Text style={styles.eoDetailText}>Total:</Text>
+                              <Text style={styles.eoInfoTextBold}>₱{(item.total_amount ?? item.final_price ?? 0).toLocaleString()}</Text>
+                            </View>
+                            {(item.amount_paid != null && item.amount_paid > 0) && (
+                              <View style={styles.eoFlexBetween}>
+                                <Text style={styles.eoDetailText}>Amount paid:</Text>
+                                <Text style={styles.eoInfoTextBold}>₱{(item.amount_paid || 0).toLocaleString()}</Text>
+                              </View>
+                            )}
+                            {(item.remaining_balance != null && item.remaining_balance > 0) && (
+                              <View style={styles.eoFlexBetween}>
+                                <Text style={[styles.eoDetailText, { color: '#D97706' }]}>Remaining balance:</Text>
+                                <Text style={[styles.eoInfoTextBold, { color: '#D97706' }]}>₱{(item.remaining_balance || 0).toLocaleString()}</Text>
+                              </View>
+                            )}
+                          </>
+                        )}
                         <View style={{flexDirection: 'row', gap: 8, alignItems: 'center'}}>
 
                                                                         <View style={[styles.eoPaymentStatus, {backgroundColor: item.payment_status === 'paid' ? '#22C55E' : '#FFA726'}]}>
@@ -3040,7 +3245,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                     <>
                       <TouchableOpacity
                         style={[styles.actionButton, styles.acceptButton]}
-                        onPress={() => handleStatusChange(selectedRequest.id, 'processing')}
+                        onPress={() => handleAcceptRequestClick(selectedRequest)}
                       >
                         <Text style={styles.buttonText}>Accept</Text>
                       </TouchableOpacity>
@@ -3053,6 +3258,20 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                     </>
                   )}
 
+                  {/* Verify payment: for GCash when payment not yet full */}
+                  {selectedRequest.payment_method?.toLowerCase() === 'gcash' && selectedRequest.payment_status !== 'paid' && ['pending', 'processing'].includes(selectedRequest.status) && (
+                    <TouchableOpacity
+                      style={[styles.actionButton, { backgroundColor: '#F59E0B' }]}
+                      onPress={() => {
+                        setRequestForAcceptPayment(selectedRequest);
+                        setAmountReceivedInput(String(selectedRequest.amount_paid || ''));
+                        setAcceptPaymentModalVisible(true);
+                      }}
+                    >
+                      <Ionicons name="card-outline" size={16} color="#fff" />
+                      <Text style={styles.buttonText}> Verify payment</Text>
+                    </TouchableOpacity>
+                  )}
                   {/* Change Status for requests not in a final state */}
                   {['processing', 'ready_for_pickup', 'out_for_delivery'].includes(selectedRequest.status) && (
                     <TouchableOpacity
@@ -3065,6 +3284,37 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                 </View>
               </ScrollView>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* GCash: Enter amount received from receipt (cashier-style) before accepting customized request */}
+      <Modal visible={acceptPaymentModalVisible} animationType="fade" transparent>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Verify GCash payment</Text>
+            <Text style={styles.modalText}>
+              Request total: ₱{(parseFloat(requestForAcceptPayment?.final_price || requestForAcceptPayment?.total_amount || 0)).toLocaleString()}. Enter the amount received from the customer's receipt.
+            </Text>
+            <TextInput
+              style={[styles.input, { marginVertical: 12 }]}
+              placeholder="Amount received (e.g. 1500)"
+              placeholderTextColor="#999"
+              keyboardType="decimal-pad"
+              value={amountReceivedInput}
+              onChangeText={setAmountReceivedInput}
+            />
+            <Text style={[styles.modalText, { fontSize: 12, color: '#666', marginTop: -8 }]}>
+              If amount is less than total, request will not be accepted. Customer must pay in full first.
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={() => { setAcceptPaymentModalVisible(false); setRequestForAcceptPayment(null); setAmountReceivedInput(''); }}>
+                <Text style={styles.buttonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalButton, styles.acceptButton]} onPress={handleConfirmAcceptPaymentRequest}>
+                <Text style={styles.buttonText}>Confirm</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

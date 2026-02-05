@@ -82,6 +82,11 @@ const OrderCustomizedTracking = () => {
                 }
             }
 
+            const requestData = typeof foundRequest.data === 'string' ? JSON.parse(foundRequest.data || '{}') : (foundRequest.data || {});
+            const paymentStatus = foundRequest.payment_status ?? requestData?.payment_status ?? 'to_pay';
+            const amountPaid = parseFloat(requestData?.amount_paid ?? foundRequest.amount_paid ?? 0);
+            const totalPrice = parseFloat(foundRequest.final_price || 0);
+
             const transformedRequest = {
                 ...foundRequest,
                 rider: riderDetails,
@@ -93,6 +98,9 @@ const OrderCustomizedTracking = () => {
                 requestData: foundRequest.data,
                 imageUrl: foundRequest.data?.items?.[0]?.image_url || foundRequest.image_url,
                 finalPrice: foundRequest.final_price,
+                payment_status: paymentStatus,
+                amount_paid: amountPaid,
+                total: totalPrice,
             };
             setRequest(transformedRequest);
 
@@ -107,19 +115,19 @@ const OrderCustomizedTracking = () => {
                 }
             } else {
                 let currentStepKey;
-            if (transformedRequest.status === 'pending') {
-                currentStepKey = 'payment';
-            } else {
-                currentStepKey = transformedRequest.status;
-            }
+                if (transformedRequest.status === 'pending') {
+                    currentStepKey = 'payment';
+                } else if (transformedRequest.status === 'accepted' && paymentStatus !== 'paid') {
+                    currentStepKey = 'payment'; // Show Payment as current until paid
+                } else if (transformedRequest.status === 'accepted') {
+                    currentStepKey = 'processing';
+                } else {
+                    currentStepKey = transformedRequest.status;
+                }
 
-            let stepIndex = steps.findIndex(step => step.key === currentStepKey);
-
-            if (stepIndex === -1) {
-                stepIndex = 0; // Default to first step if no match
-            }
-            
-            setCurrentStep(stepIndex + 1);
+                let stepIndex = steps.findIndex(step => step.key === currentStepKey);
+                if (stepIndex === -1) stepIndex = 0;
+                setCurrentStep(stepIndex + 1);
             }
 
             setLoading(false);
@@ -304,7 +312,12 @@ const OrderCustomizedTracking = () => {
                                 Request Timeline
                             </h5>
                             <div className="timeline">
-                                {trackingSteps.map((step) => (
+                                {trackingSteps.map((step) => {
+                                    const isPaymentStep = step.key === 'payment';
+                                    const amountPaidByAdmin = parseFloat(request.amount_paid) || 0;
+                                    const remaining = Math.max(0, (request.total || request.finalPrice || 0) - amountPaidByAdmin);
+                                    const showRemainingAndPayLink = isPaymentStep && request.payment_status !== 'paid' && remaining > 0 && amountPaidByAdmin > 0;
+                                    return (
                                     <div 
                                         key={step.id}
                                         className={`timeline-item ${
@@ -319,6 +332,17 @@ const OrderCustomizedTracking = () => {
                                             <h5>{step.title}</h5>
                                             <p>
                                                 {step.description}
+                                                {isPaymentStep && request.payment_status === 'paid' && ' Payment confirmed.'}
+                                                {showRemainingAndPayLink && (
+                                                    <>
+                                                        <br />
+                                                        <span className="text-warning fw-bold">Remaining balance: ₱{remaining.toLocaleString()}</span>
+                                                        <br />
+                                                        <Link to="/profile" state={{ activeMenu: 'orders' }} className="btn btn-sm mt-2" style={{ background: 'var(--shop-pink)', color: 'white' }}>
+                                                            Pay remaining & upload receipt
+                                                        </Link>
+                                                    </>
+                                                )}
                                                 {step.key === 'out_for_delivery' && ['out_for_delivery', 'delivered', 'completed', 'claimed'].includes(request.status) && request.rider && (
                                                     <><br /><span className="fw-bold">Rider:</span> {request.rider.name} {request.rider.phone && `(${request.rider.phone})`}</>
                                                 )}
@@ -326,7 +350,8 @@ const OrderCustomizedTracking = () => {
                                             <div className="timeline-date">{getTimelineDate(step.id)}</div>
                                         </div>
                                     </div>
-                                ))}
+                                    );
+                                })}
                                 {isDeclinedOrCancelled && (
                                      <div className="timeline-item current">
                                         <div className="timeline-marker" style={{backgroundColor: '#f44336', borderColor: '#f44336', color: '#fff'}}>
