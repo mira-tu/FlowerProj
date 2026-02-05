@@ -178,9 +178,6 @@ const Profile = ({ user, logout }) => {
     const [receiptFile, setReceiptFile] = useState(null);
     const [receiptPreview, setReceiptPreview] = useState(null);
     const [isProcessingPayment, setIsProcessingPayment] = useState(false);
-    // GCash cashier-style: amount-paid modal (total + input for amount paid from receipt)
-    const [showAmountPaidModal, setShowAmountPaidModal] = useState(false);
-    const [amountPaidInput, setAmountPaidInput] = useState('');
     const [amountPaidForCurrentPayment, setAmountPaidForCurrentPayment] = useState(null); // amount being paid in this submission
 
     const handleReceiptUpload = (e) => {
@@ -457,6 +454,7 @@ const Profile = ({ user, logout }) => {
                     status: request.status === 'accepted' ? 'processing' : request.status, // Map accepted to processing for display
                     type: request.type, // booking, customized, special_order
                     payment_status: paymentStatus,
+                    payment_method: requestData?.payment_method || request.payment_method,
                     amount_paid: amountPaid,
                     total,
                     notes: request.notes || requestData.notes,
@@ -788,45 +786,28 @@ const Profile = ({ user, logout }) => {
         }
     };
 
-    const handleAcceptQuote = (order) => {
-        setOrderForPayment(order);
-        setAmountPaidInput('');
-        setAmountPaidForCurrentPayment(null);
-        setShowAmountPaidModal(true);
-        setModalContent(null);
-    };
-
-    const handleAmountPaidSubmit = () => {
-        const amount = parseFloat(amountPaidInput.replace(/,/g, ''));
-        const total = parseFloat(orderForPayment?.total || 0);
-        if (isNaN(amount) || amount < 0) {
-            alert('Please enter a valid amount paid.');
-            return;
-        }
-        setAmountPaidForCurrentPayment(amount);
-        setShowAmountPaidModal(false);
-        setShowQRModal(true);
-        setAmountPaidInput('');
-    };
-
-    const getPayAmountForQRModal = () => {
-        if (amountPaidForCurrentPayment != null) return amountPaidForCurrentPayment;
-        const total = parseFloat(orderForPayment?.total || 0);
-        const paid = parseFloat(orderForPayment?.amount_paid || 0);
-        return Math.max(0, total - paid);
-    };
-
     const getAmountDue = (order) => {
         const total = parseFloat(order?.total || 0);
         const paid = parseFloat(order?.amount_paid || 0);
         return Math.max(0, total - paid);
     };
 
+    const getPayAmountForQRModal = () => {
+        if (amountPaidForCurrentPayment != null) return amountPaidForCurrentPayment;
+        return getAmountDue(orderForPayment);
+    };
+
+    const handleAcceptQuote = (order) => {
+        setOrderForPayment(order);
+        setAmountPaidForCurrentPayment(parseFloat(order?.total || 0));
+        setShowQRModal(true);
+        setModalContent(null);
+    };
+
     const handlePayRemaining = (order) => {
         setOrderForPayment(order);
-        setAmountPaidInput('');
-        setAmountPaidForCurrentPayment(null);
-        setShowAmountPaidModal(true);
+        setAmountPaidForCurrentPayment(getAmountDue(order));
+        setShowQRModal(true);
     };
 
     const handleRequestAdjustment = (order) => {
@@ -1782,44 +1763,6 @@ const Profile = ({ user, logout }) => {
                                 }
                             }}>
                                 {modalContent.confirmText || 'OK'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* GCash amount-paid (cashier) modal: total due + input for amount paid from receipt */}
-            {showAmountPaidModal && orderForPayment && (
-                <div className="modal-overlay" onClick={() => setShowAmountPaidModal(false)}>
-                    <div className="modal-content-custom" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
-                        <div className="modal-header-custom">
-                            <h4>GCash Payment</h4>
-                            <button className="modal-close" onClick={() => { setShowAmountPaidModal(false); setOrderForPayment(null); }}>
-                                <i className="fas fa-times"></i>
-                            </button>
-                        </div>
-                        <div className="modal-body-custom">
-                            <p className="mb-3">Enter the amount shown on your GCash receipt for request #{orderForPayment.request_number}.</p>
-                            <div className="mb-3 p-3 rounded" style={{ background: '#f8f9fa' }}>
-                                <div className="fw-bold mb-2">Total amount due</div>
-                                <div style={{ fontSize: '1.5rem', color: 'var(--shop-pink)' }}>₱{getAmountDue(orderForPayment).toLocaleString()}</div>
-                            </div>
-                            <label className="form-label fw-bold">Amount paid (from receipt)</label>
-                            <input
-                                type="number"
-                                className="form-control mb-3"
-                                placeholder="0.00"
-                                min="0"
-                                step="0.01"
-                                value={amountPaidInput}
-                                onChange={(e) => setAmountPaidInput(e.target.value)}
-                            />
-                            <button
-                                className="btn w-100"
-                                style={{ background: 'var(--shop-pink)', color: 'white' }}
-                                onClick={handleAmountPaidSubmit}
-                            >
-                                Continue to scan QR & upload receipt
                             </button>
                         </div>
                     </div>

@@ -719,11 +719,11 @@ export const adminAPI = {
                 }
             }
             
-            // If it's a customized request, prioritize fields from the 'data' JSONB
-            if (req.type === 'customized' && requestData) {
-                paymentStatusToUse = requestData.payment_status !== undefined ? requestData.payment_status : paymentStatusToUse;
-                paymentMethodToUse = requestData.payment_method !== undefined ? requestData.payment_method : paymentMethodToUse;
-                receiptUrlToUse = requestData.receipt_url !== undefined ? requestData.receipt_url : receiptUrlToUse;
+            // For customized, booking, special_order: prioritize payment fields from 'data' when present (verify-payment flow)
+            if (requestData && ['customized', 'booking', 'special_order'].includes(req.type)) {
+                if (requestData.payment_status !== undefined) paymentStatusToUse = requestData.payment_status;
+                if (requestData.payment_method !== undefined) paymentMethodToUse = requestData.payment_method;
+                if (requestData.receipt_url !== undefined) receiptUrlToUse = requestData.receipt_url;
             }
             const amountPaid = parseFloat(requestData?.amount_paid ?? req.amount_paid ?? 0);
             const totalAmount = parseFloat(req.final_price || 0);
@@ -871,10 +871,34 @@ export const adminAPI = {
             }
             return { data: { success: true, request: data } };
         } else {
-            // Logic for booking and special_order requests (update top-level payment_status)
+            // Logic for booking and special_order: update top-level payment_status and optionally data.amount_paid (same flow as customized for insufficient balance)
+            const payload = { payment_status: newStatus };
+            if (amountVerified != null && !isNaN(amountVerified)) {
+                const { data: currentRequest, error: fetchError } = await supabase
+                    .from('requests')
+                    .select('data')
+                    .eq('id', requestId)
+                    .single();
+                if (!fetchError && currentRequest) {
+                    let requestData = currentRequest.data;
+                    if (typeof requestData === 'string') {
+                        try {
+                            requestData = JSON.parse(requestData);
+                        } catch (e) {
+                            requestData = {};
+                        }
+                    }
+                    payload.data = {
+                        ...(requestData || {}),
+                        payment_status: newStatus,
+                        amount_paid: parseFloat(amountVerified),
+                        payment_method: 'gcash',
+                    };
+                }
+            }
             const { data, error } = await supabase
                 .from('requests')
-                .update({ payment_status: newStatus })
+                .update(payload)
                 .eq('id', requestId)
                 .select()
                 .single();

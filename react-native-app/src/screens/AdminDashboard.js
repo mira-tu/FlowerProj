@@ -1184,41 +1184,34 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     setStatusModalVisible(true);
   };
 
-  const confirmStatusChange = async () => {
-    if (!orderToUpdate || !selectedStatus) return;
-    const orderId = orderToUpdate.id;
-
-    // GCash: block advancing status until payment is fully paid
-    const isGcash = orderToUpdate.payment_method?.toLowerCase() === 'gcash';
-    const paymentPaid = orderToUpdate.payment_status === 'paid';
+  const applyOrderStatus = async (order, statusId) => {
+    if (!order || !statusId) return;
+    const orderId = order.id;
+    const isGcash = order.payment_method?.toLowerCase() === 'gcash';
+    const paymentPaid = order.payment_status === 'paid';
     const statusesAfterPayment = ['processing', 'out_for_delivery', 'ready_for_pick_up', 'ready_for_pickup', 'claimed', 'completed'];
-    if (isGcash && !paymentPaid && statusesAfterPayment.includes(selectedStatus)) {
-      const remaining = Math.max(0, (parseFloat(orderToUpdate.total) || 0) - (parseFloat(orderToUpdate.amount_paid) || 0));
+    if (isGcash && !paymentPaid && statusesAfterPayment.includes(statusId)) {
+      const remaining = Math.max(0, (parseFloat(order.total) || 0) - (parseFloat(order.amount_paid) || 0));
       Alert.alert(
         'Payment required',
-        `GCash payment is not fully paid. Remaining balance: ₱${remaining.toLocaleString()}. Please verify payment (enter amount received) before changing status to "${selectedStatus}".`
+        `GCash payment is not fully paid. Remaining balance: ₱${remaining.toLocaleString()}. Verify payment first.`
       );
       return;
     }
-
     try {
-      await adminAPI.updateOrderStatus(orderId, selectedStatus);
-
-      // New logic: If order is completed and payment method is COD and payment is 'to_pay', mark as 'paid'
-      if (selectedStatus === 'completed' && orderToUpdate.payment_method === 'cod' && orderToUpdate.payment_status === 'to_pay') {
+      await adminAPI.updateOrderStatus(orderId, statusId);
+      if (statusId === 'completed' && order.payment_method === 'cod' && order.payment_status === 'to_pay') {
         await adminAPI.updateOrderPaymentStatus(orderId, 'paid');
         Toast.show({ type: 'success', text1: 'Order Completed and Payment Marked as Paid' });
       } else {
-        Toast.show({ type: 'success', text1: 'Status Updated' });
+        Toast.show({ type: 'success', text1: `Status: ${statusId.replace(/_/g, ' ')}` });
       }
-
-      await loadOrders();
-    } catch (error) {
-      Toast.show({ type: 'error', text1: 'Update Failed' });
-    } finally {
       setStatusModalVisible(false);
       setOrderToUpdate(null);
       setSelectedStatus(null);
+      await loadOrders();
+    } catch (error) {
+      Toast.show({ type: 'error', text1: 'Update Failed' });
     }
   };
 
@@ -1451,7 +1444,11 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                 <Text style={styles.eoMainBtnText}>Verify payment</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={[styles.eoMainBtn, {backgroundColor: '#3B82F6'}]} onPress={() => openStatusModal(item)}>
+            <TouchableOpacity
+              style={[styles.eoMainBtn, {backgroundColor: '#3B82F6'}, (item.payment_method?.toLowerCase() === 'gcash' && item.payment_status !== 'paid') && { opacity: 0.5 }]}
+              onPress={() => (item.payment_method?.toLowerCase() === 'gcash' && item.payment_status !== 'paid') ? null : openStatusModal(item)}
+              disabled={item.payment_method?.toLowerCase() === 'gcash' && item.payment_status !== 'paid'}
+            >
                 <Ionicons name="time" size={18} color="#fff" />
                 <Text style={styles.eoMainBtnText}>Change Status</Text>
             </TouchableOpacity>
@@ -1628,9 +1625,13 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       {/* Change Status Modal (Timeline UI) */}
       <Modal visible={statusModalVisible} transparent animationType="fade" onRequestClose={() => setStatusModalVisible(false)}>
           <View style={styles.statusModalBackdrop}>
+              <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => { setStatusModalVisible(false); setOrderToUpdate(null); setSelectedStatus(null); }} />
               <View style={styles.timelineModalContainer}>
-                  <View style={styles.statusModalHeader}>
+                  <View style={[styles.statusModalHeader, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
                       <Text style={styles.statusModalTitle}>Change Order Status</Text>
+                      <TouchableOpacity onPress={() => { setStatusModalVisible(false); setOrderToUpdate(null); setSelectedStatus(null); }} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                          <Ionicons name="close" size={28} color="#fff" />
+                      </TouchableOpacity>
                   </View>
 
                   <ScrollView contentContainerStyle={styles.timelineScrollView}>
@@ -1661,7 +1662,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                                               )}
                                               {/* Content */}
                                               <TouchableOpacity
-                                                onPress={() => setSelectedStatus(status.id)}
+                                                onPress={() => applyOrderStatus(orderToUpdate, status.id)}
                                                 style={styles.timelineStep}
                                                 disabled={isPast}
                                               >
@@ -1700,17 +1701,11 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                                   {/* Special Status Buttons */}
                                   <View style={styles.timelineActions}>
                                       <TouchableOpacity
-                                          onPress={() => setSelectedStatus('cancelled')}
-                                          style={[
-                                              styles.timelineCancelButton,
-                                              selectedStatus === 'cancelled' && styles.timelineCancelButtonSelected
-                                          ]}
+                                          onPress={() => applyOrderStatus(orderToUpdate, 'cancelled')}
+                                          style={styles.timelineCancelButton}
                                       >
-                                          <Ionicons name="close-circle-outline" size={16} color={selectedStatus === 'cancelled' ? '#fff' : '#EF4444'} />
-                                          <Text style={[
-                                              styles.timelineCancelButtonText,
-                                              selectedStatus === 'cancelled' && { color: '#fff' }
-                                          ]}>
+                                          <Ionicons name="close-circle-outline" size={16} color="#EF4444" />
+                                          <Text style={styles.timelineCancelButtonText}>
                                               Cancel Order
                                           </Text>
                                       </TouchableOpacity>
@@ -1719,15 +1714,6 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                           );
                       })()}
                   </ScrollView>
-
-                  <View style={styles.statusModalFooter}>
-                      <TouchableOpacity onPress={confirmStatusChange} style={styles.statusConfirmButton}>
-                          <Text style={styles.statusConfirmButtonText}>Confirm</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={() => setStatusModalVisible(false)} style={styles.statusCloseButton}>
-                          <Text style={styles.statusCloseButtonText}>Cancel</Text>
-                      </TouchableOpacity>
-                  </View>
               </View>
           </View>
       </Modal>
@@ -2751,7 +2737,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
         await adminAPI.updateRequestStatus(requestForAcceptPayment.id, 'accepted');
       }
       await adminAPI.updateRequestPaymentStatus(
-        { ...requestForAcceptPayment, type: 'customized' },
+        requestForAcceptPayment,
         isSufficient ? 'paid' : 'waiting_for_confirmation',
         amount
       );
@@ -2795,56 +2781,34 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     setRequestStatusModalVisible(true);
   };
 
-  const confirmRequestStatusChange = async () => {
-    if (!requestToUpdate || !selectedRequestStatus) return;
-    const requestId = requestToUpdate.id;
-
-    // GCash: block advancing status until payment is fully paid
-    const isGcash = requestToUpdate.payment_method?.toLowerCase() === 'gcash';
-    const paymentPaid = requestToUpdate.payment_status === 'paid';
-    const remaining = requestToUpdate.remaining_balance ?? Math.max(0, (requestToUpdate.final_price || requestToUpdate.total_amount || 0) - (requestToUpdate.amount_paid || 0));
+  const applyRequestStatus = async (request, statusId) => {
+    if (!request || !statusId) return;
+    const requestId = request.id;
+    const isGcash = request.payment_method?.toLowerCase() === 'gcash';
+    const paymentPaid = request.payment_status === 'paid';
+    const remaining = request.remaining_balance ?? Math.max(0, (request.final_price || request.total_amount || 0) - (request.amount_paid || 0));
     const statusesAfterPayment = ['processing', 'out_for_delivery', 'ready_for_pickup', 'completed'];
-    if (isGcash && !paymentPaid && statusesAfterPayment.includes(selectedRequestStatus)) {
+    if (isGcash && !paymentPaid && statusesAfterPayment.includes(statusId)) {
       Alert.alert(
         'Payment required',
-        `GCash payment is not fully paid. Remaining balance: ₱${remaining.toLocaleString()}. Please verify payment (enter amount received) before changing status to "${selectedRequestStatus}".`
+        `GCash payment is not fully paid. Remaining balance: ₱${remaining.toLocaleString()}. Verify payment first.`
       );
       return;
     }
-
-    setRequestStatusModalVisible(false); // Close modal immediately
-
+    setRequestStatusModalVisible(false);
     try {
-      await adminAPI.updateRequestStatus(requestId, selectedRequestStatus);
-
-      let toastMessage = `Request Status Updated: Request #${requestToUpdate.request_number} is now ${selectedRequestStatus}.`;
-
-      // When advancing status, mark payment as paid if full amount was already received (e.g. just verified)
-      const canConfirmPayment = (
-        statusesAfterPayment.includes(selectedRequestStatus) &&
-        requestToUpdate.payment_method?.toLowerCase() !== 'cod' &&
-        requestToUpdate.payment_status !== 'paid' &&
-        requestToUpdate.payment_status !== 'cancelled'
-      );
-      if (canConfirmPayment && remaining <= 0) {
-        await adminAPI.updateRequestPaymentStatus(requestToUpdate, 'paid');
-        toastMessage = `Request Status Updated and Payment Marked as Paid for Request #${requestToUpdate.request_number}.`;
+      await adminAPI.updateRequestStatus(requestId, statusId);
+      let toastMessage = `Request #${request.request_number} is now ${statusId.replace(/_/g, ' ')}.`;
+      if (statusesAfterPayment.includes(statusId) && request.payment_method?.toLowerCase() !== 'cod' && request.payment_status !== 'paid' && remaining <= 0) {
+        await adminAPI.updateRequestPaymentStatus(request, 'paid');
+        toastMessage = `Request updated and payment marked as paid.`;
       }
-
-      Toast.show({
-        type: 'success',
-        text1: 'Success',
-        text2: toastMessage
-      });
-      setModalVisible(false); // Close the main details modal too
-      loadRequests(); // Reload requests to reflect changes
+      Toast.show({ type: 'success', text1: 'Success', text2: toastMessage });
+      setModalVisible(false);
+      loadRequests();
     } catch (error) {
       console.error('Update request status error:', error);
-      Toast.show({
-        type: 'error',
-        text1: 'Update Failed',
-        text2: error.response?.data?.message || 'Failed to update request status'
-      });
+      Toast.show({ type: 'error', text1: 'Update Failed', text2: error.response?.data?.message || 'Failed to update' });
     } finally {
       setRequestToUpdate(null);
       setSelectedRequestStatus(null);
@@ -3258,8 +3222,8 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                     </>
                   )}
 
-                  {/* Verify payment: for GCash when payment not yet full */}
-                  {selectedRequest.payment_method?.toLowerCase() === 'gcash' && selectedRequest.payment_status !== 'paid' && ['pending', 'processing'].includes(selectedRequest.status) && (
+                  {/* Verify payment: for GCash (or any request with receipt) when payment not yet full (customized, booking, special_order) */}
+                  {(selectedRequest.payment_method?.toLowerCase() === 'gcash' || selectedRequest.receipt_url) && selectedRequest.payment_status !== 'paid' && ['pending', 'quoted', 'processing'].includes(selectedRequest.status) && (
                     <TouchableOpacity
                       style={[styles.actionButton, { backgroundColor: '#F59E0B' }]}
                       onPress={() => {
@@ -3272,11 +3236,19 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                       <Text style={styles.buttonText}> Verify payment</Text>
                     </TouchableOpacity>
                   )}
-                  {/* Change Status for requests not in a final state */}
+                  {/* Change Status: disabled when GCash not fully paid */}
                   {['processing', 'ready_for_pickup', 'out_for_delivery'].includes(selectedRequest.status) && (
                     <TouchableOpacity
-                      style={[styles.actionButton, styles.changeStatusButton]}
-                      onPress={() => openRequestStatusModal(selectedRequest)}
+                      style={[
+                        styles.actionButton,
+                        styles.changeStatusButton,
+                        (selectedRequest.payment_method?.toLowerCase() === 'gcash' && selectedRequest.payment_status !== 'paid') && { opacity: 0.5 }
+                      ]}
+                      onPress={() => {
+                        if (selectedRequest.payment_method?.toLowerCase() === 'gcash' && selectedRequest.payment_status !== 'paid') return;
+                        openRequestStatusModal(selectedRequest);
+                      }}
+                      disabled={selectedRequest.payment_method?.toLowerCase() === 'gcash' && selectedRequest.payment_status !== 'paid'}
                     >
                       <Text style={styles.buttonText}>Change Status</Text>
                     </TouchableOpacity>
@@ -3322,9 +3294,13 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       {/* Request Change Status Modal (Timeline UI) */}
       <Modal visible={requestStatusModalVisible} transparent animationType="fade" onRequestClose={() => setRequestStatusModalVisible(false)}>
           <View style={styles.statusModalBackdrop}>
+              <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => { setRequestStatusModalVisible(false); setRequestToUpdate(null); setSelectedRequestStatus(null); }} />
               <View style={styles.timelineModalContainer}>
-                  <View style={styles.statusModalHeader}>
+                  <View style={[styles.statusModalHeader, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
                       <Text style={styles.statusModalTitle}>Change Request Status</Text>
+                      <TouchableOpacity onPress={() => { setRequestStatusModalVisible(false); setRequestToUpdate(null); setSelectedRequestStatus(null); }} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                          <Ionicons name="close" size={28} color="#fff" />
+                      </TouchableOpacity>
                   </View>
 
                   <ScrollView contentContainerStyle={styles.timelineScrollView}>
@@ -3370,7 +3346,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                                                   ]}/>
                                               )}
                                               <TouchableOpacity
-                                                onPress={() => setSelectedRequestStatus(status.id)}
+                                                onPress={() => applyRequestStatus(requestToUpdate, status.id)}
                                                 style={styles.timelineStep}
                                                 disabled={isPast}
                                               >
@@ -3408,17 +3384,11 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                                   })}
                                   <View style={styles.timelineActions}>
                                       <TouchableOpacity
-                                          onPress={() => setSelectedRequestStatus('cancelled')}
-                                          style={[
-                                              styles.timelineCancelButton,
-                                              selectedRequestStatus === 'cancelled' && styles.timelineCancelButtonSelected
-                                          ]}
+                                          onPress={() => applyRequestStatus(requestToUpdate, 'cancelled')}
+                                          style={styles.timelineCancelButton}
                                       >
-                                          <Ionicons name="close-circle-outline" size={16} color={selectedRequestStatus === 'cancelled' ? '#fff' : '#EF4444'} />
-                                          <Text style={[
-                                              styles.timelineCancelButtonText,
-                                              selectedRequestStatus === 'cancelled' && { color: '#fff' }
-                                          ]}>
+                                          <Ionicons name="close-circle-outline" size={16} color="#EF4444" />
+                                          <Text style={styles.timelineCancelButtonText}>
                                               Cancel Request
                                           </Text>
                                       </TouchableOpacity>
@@ -3427,15 +3397,6 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                           );
                       })()}
                   </ScrollView>
-
-                  <View style={styles.statusModalFooter}>
-                      <TouchableOpacity onPress={confirmRequestStatusChange} style={styles.statusConfirmButton}>
-                          <Text style={styles.statusConfirmButtonText}>Confirm</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={() => setRequestStatusModalVisible(false)} style={styles.statusCloseButton}>
-                          <Text style={styles.statusCloseButtonText}>Cancel</Text>
-                      </TouchableOpacity>
-                  </View>
               </View>
           </View>
       </Modal>
