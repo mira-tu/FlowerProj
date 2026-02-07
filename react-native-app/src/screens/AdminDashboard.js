@@ -110,6 +110,7 @@ const AdminDashboard = () => {
   const navigation = useNavigation();
   const [activeTab, setActiveTab] = useState('catalogue');
   const [menuVisible, setMenuVisible] = useState(false);
+  const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [unreadMessageCount, setUnreadMessageCount] = useState(0);
@@ -178,24 +179,21 @@ const AdminDashboard = () => {
   }, [currentUser]);
 
 
-  const handleLogout = () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Logout',
-          onPress: async () => {
-            await authAPI.logout(); // Sign out from Supabase
-            await AsyncStorage.removeItem('currentUser');
-            await AsyncStorage.removeItem('token');
-            navigation.navigate('Login');
-          }
-        }
-      ]
-    );
+  const performLogout = async () => {
+    try {
+      await authAPI.logout();
+      await AsyncStorage.removeItem('currentUser');
+      await AsyncStorage.removeItem('token');
+    } catch (e) {
+      console.warn('Logout cleanup error:', e);
+    }
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'Login' }],
+    });
   };
+
+  const showLogoutConfirm = () => setLogoutConfirmVisible(true);
 
   const renderTabContent = () => {
     // Prevent employees from accessing admin-only tabs
@@ -256,7 +254,7 @@ const AdminDashboard = () => {
           <Text style={styles.headerSubtitle}>Admin Dashboard</Text>
         </View>
 
-        <TouchableOpacity onPress={handleLogout}>
+        <TouchableOpacity onPress={showLogoutConfirm} activeOpacity={0.7} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           <Ionicons name="log-out-outline" size={28} color="#fff" />
         </TouchableOpacity>
       </View>
@@ -428,11 +426,51 @@ const AdminDashboard = () => {
 
               <View style={styles.menuDivider} />
 
-              <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuVisible(false); handleLogout(); }}>
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => {
+                  setMenuVisible(false);
+                  setTimeout(() => setLogoutConfirmVisible(true), 300);
+                }}
+                activeOpacity={0.7}
+              >
                 <Ionicons name="log-out-outline" size={20} color="#f44336" />
                 <Text style={[styles.menuItemText, { color: '#f44336' }]}>Logout</Text>
               </TouchableOpacity>
             </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Logout confirmation modal - in-app so it works on all platforms */}
+      <Modal
+        visible={logoutConfirmVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setLogoutConfirmVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.logoutOverlay}
+          activeOpacity={1}
+          onPress={() => setLogoutConfirmVisible(false)}
+        >
+          <View style={styles.logoutConfirmBox} onStartShouldSetResponder={() => true}>
+            <Text style={styles.logoutConfirmTitle}>Logout</Text>
+            <Text style={styles.logoutConfirmMessage}>Are you sure you want to logout?</Text>
+            <View style={styles.logoutConfirmButtons}>
+              <TouchableOpacity style={styles.logoutCancelBtn} onPress={() => setLogoutConfirmVisible(false)}>
+                <Text style={styles.logoutCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.logoutConfirmBtn}
+                onPress={() => {
+                  setLogoutConfirmVisible(false);
+                  performLogout();
+                }}
+              >
+                <Text style={styles.logoutConfirmBtnText}>Logout</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </TouchableOpacity>
       </Modal>
@@ -5614,6 +5652,58 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#e0e0e0',
     marginVertical: 10,
+  },
+  logoutOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  logoutConfirmBox: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 24,
+    minWidth: 280,
+    maxWidth: '100%',
+  },
+  logoutConfirmTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  logoutConfirmMessage: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 24,
+  },
+  logoutConfirmButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  logoutCancelBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    backgroundColor: '#f0f0f0',
+  },
+  logoutCancelBtnText: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '500',
+  },
+  logoutConfirmBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    backgroundColor: '#f44336',
+  },
+  logoutConfirmBtnText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
   },
   dropdownInput: {
     borderWidth: 1,
