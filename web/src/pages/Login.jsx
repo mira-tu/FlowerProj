@@ -10,6 +10,11 @@ const Login = ({ onLogin }) => {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [showReset, setShowReset] = useState(false);
+    const [resetEmail, setResetEmail] = useState('');
+    const [resetLoading, setResetLoading] = useState(false);
+    const [resetMessage, setResetMessage] = useState('');
+    const [resetError, setResetError] = useState('');
 
     const handleLogin = async (e) => {
         e.preventDefault();
@@ -56,6 +61,30 @@ const Login = ({ onLogin }) => {
             setError(err.message || 'Invalid email or password');
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleResetPassword = async (e) => {
+        e.preventDefault();
+        setResetMessage('');
+        setResetError('');
+        setResetLoading(true);
+
+        try {
+            const { error: resetError } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+                redirectTo: `${window.location.origin}/reset-password`,
+            });
+
+            if (resetError) {
+                throw resetError;
+            }
+
+            setResetMessage('If an account exists for that email, a password reset link has been sent.');
+        } catch (err) {
+            console.error('Password reset error:', err);
+            setResetError(err.message || 'Unable to send reset email. Please try again.');
+        } finally {
+            setResetLoading(false);
         }
     };
 
@@ -115,13 +144,65 @@ const Login = ({ onLogin }) => {
                                     Remember me
                                 </label>
                             </div>
-                            <a href="#" className="auth-link small text-nowrap">Forgot Password?</a>
+                            <button
+                                type="button"
+                                className="auth-link small text-nowrap btn btn-link p-0"
+                                onClick={() => {
+                                    setShowReset((prev) => !prev);
+                                    setResetEmail((prev) => prev || email);
+                                    setResetMessage('');
+                                    setResetError('');
+                                }}
+                            >
+                                Forgot Password?
+                            </button>
                         </div>
 
                         <button type="submit" className="btn btn-auth" disabled={loading}>
                             {loading ? 'Signing In...' : 'Sign In'}
                         </button>
                     </form>
+
+                    {showReset && (
+                        <div className="mt-4">
+                            <h6 className="fw-semibold mb-2">Reset your password</h6>
+                            <p className="text-muted small mb-3">
+                                Enter your email and we&apos;ll send you a reset link.
+                            </p>
+                            <form onSubmit={handleResetPassword}>
+                                {resetMessage && (
+                                    <div className="alert alert-success" role="alert">
+                                        {resetMessage}
+                                    </div>
+                                )}
+                                {resetError && (
+                                    <div className="alert alert-danger" role="alert">
+                                        {resetError}
+                                    </div>
+                                )}
+                                <div className="form-floating mb-3">
+                                    <input
+                                        type="email"
+                                        className="form-control"
+                                        id="resetEmail"
+                                        placeholder="name@example.com"
+                                        value={resetEmail}
+                                        onChange={(e) => setResetEmail(e.target.value)}
+                                        required
+                                        disabled={resetLoading}
+                                    />
+                                    <label htmlFor="resetEmail">Email address</label>
+                                </div>
+                                <button
+                                    type="submit"
+                                    className="btn btn-auth"
+                                    disabled={resetLoading}
+                                >
+                                    {resetLoading ? 'Sending...' : 'Send reset link'}
+                                </button>
+                            </form>
+                        </div>
+                    )}
 
                     <div className="auth-footer">
                         Don't have an account? <Link to="/signup" className="auth-link">Sign Up</Link>

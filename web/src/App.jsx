@@ -7,6 +7,7 @@ import Contact from './pages/Contact'
 import About from './pages/About'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
+import ResetPassword from './pages/ResetPassword'
 import Wishlist from './pages/Wishlist'
 import Cart from './pages/Cart'
 import BookingCart from './pages/BookingCart'
@@ -32,7 +33,7 @@ import { supabase } from './config/supabase';
 
 function AppContent() {
   const location = useLocation();
-  const isAuthRoute = ['/login', '/signup'].includes(location.pathname);
+  const isAuthRoute = ['/login', '/signup', '/reset-password'].includes(location.pathname);
   const showNavbar = !isAuthRoute;
   const [user, setUser] = useState(null);
   const [products, setProducts] = useState([]);
@@ -215,6 +216,7 @@ function AppContent() {
         <Route path="/booking-checkout" element={<BookingCheckout user={user} />} />
         <Route path="/login" element={<Login onLogin={login} />} />
         <Route path="/signup" element={<Signup />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/book-event" element={<BookEvent user={user} />} />
         <Route path="/customized" element={<Customized addToCart={addToCart} />} />
         <Route path="/special-order" element={<SpecialOrder user={user} />} />
