@@ -15,10 +15,6 @@ const Login = ({ onLogin }) => {
     const [resetLoading, setResetLoading] = useState(false);
     const [resetMessage, setResetMessage] = useState('');
     const [resetError, setResetError] = useState('');
-    const configuredPasswordResetRedirectUrl = import.meta.env.VITE_PASSWORD_RESET_REDIRECT_URL?.trim();
-    const passwordResetRedirectUrl = configuredPasswordResetRedirectUrl
-        ? configuredPasswordResetRedirectUrl
-        : `${window.location.origin}/reset-password`;
 
     const handleLogin = async (e) => {
         e.preventDefault();
@@ -76,7 +72,7 @@ const Login = ({ onLogin }) => {
 
         try {
             const { error: resetError } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-                redirectTo: passwordResetRedirectUrl,
+                redirectTo: `${window.location.origin}/reset-password`,
             });
 
             if (resetError) {
