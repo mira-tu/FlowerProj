@@ -17,8 +17,11 @@ export const productAPI = {
                 stock_quantity,
                 is_active,
                 categories ( name )
-            `)
-            .eq('is_active', true);
+            `);
+
+        if (!params?.includeInactive) {
+            query = query.eq('is_active', true);
+        }
 
         if (params?.category_id) {
             query = query.eq('category_id', parseInt(params.category_id, 10));
@@ -118,7 +121,7 @@ export const productAPI = {
             description: formData.description || '',
             category_id: parseInt(formData.category_id, 10),
             image_url: imageUrl,
-            is_active: true,
+            is_active: formData.is_active !== false,
         };
 
         console.log('Inserting product to database:', productToInsert);
@@ -186,6 +189,7 @@ export const productAPI = {
             description: formData.description,
             category_id: parseInt(formData.category_id, 10),
             image_url: imageUrl,
+            is_active: formData.is_active !== false,
         };
         
         Object.keys(productToUpdate).forEach(key => (productToUpdate[key] === undefined || Number.isNaN(productToUpdate[key])) && delete productToUpdate[key]);
@@ -226,6 +230,33 @@ export const productAPI = {
         if (productError) {
             console.error('Error deleting product:', productError);
             throw productError;
+        }
+
+        return { data: { success: true } };
+    },
+
+    createCategory: async (name) => {
+        const { data, error } = await supabase
+            .from('categories')
+            .insert({ name, is_active: true })
+            .select()
+            .single();
+
+        if (error) {
+            throw error;
+        }
+
+        return { data };
+    },
+
+    deleteCategory: async (id) => {
+        const { error } = await supabase
+            .from('categories')
+            .delete()
+            .eq('id', parseInt(id, 10));
+
+        if (error) {
+            throw error;
         }
 
         return { data: { success: true } };

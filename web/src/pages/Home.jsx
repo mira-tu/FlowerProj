@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import '../styles/Home.css';
 // Removed API import - using localStorage instead
 import eventImg from '../assets/pictures/EVENTSPECIFIC.jpg';
 import customImg from '../assets/pictures/CUSTOMIZED.jpg';
 import specialImg from '../assets/pictures/SPECIALORDERPAGE.jpg';
+import ProductModal from '../components/ProductModal';
 
 // Import Occasion Images
 import allSouls1 from '../assets/pictures/occasions/ALLSOULSDAY1.png';
@@ -46,13 +47,13 @@ import val9 from '../assets/pictures/occasions/VALENTINES9.png';
 
 
 const Home = ({ addToCart, products, categories }) => {
-    const navigate = useNavigate();
     const [selectedCategory, setSelectedCategory] = useState('All');
     const [searchTerm, setSearchTerm] = useState('');
     const [wishlist, setWishlist] = useState([]);
     const [showWishlistPopup, setShowWishlistPopup] = useState(false);
     const [popupMessage, setPopupMessage] = useState('');
     const [showCartPopup, setShowCartPopup] = useState(false);
+    const [selectedProduct, setSelectedProduct] = useState(null);
 
     useEffect(() => {
         const savedWishlist = localStorage.getItem('wishlist');
@@ -66,8 +67,13 @@ const Home = ({ addToCart, products, categories }) => {
     }, []);
 
     const handleAddToCart = (product, e) => {
-        e.preventDefault();
-        e.stopPropagation();
+        if (e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        if (product.is_active === false) {
+            return;
+        }
         addToCart(product.name, product.price, product.image_url, product.id);
         setShowCartPopup(true);
         setTimeout(() => setShowCartPopup(false), 2000);
@@ -222,40 +228,44 @@ const Home = ({ addToCart, products, categories }) => {
                 <div className="container">
                     <h2 className="text-center mb-5 fw-bold" style={{ color: 'var(--text-dark)' }}>Featured Collections</h2>
                     <div className="row g-4" id="productList">
-                        {filteredProducts.map((product, index) => (
-                            <div key={index} className="col-md-3 col-sm-6">
-                                <div className="product-card">
-                                    <Link to={`/product/${product.id}`}>
-                                        <div className="product-img-wrapper">
-                                            <img 
-                                                src={product.image_url} 
-                                                alt={product.name} 
-                                                loading="lazy"
-                                                decoding="async"
-                                                height="250"
-                                            />
-                                            <button
-                                                className={`wishlist-heart-btn ${isInWishlist(product.name) ? 'active' : ''}`}
-                                                onClick={(e) => toggleWishlist(product, e)}
-                                                title={isInWishlist(product.name) ? 'Remove from Wishlist' : 'Add to Wishlist'}
-                                            >
-                                                <i className={`${isInWishlist(product.name) ? 'fas' : 'far'} fa-heart`}></i>
-                                            </button>
-                                        </div>
-                                    </Link>
-                                    <Link to={`/product/${product.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                                        <div className="product-body">
-                                            <h5 className="product-title">{product.name}</h5>
-                                            <p className="product-price">₱{product.price.toLocaleString()}</p>
-                                            {product.description && <p className="product-description">{product.description}</p>}
-                                        </div>
-                                    </Link>
+                        {filteredProducts.map((product) => (
+                            <div key={product.id} className="col-md-3 col-sm-6">
+                                <div
+                                    className={`product-card ${product.is_active === false ? 'product-card-unavailable' : ''}`}
+                                    onClick={() => setSelectedProduct(product)}
+                                    role="button"
+                                    tabIndex={0}
+                                    onKeyDown={(e) => e.key === 'Enter' && setSelectedProduct(product)}
+                                >
+                                    <div className="product-img-wrapper">
+                                        <img
+                                            src={product.image_url}
+                                            alt={product.name}
+                                            loading="lazy"
+                                            decoding="async"
+                                            height="250"
+                                        />
+                                        {product.is_active === false && <div className="unavailable-overlay">Unavailable</div>}
+                                        <button
+                                            className={`wishlist-heart-btn ${isInWishlist(product.name) ? 'active' : ''}`}
+                                            onClick={(e) => toggleWishlist(product, e)}
+                                            title={isInWishlist(product.name) ? 'Remove from Wishlist' : 'Add to Wishlist'}
+                                        >
+                                            <i className={`${isInWishlist(product.name) ? 'fas' : 'far'} fa-heart`}></i>
+                                        </button>
+                                    </div>
+                                    <div className="product-body">
+                                        <h5 className="product-title">{product.name}</h5>
+                                        <p className="product-price">₱{product.price.toLocaleString()}</p>
+                                        {product.description && <p className="product-description">{product.description}</p>}
+                                    </div>
                                     <div className="product-body pt-0">
                                         <button
                                             className="btn-add-cart"
                                             onClick={(e) => handleAddToCart(product, e)}
+                                            disabled={product.is_active === false}
                                         >
-                                            Add to Cart
+                                            {product.is_active === false ? 'Unavailable' : 'Add to Cart'}
                                         </button>
                                     </div>
                                 </div>
@@ -265,6 +275,11 @@ const Home = ({ addToCart, products, categories }) => {
                 </div>
             </section>
 
+            <ProductModal
+                product={selectedProduct}
+                onClose={() => setSelectedProduct(null)}
+                onAddToCart={handleAddToCart}
+            />
         </div>
     );
 };

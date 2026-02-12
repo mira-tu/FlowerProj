@@ -37,39 +37,40 @@ function AppContent() {
   const showNavbar = !isAuthRoute;
   const [user, setUser] = useState(null);
   const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [cart, setCart] = useState([]);
+  const [isInitializing, setIsInitializing] = useState(true);
   const isLoggedIn = !!user;
-
-  const hardcodedCategories = [
-      { id: 1, name: 'Sympathy' },
-      { id: 2, name: 'Graduation' },
-      { id: 3, name: 'All Souls Day' },
-      { id: 4, name: 'Valentines' },
-      { id: 5, name: 'Get Well Soon' },
-      { id: 6, name: 'Mothers Day' },
-  ];
 
   useEffect(() => {
     const fetchData = async () => {
-      // Fetch Products
-      const { data: productsData, error: productsError } = await supabase
-        .from('products')
-        .select('*');
-      
-      if (productsError) {
-        console.error('Error fetching products:', productsError);
-      } else {
-        // Add category_name to each product
-        const productsWithCategories = productsData.map(product => {
-          const category = hardcodedCategories.find(c => c.id === product.category_id);
-          return {
+      try {
+        const [{ data: categoriesData, error: categoriesError }, { data: productsData, error: productsError }] = await Promise.all([
+          supabase.from('categories').select('id, name').eq('is_active', true).order('name', { ascending: true }),
+          supabase
+            .from('products')
+            .select('*, categories ( name )')
+            .eq('is_active', true)
+        ]);
+
+        if (categoriesError) {
+          console.error('Error fetching categories:', categoriesError);
+        } else {
+          setCategories(categoriesData || []);
+        }
+
+        if (productsError) {
+          console.error('Error fetching products:', productsError);
+        } else {
+          const productsWithCategories = (productsData || []).map(product => ({
             ...product,
-            category_name: category ? category.name : 'Uncategorized'
-          };
-        });
-        
-        const sortedProducts = productsWithCategories.sort((a, b) => b.id - a.id);
-        setProducts(sortedProducts);
+            category_name: product.categories?.name || 'Uncategorized'
+          }));
+          const sortedProducts = productsWithCategories.sort((a, b) => b.id - a.id);
+          setProducts(sortedProducts);
+        }
+      } finally {
+        setIsInitializing(false);
       }
     };
 
@@ -197,6 +198,15 @@ function AppContent() {
 
   const cartCount = cart.reduce((acc, item) => acc + (item.qty || 0), 0);
 
+  if (isInitializing) {
+    return (
+      <div className="d-flex flex-column justify-content-center align-items-center" style={{ minHeight: '100vh' }}>
+        <div className="spinner-border text-danger" role="status" aria-hidden="true"></div>
+        <p className="mt-3 mb-0 fw-semibold">Loading...</p>
+      </div>
+    );
+  }
+
   return (
     <>
       {showNavbar && (
@@ -205,7 +215,7 @@ function AppContent() {
 
       <Routes>
         {/* Public Routes */}
-        <Route path="/" element={<Home addToCart={addToCart} products={products} categories={hardcodedCategories} />} />
+        <Route path="/" element={<Home addToCart={addToCart} products={products} categories={categories} />} />
         <Route path="/about" element={<About />} />
         <Route path="/contact" element={<Contact />} />
         <Route path="/wishlist" element={<Wishlist cart={cart} addToCart={addToCart} />} />

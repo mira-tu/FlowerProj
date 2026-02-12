@@ -15,6 +15,7 @@ const ProductCard = ({
   onEdit,
   onDelete,
   children,
+  statusBadge,
 }) => (
   <View style={styles.productCard}>
     <View style={styles.imageContainer}>
@@ -35,6 +36,8 @@ const ProductCard = ({
       <Text style={styles.productName}>{name}</Text>
       <Text style={styles.productCategory}>{category}</Text>
       {showDescription && description && <Text style={styles.productDescription}>{description}</Text>}
+
+      {statusBadge && <Text style={styles.unavailableBadge}>{statusBadge}</Text>}
 
       <View style={styles.priceRow}>
         <Text style={styles.productPrice}>{priceText}</Text>

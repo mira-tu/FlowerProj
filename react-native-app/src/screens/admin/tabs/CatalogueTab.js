@@ -11,11 +11,12 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import Toast from 'react-native-toast-message';
-import { productAPI, BASE_URL } from '../../../config/api';
+import { productAPI, categoryAPI, BASE_URL } from '../../../config/api';
 import styles from '../../AdminDashboard.styles';
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal';
 import ProductCard from '../components/ProductCard';
@@ -31,6 +32,8 @@ const CatalogueTab = () => {
   const [deleteModalVisible, setDeleteModalVisible] = useState(false); // New state
   const [productToDeleteId, setProductToDeleteId] = useState(null);   // New state
   const [categoryModalVisible, setCategoryModalVisible] = useState(false);
+  const [manageCategoriesVisible, setManageCategoriesVisible] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     price: '',
@@ -38,6 +41,7 @@ const CatalogueTab = () => {
     stock_quantity: '',
     description: '',
     image: null,
+    is_active: true,
   });
 
   useEffect(() => {
@@ -47,21 +51,17 @@ const CatalogueTab = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const productsRes = await productAPI.getAll();
+      const [productsRes, categoriesRes] = await Promise.all([
+        productAPI.getAll({ includeInactive: true }),
+        categoryAPI.getAll(),
+      ]);
 
-      const staticCategories = [
-        { id: 1, name: 'Sympathy' },
-        { id: 2, name: 'Graduation' },
-        { id: 3, name: 'All Souls Day' },
-        { id: 4, name: 'Valentines' },
-        { id: 5, name: 'Get Well Soon' },
-        { id: 6, name: 'Mothers Day' },
-      ];
-      const categoriesWithAll = [{ id: 0, name: 'All' }, ...staticCategories];
+      const activeCategories = categoriesRes.data.categories || [];
+      const categoriesWithAll = [{ id: 0, name: 'All' }, ...activeCategories];
       setCategories(categoriesWithAll);
 
       const productsWithCategoryNames = (productsRes.data.products || []).map(product => {
-        const category = staticCategories.find(c => c.id == product.category_id);
+        const category = activeCategories.find(c => c.id == product.category_id);
         return {
           ...product,
           category_name: category ? category.name : 'Uncategorized'
@@ -181,6 +181,7 @@ const CatalogueTab = () => {
         description: formData.description || '',
         category_id: formData.category_id || '1',
         image: formData.image, // Pass the image object from the state
+        is_active: formData.is_active,
       };
 
       if (editingProduct) {
@@ -214,6 +215,7 @@ const CatalogueTab = () => {
       stock_quantity: product.stock_quantity?.toString() || '0',
       description: product.description || '',
       image: product.image_url ? { uri: product.image_url.startsWith('http') ? product.image_url : `${BASE_URL}${product.image_url}` } : null,
+      is_active: product.is_active !== false,
     });
     setModalVisible(true);
   };
@@ -231,8 +233,45 @@ const CatalogueTab = () => {
       stock_quantity: '',
       description: '',
       image: null,
+      is_active: true,
     });
     setEditingProduct(null);
+  };
+
+
+  const addCategory = async () => {
+    if (!newCategoryName.trim()) {
+      Alert.alert('Validation', 'Category name is required');
+      return;
+    }
+
+    try {
+      await productAPI.createCategory(newCategoryName.trim());
+      setNewCategoryName('');
+      await loadData();
+      Toast.show({ type: 'success', text1: 'Category added' });
+    } catch (error) {
+      Alert.alert('Error', error.message || 'Failed to add category');
+    }
+  };
+
+  const deleteCategory = (id) => {
+    Alert.alert('Delete Category', 'Are you sure you want to delete this category?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await productAPI.deleteCategory(id);
+            await loadData();
+            Toast.show({ type: 'success', text1: 'Category deleted' });
+          } catch (error) {
+            Alert.alert('Error', error.message || 'Failed to delete category');
+          }
+        },
+      },
+    ]);
   };
 
   const renderProduct = ({ item }) => {
@@ -252,6 +291,7 @@ const CatalogueTab = () => {
         stockText={`Qty: ${item.stock_quantity || 0}`}
         showDescription
         showActions
+        statusBadge={item.is_active === false ? 'Unavailable' : null}
         onEdit={() => handleEdit(item)}
         onDelete={() => handleDelete(item.id)}
       />
@@ -277,6 +317,14 @@ const CatalogueTab = () => {
       >
         <Ionicons name="add" size={20} color="#fff" />
         <Text style={styles.addButtonText}>Add Product</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.addButton, { backgroundColor: '#6b7280', marginTop: -5 }]}
+        onPress={() => setManageCategoriesVisible(true)}
+      >
+        <Ionicons name="list" size={20} color="#fff" />
+        <Text style={styles.addButtonText}>Manage Categories</Text>
       </TouchableOpacity>
 
       {/* Category Filter Container */}
@@ -367,6 +415,16 @@ const CatalogueTab = () => {
                 <Ionicons name="chevron-down" size={20} color="#666" />
               </TouchableOpacity>
 
+              <View style={styles.toggleRow}>
+                <Text style={styles.inputLabel}>Available to Customers</Text>
+                <Switch
+                  value={formData.is_active}
+                  onValueChange={(value) => setFormData({ ...formData, is_active: value })}
+                  trackColor={{ false: '#d1d5db', true: '#f9a8d4' }}
+                  thumbColor={formData.is_active ? '#ec4899' : '#9ca3af'}
+                />
+              </View>
+
               <Text style={styles.inputLabel}>Description</Text>
               <Text style={styles.inputHelperText}>Max 20 words</Text>
               <TextInput
@@ -450,6 +508,45 @@ const CatalogueTab = () => {
             />
           </View>
         </TouchableOpacity>
+      </Modal>
+
+
+      <Modal visible={manageCategoriesVisible} animationType="slide" transparent>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Manage Categories</Text>
+              <TouchableOpacity onPress={() => setManageCategoriesVisible(false)}>
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.categoryManageRow}>
+              <TextInput
+                style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                placeholder="New category"
+                value={newCategoryName}
+                onChangeText={setNewCategoryName}
+              />
+              <TouchableOpacity style={styles.categoryAddBtn} onPress={addCategory}>
+                <Text style={styles.buttonText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+
+            <FlatList
+              data={categories.filter(c => c.id !== 0)}
+              keyExtractor={(item) => item.id.toString()}
+              renderItem={({ item }) => (
+                <View style={styles.categoryManageItem}>
+                  <Text style={styles.categoryPickerItemText}>{item.name}</Text>
+                  <TouchableOpacity onPress={() => deleteCategory(item.id)}>
+                    <Ionicons name="trash-outline" size={20} color="#ef4444" />
+                  </TouchableOpacity>
+                </View>
+              )}
+            />
+          </View>
+        </View>
       </Modal>
 
       {/* Delete Confirmation Modal */}

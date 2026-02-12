@@ -17,6 +17,7 @@ const Checkout = ({ setCart, user }) => {
     const [orderType, setOrderType] = useState('ecommerce');
     const [selectedPayment, setSelectedPayment] = useState('cod');
     const [deliveryMethod, setDeliveryMethod] = useState('delivery');
+    const [selectedPickupDate, setSelectedPickupDate] = useState('');
     const [selectedPickupTime, setSelectedPickupTime] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
     const [showQRModal, setShowQRModal] = useState(false);
@@ -156,8 +157,8 @@ const Checkout = ({ setCart, user }) => {
                 return;
             }
         
-            if (deliveryMethod === 'pickup' && !selectedPickupTime) {
-                alert('Please select a pickup time');
+            if (deliveryMethod === 'pickup' && (!selectedPickupDate || !selectedPickupTime)) {
+                alert('Please select a pickup date and time');
                 return;
             }
             
@@ -221,7 +222,7 @@ const Checkout = ({ setCart, user }) => {
                 total: total,
                 status: 'pending',
                 delivery_method: deliveryMethod,
-                pickup_time: deliveryMethod === 'pickup' ? selectedPickupTime : null,
+                pickup_time: deliveryMethod === 'pickup' ? `${selectedPickupDate} - ${selectedPickupTime}` : null,
                 receipt_url: uploadedReceiptUrl,
             };
         
@@ -292,7 +293,7 @@ const Checkout = ({ setCart, user }) => {
                     user_email: user.email,
                     delivery_method: deliveryMethod,
                     address: deliveryMethod === 'delivery' ? address : null,
-                    pickup_time: deliveryMethod === 'pickup' ? selectedPickupTime : null,
+                    pickup_time: deliveryMethod === 'pickup' ? `${selectedPickupDate} - ${selectedPickupTime}` : null,
                 },
             });
             if (functionError) {
@@ -391,8 +392,15 @@ const Checkout = ({ setCart, user }) => {
                                 <div className="mt-3 p-3 rounded" style={{ background: '#f8f9fa' }}>
                                     <label className="form-label fw-bold">
                                         <i className="fas fa-clock me-2" style={{ color: 'var(--shop-pink)' }}></i>
-                                        Select Pickup Time
+                                        Select Pickup Date & Time
                                     </label>
+                                    <input
+                                        type="date"
+                                        className="form-control mb-3"
+                                        value={selectedPickupDate}
+                                        min={new Date().toISOString().split('T')[0]}
+                                        onChange={(e) => setSelectedPickupDate(e.target.value)}
+                                    />
                                     <div className="d-flex flex-wrap gap-2">
                                         {pickupTimes.map(time => (
                                             <button
@@ -595,7 +603,7 @@ const Checkout = ({ setCart, user }) => {
                             {deliveryMethod === 'pickup' && selectedPickupTime && (
                                 <div className="small mb-2" style={{ color: 'var(--shop-pink)' }}>
                                     <i className="fas fa-clock me-1"></i>
-                                    Pickup: {selectedPickupTime}
+                                    Pickup: {selectedPickupDate} - {selectedPickupTime}
                                 </div>
                             )}
                             {shippingFee === 0 && deliveryMethod === 'delivery' && (

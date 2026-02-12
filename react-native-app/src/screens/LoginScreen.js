@@ -59,7 +59,7 @@ const LoginScreen = () => {
         Alert.alert('Access Denied', error.message);
       } else if (error.response) {
         // Server responded with error (e.g., from an API call)
-        errorMessage = error.response.data?.message || 'Invalid credentials';
+        errorMessage = error.response.data?.message || 'Invalid email or password.';
         Alert.alert('Login Failed', errorMessage);
       } else if (error.request) {
         // Request made but no response (network error)
@@ -67,7 +67,7 @@ const LoginScreen = () => {
         Alert.alert('Login Failed', errorMessage);
       } else {
         // Something else happened
-        errorMessage = error.message || 'An unexpected error occurred during login.';
+        errorMessage = error.message || 'Unable to sign in. Please try again.';
         Alert.alert('Login Failed', errorMessage);
       }
     } finally {
@@ -79,7 +79,7 @@ const LoginScreen = () => {
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
         <View style={styles.logoContainer}>
-          <Text style={styles.shopName}>Joccery's Flower Shop</Text>
+          <Text style={styles.shopName}>Jocerry's Flower Shop</Text>
           <Text style={styles.title}>Login</Text>
         </View>
         <Text style={styles.subtitle}>FlowerForge Admin Dashboard</Text>

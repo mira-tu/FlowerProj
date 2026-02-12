@@ -58,7 +58,11 @@ const Login = ({ onLogin }) => {
             navigate('/');
         } catch (err) {
             console.error('Login error:', err);
-            setError(err.message || 'Invalid email or password');
+            if (err?.message?.toLowerCase().includes('invalid login credentials')) {
+                setError('Invalid email or password');
+            } else {
+                setError(err.message || 'Unable to login. Please try again.');
+            }
         } finally {
             setLoading(false);
         }
@@ -95,7 +99,7 @@ const Login = ({ onLogin }) => {
                     <div className="auth-overlay"></div>
                     <div className="auth-text">
                         <h3>Welcome to</h3>
-                        <h2>Jocery's Flower Shop!</h2>
+                        <h2>Jocerry's Flower Shop!</h2>
                         <p>We're so happy to see you again.</p>
                     </div>
                 </div>
