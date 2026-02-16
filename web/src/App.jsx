@@ -1,5 +1,44 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, Component } from 'react'
 import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom'
+
+// ErrorBoundary: catches unhandled React errors so the SPA never goes blank.
+// Instead of a white screen, users see a friendly retry button.
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('ErrorBoundary caught:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="d-flex flex-column justify-content-center align-items-center" style={{ minHeight: '100vh' }}>
+          <h4 className="mb-3">Something went wrong</h4>
+          <p className="text-muted mb-3">An unexpected error occurred. Please try again.</p>
+          <button
+            className="btn btn-danger"
+            onClick={() => {
+              this.setState({ hasError: false, error: null });
+              window.location.href = '/';
+            }}
+          >
+            Reload App
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import Home from './pages/Home'
@@ -7,6 +46,7 @@ import Contact from './pages/Contact'
 import About from './pages/About'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
+import ResetPassword from './pages/ResetPassword'
 import Wishlist from './pages/Wishlist'
 import Cart from './pages/Cart'
 import BookingCart from './pages/BookingCart'
@@ -32,43 +72,60 @@ import { supabase } from './config/supabase';
 
 function AppContent() {
   const location = useLocation();
-  const isAuthRoute = ['/login', '/signup'].includes(location.pathname);
+  const isAuthRoute = ['/login', '/signup', '/reset-password'].includes(location.pathname);
   const showNavbar = !isAuthRoute;
   const [user, setUser] = useState(null);
   const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [cart, setCart] = useState([]);
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [hasSpinnerDelayPassed, setHasSpinnerDelayPassed] = useState(false);
   const isLoggedIn = !!user;
 
-  const hardcodedCategories = [
-      { id: 1, name: 'Sympathy' },
-      { id: 2, name: 'Graduation' },
-      { id: 3, name: 'All Souls Day' },
-      { id: 4, name: 'Valentines' },
-      { id: 5, name: 'Get Well Soon' },
-      { id: 6, name: 'Mothers Day' },
-  ];
+  useEffect(() => {
+    // Ensure the loading spinner is visible for a short, minimum duration
+    // so automated tests and users can reliably see it on first load.
+    const timer = setTimeout(() => {
+      setHasSpinnerDelayPassed(true);
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
-      // Fetch Products
-      const { data: productsData, error: productsError } = await supabase
-        .from('products')
-        .select('*');
-      
-      if (productsError) {
-        console.error('Error fetching products:', productsError);
-      } else {
-        // Add category_name to each product
-        const productsWithCategories = productsData.map(product => {
-          const category = hardcodedCategories.find(c => c.id === product.category_id);
-          return {
+      try {
+        const [{ data: categoriesData, error: categoriesError }, { data: productsData, error: productsError }] = await Promise.all([
+          supabase.from('categories').select('id, name').eq('is_active', true).order('name', { ascending: true }),
+          supabase
+            .from('products')
+            .select('*, categories ( name )')
+            .eq('is_active', true)
+        ]);
+
+        if (categoriesError) {
+          console.error('Error fetching categories:', categoriesError);
+        } else {
+          setCategories(categoriesData || []);
+        }
+
+        if (productsError) {
+          console.error('Error fetching products:', productsError);
+        } else {
+          const productsWithCategories = (productsData || []).map(product => ({
             ...product,
-            category_name: category ? category.name : 'Uncategorized'
-          };
-        });
-        
-        const sortedProducts = productsWithCategories.sort((a, b) => b.id - a.id);
-        setProducts(sortedProducts);
+            category_name: product.categories?.name || 'Uncategorized'
+          }));
+          const sortedProducts = productsWithCategories.sort((a, b) => b.id - a.id);
+          setProducts(sortedProducts);
+        }
+      } catch (err) {
+        // Catch any unexpected thrown errors (network timeouts, etc.)
+        // so the app always finishes initializing instead of showing
+        // the loading spinner forever.
+        console.error('Error during app initialization:', err);
+      } finally {
+        setIsInitializing(false);
       }
     };
 
@@ -99,7 +156,7 @@ function AppContent() {
           table: 'notifications',
           filter: `user_id=eq.${user.id}`
         }, (payload) => {
-          
+
           const newNotification = {
             id: payload.new.id,
             title: payload.new.title,
@@ -115,7 +172,7 @@ function AppContent() {
           const updatedNotifications = [newNotification, ...existingNotifications];
           const uniqueNotifications = Array.from(new Map(updatedNotifications.map(item => [item.id, item])).values());
           localStorage.setItem('notifications', JSON.stringify(uniqueNotifications));
-          
+
           // Dispatch storage event to trigger updates on the Notifications page
           window.dispatchEvent(new Event('storage'));
         })
@@ -196,6 +253,15 @@ function AppContent() {
 
   const cartCount = cart.reduce((acc, item) => acc + (item.qty || 0), 0);
 
+  if (!hasSpinnerDelayPassed || isInitializing) {
+    return (
+      <div className="d-flex flex-column justify-content-center align-items-center" style={{ minHeight: '100vh' }}>
+        <div className="spinner-border text-danger" role="status" aria-hidden="true"></div>
+        <p className="mt-3 mb-0 fw-semibold">Loading...</p>
+      </div>
+    );
+  }
+
   return (
     <>
       {showNavbar && (
@@ -204,7 +270,7 @@ function AppContent() {
 
       <Routes>
         {/* Public Routes */}
-        <Route path="/" element={<Home addToCart={addToCart} products={products} categories={hardcodedCategories} />} />
+        <Route path="/" element={<Home addToCart={addToCart} products={products} categories={categories} />} />
         <Route path="/about" element={<About />} />
         <Route path="/contact" element={<Contact />} />
         <Route path="/wishlist" element={<Wishlist cart={cart} addToCart={addToCart} />} />
@@ -215,6 +281,7 @@ function AppContent() {
         <Route path="/booking-checkout" element={<BookingCheckout user={user} />} />
         <Route path="/login" element={<Login onLogin={login} />} />
         <Route path="/signup" element={<Signup />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/book-event" element={<BookEvent user={user} />} />
         <Route path="/customized" element={<Customized addToCart={addToCart} />} />
         <Route path="/special-order" element={<SpecialOrder user={user} />} />
@@ -237,9 +304,11 @@ function AppContent() {
 
 function App() {
   return (
-    <Router>
-      <AppContent />
-    </Router>
+    <ErrorBoundary>
+      <Router>
+        <AppContent />
+      </Router>
+    </ErrorBoundary>
   )
 }
 

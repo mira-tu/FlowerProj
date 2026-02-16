@@ -35,6 +35,7 @@ const BookEvent = ({ user }) => {
     const [barangays, setBarangays] = useState([]);
     const [addressLoading, setAddressLoading] = useState(false);
     const [selectedBarangay, setSelectedBarangay] = useState(null);
+    const [showReviewModal, setShowReviewModal] = useState(false);
 
     useEffect(() => {
         if (user) {
@@ -200,16 +201,28 @@ const BookEvent = ({ user }) => {
                     notes: formData.details,
                 }
             };
-            
+
+            // Store prepared inquiry and open a review modal so the user
+            // can confirm before adding to the booking cart.
             localStorage.setItem('bookingInquiry', JSON.stringify(inquiryData));
-            navigate('/booking-cart');
+            setShowReviewModal(true);
 
         } catch (error) {
             console.error('Error preparing event booking:', error);
             setStatus({ type: 'error', message: 'Failed to prepare your booking. Please try again.' });
-        } finally {
             setIsSubmitting(false);
         }
+    };
+
+    const handleConfirmReview = () => {
+        setIsSubmitting(false);
+        setShowReviewModal(false);
+        navigate('/booking-cart');
+    };
+
+    const handleCancelReview = () => {
+        setIsSubmitting(false);
+        setShowReviewModal(false);
     };
 
     const selectStyles = {
@@ -373,6 +386,36 @@ const BookEvent = ({ user }) => {
                                 onClick={handleSaveAddress}
                             >
                                 Save Address
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showReviewModal && (
+                <div className="modal-overlay" onClick={handleCancelReview}>
+                    <div className="modal-content-custom" onClick={e => e.stopPropagation()}>
+                        <div className="modal-header-custom">
+                            <h4>Review Inquiry</h4>
+                            <button className="modal-close" onClick={handleCancelReview}>
+                                <i className="fas fa-times"></i>
+                            </button>
+                        </div>
+                        <div className="modal-body-custom">
+                            <p className="mb-2"><strong>Recipient:</strong> {formData.recipientName}</p>
+                            <p className="mb-2"><strong>Contact:</strong> {formData.contactNumber}</p>
+                            <p className="mb-2"><strong>Occasion:</strong> {formData.eventType === 'Other' ? formData.otherOccasion : formData.eventType}</p>
+                            <p className="mb-2"><strong>Event Date:</strong> {formData.eventDate}</p>
+                            <p className="mb-2"><strong>Venue:</strong> {formData.venue}</p>
+                            {formData.details && (
+                                <p className="mb-3"><strong>Notes:</strong> {formData.details}</p>
+                            )}
+                            <button
+                                className="btn w-100 mt-3"
+                                style={{ background: 'var(--shop-pink)', color: 'white' }}
+                                onClick={handleConfirmReview}
+                            >
+                                Add to Booking Cart
                             </button>
                         </div>
                     </div>

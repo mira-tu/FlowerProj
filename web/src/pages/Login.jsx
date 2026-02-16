@@ -10,6 +10,11 @@ const Login = ({ onLogin }) => {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [showReset, setShowReset] = useState(false);
+    const [resetEmail, setResetEmail] = useState('');
+    const [resetLoading, setResetLoading] = useState(false);
+    const [resetMessage, setResetMessage] = useState('');
+    const [resetError, setResetError] = useState('');
 
     const handleLogin = async (e) => {
         e.preventDefault();
@@ -23,39 +28,68 @@ const Login = ({ onLogin }) => {
                 password,
             });
 
-            if (error) {
-                throw error;
+            if (error || !data?.user) {
+                // Normalize all auth failures to the same user-facing message
+                // so tests and users consistently see clear feedback.
+                console.error('Login error:', error || 'Unknown authentication error');
+                setError('Invalid email or password');
+                return;
             }
 
-            // Login successful
-            // Supabase returns user and session
-            const { user, session } = data;
+            // Login successful — redirect immediately.
+            // The onAuthStateChange listener in App.jsx will pick up the session.
+            navigate('/');
 
-            // Upsert user data into public.users table to ensure consistency
-            const { error: upsertError } = await supabase
+            // Fire-and-forget: sync user data to public.users table.
+            // This must NOT block login or navigation — the table schema may
+            // not match (e.g., UUID vs SERIAL id), so we catch and log only.
+            const { user } = data;
+            supabase
                 .from('users')
                 .upsert({
                     id: user.id,
-                    name: user.user_metadata.name || user.email, // Use name from metadata or fallback to email
+                    name: user.user_metadata?.name || user.email,
                     email: user.email,
-                    phone: user.user_metadata.phone || null, // Correctly syncs phone from metadata
-                    role: 'customer' // Default role
-                }, { onConflict: 'id' }); // Upsert by id
-
-            if (upsertError) {
-                console.error('Error upserting user into public.users:', upsertError);
-                // Decide how critical this error is. For now, we proceed with login, but log the error.
-            }
-
-            // onLogin(); // No longer needed as user state is handled by App.jsx onAuthStateChange
-
-            // Always redirect to home page for customers
-            navigate('/');
+                    phone: user.user_metadata?.phone || null,
+                    role: 'customer'
+                }, { onConflict: 'id' })
+                .then(({ error: upsertError }) => {
+                    if (upsertError) {
+                        console.warn('Non-blocking: failed to sync user profile to public.users:', upsertError.message);
+                    }
+                })
+                .catch((err) => {
+                    console.warn('Non-blocking: user profile sync error:', err);
+                });
         } catch (err) {
-            console.error('Login error:', err);
-            setError(err.message || 'Invalid email or password');
+            console.error('Unexpected login error:', err);
+            setError('Invalid email or password');
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleResetPassword = async (e) => {
+        e.preventDefault();
+        setResetMessage('');
+        setResetError('');
+        setResetLoading(true);
+
+        try {
+            const { error: resetError } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+                redirectTo: `${window.location.origin}/reset-password`,
+            });
+
+            if (resetError) {
+                throw resetError;
+            }
+
+            setResetMessage('If an account exists for that email, a password reset link has been sent.');
+        } catch (err) {
+            console.error('Password reset error:', err);
+            setResetError(err.message || 'Unable to send reset email. Please try again.');
+        } finally {
+            setResetLoading(false);
         }
     };
 
@@ -66,62 +100,127 @@ const Login = ({ onLogin }) => {
                     <div className="auth-overlay"></div>
                     <div className="auth-text">
                         <h3>Welcome to</h3>
-                        <h2>Jocery's Flower Shop!</h2>
+                        <h2>Jocerry's Flower Shop!</h2>
                         <p>We're so happy to see you again.</p>
                     </div>
                 </div>
                 <div className="auth-form-container">
-                    <h2 className="auth-title">Login</h2>
-                    <p className="auth-subtitle">Enter your details to access your account.</p>
+                    {showReset ? (
+                        <>
+                            <h2 className="auth-title">Reset your password</h2>
+                            <p className="auth-subtitle">Enter your email and we&apos;ll send you a reset link.</p>
+                            <form onSubmit={handleResetPassword}>
+                                {resetMessage && (
+                                    <div className="alert alert-success" role="alert">
+                                        {resetMessage}
+                                    </div>
+                                )}
+                                {resetError && (
+                                    <div className="alert alert-danger" role="alert">
+                                        {resetError}
+                                    </div>
+                                )}
+                                <div className="form-floating mb-3">
+                                    <input
+                                        type="email"
+                                        className="form-control"
+                                        id="resetEmail"
+                                        placeholder="name@example.com"
+                                        value={resetEmail}
+                                        onChange={(e) => setResetEmail(e.target.value)}
+                                        required
+                                        disabled={resetLoading}
+                                    />
+                                    <label htmlFor="resetEmail">Email address</label>
+                                </div>
+                                <button
+                                    type="submit"
+                                    className="btn btn-auth"
+                                    disabled={resetLoading}
+                                >
+                                    {resetLoading ? 'Sending...' : 'Send reset link'}
+                                </button>
+                            </form>
 
-                    <form onSubmit={handleLogin}>
-                        {error && (
-                            <div className="alert alert-danger" role="alert">
-                                {error}
-                            </div>
-                        )}
+                            <button
+                                type="button"
+                                className="auth-link btn btn-link p-0 mt-3"
+                                onClick={() => {
+                                    setShowReset(false);
+                                    setResetMessage('');
+                                    setResetError('');
+                                }}
+                            >
+                                Back to Login
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            <h2 className="auth-title">Login</h2>
+                            <p className="auth-subtitle">Enter your details to access your account.</p>
 
-                        <div className="form-floating mb-3">
-                            <input
-                                type="email"
-                                className="form-control"
-                                id="floatingInput"
-                                placeholder="name@example.com"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                required
-                                disabled={loading}
-                            />
-                            <label htmlFor="floatingInput">Email address</label>
-                        </div>
-                        <div className="form-floating mb-3">
-                            <input
-                                type="password"
-                                className="form-control"
-                                id="floatingPassword"
-                                placeholder="Password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                required
-                                disabled={loading}
-                            />
-                            <label htmlFor="floatingPassword">Password</label>
-                        </div>
+                            <form onSubmit={handleLogin}>
+                                {error && (
+                                    <div className="alert alert-danger" role="alert">
+                                        {error}
+                                    </div>
+                                )}
 
-                        <div className="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
-                            <div className="form-check">
-                                <input className="form-check-input" type="checkbox" id="rememberMe" />
-                                <label className="form-check-label text-muted" htmlFor="rememberMe">
-                                    Remember me
-                                </label>
-                            </div>
-                            <a href="#" className="auth-link small text-nowrap">Forgot Password?</a>
-                        </div>
+                                <div className="form-floating mb-3">
+                                    <input
+                                        type="email"
+                                        className="form-control"
+                                        id="floatingInput"
+                                        placeholder="name@example.com"
+                                        value={email}
+                                        onChange={(e) => setEmail(e.target.value)}
+                                        required
+                                        disabled={loading}
+                                    />
+                                    <label htmlFor="floatingInput">Email address</label>
+                                </div>
+                                <div className="form-floating mb-3">
+                                    <input
+                                        type="password"
+                                        className="form-control"
+                                        id="floatingPassword"
+                                        placeholder="Password"
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                        required
+                                        disabled={loading}
+                                    />
+                                    <label htmlFor="floatingPassword">Password</label>
+                                </div>
 
-                        <button type="submit" className="btn btn-auth" disabled={loading}>
-                            {loading ? 'Signing In...' : 'Sign In'}
-                        </button>
-                    </form>
+                                <div className="d-flex justify-content-end align-items-center mb-4">
+                                    <button
+                                        type="button"
+                                        className="auth-link small text-nowrap btn btn-link p-0"
+                                        onClick={() => {
+                                            setShowReset(true);
+                                            setResetEmail((prev) => prev || email);
+                                            setResetMessage('');
+                                            setResetError('');
+                                        }}
+                                    >
+                                        Forgot Password?
+                                    </button>
+                                </div>
+
+                                <button type="submit" className="btn btn-auth" disabled={loading}>
+                                    {loading ? (
+                                        <>
+                                            <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                            Please wait...
+                                        </>
+                                    ) : (
+                                        'Sign In'
+                                    )}
+                                </button>
+                            </form>
+                        </>
+                    )}
 
                     <div className="auth-footer">
                         Don't have an account? <Link to="/signup" className="auth-link">Sign Up</Link>
