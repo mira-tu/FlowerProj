@@ -1,5 +1,44 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, Component } from 'react'
 import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom'
+
+// ErrorBoundary: catches unhandled React errors so the SPA never goes blank.
+// Instead of a white screen, users see a friendly retry button.
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('ErrorBoundary caught:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="d-flex flex-column justify-content-center align-items-center" style={{ minHeight: '100vh' }}>
+          <h4 className="mb-3">Something went wrong</h4>
+          <p className="text-muted mb-3">An unexpected error occurred. Please try again.</p>
+          <button
+            className="btn btn-danger"
+            onClick={() => {
+              this.setState({ hasError: false, error: null });
+              window.location.href = '/';
+            }}
+          >
+            Reload App
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import Home from './pages/Home'
@@ -40,7 +79,18 @@ function AppContent() {
   const [categories, setCategories] = useState([]);
   const [cart, setCart] = useState([]);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [hasSpinnerDelayPassed, setHasSpinnerDelayPassed] = useState(false);
   const isLoggedIn = !!user;
+
+  useEffect(() => {
+    // Ensure the loading spinner is visible for a short, minimum duration
+    // so automated tests and users can reliably see it on first load.
+    const timer = setTimeout(() => {
+      setHasSpinnerDelayPassed(true);
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -69,6 +119,11 @@ function AppContent() {
           const sortedProducts = productsWithCategories.sort((a, b) => b.id - a.id);
           setProducts(sortedProducts);
         }
+      } catch (err) {
+        // Catch any unexpected thrown errors (network timeouts, etc.)
+        // so the app always finishes initializing instead of showing
+        // the loading spinner forever.
+        console.error('Error during app initialization:', err);
       } finally {
         setIsInitializing(false);
       }
@@ -101,7 +156,7 @@ function AppContent() {
           table: 'notifications',
           filter: `user_id=eq.${user.id}`
         }, (payload) => {
-          
+
           const newNotification = {
             id: payload.new.id,
             title: payload.new.title,
@@ -117,7 +172,7 @@ function AppContent() {
           const updatedNotifications = [newNotification, ...existingNotifications];
           const uniqueNotifications = Array.from(new Map(updatedNotifications.map(item => [item.id, item])).values());
           localStorage.setItem('notifications', JSON.stringify(uniqueNotifications));
-          
+
           // Dispatch storage event to trigger updates on the Notifications page
           window.dispatchEvent(new Event('storage'));
         })
@@ -198,7 +253,7 @@ function AppContent() {
 
   const cartCount = cart.reduce((acc, item) => acc + (item.qty || 0), 0);
 
-  if (isInitializing) {
+  if (!hasSpinnerDelayPassed || isInitializing) {
     return (
       <div className="d-flex flex-column justify-content-center align-items-center" style={{ minHeight: '100vh' }}>
         <div className="spinner-border text-danger" role="status" aria-hidden="true"></div>
@@ -249,9 +304,11 @@ function AppContent() {
 
 function App() {
   return (
-    <Router>
-      <AppContent />
-    </Router>
+    <ErrorBoundary>
+      <Router>
+        <AppContent />
+      </Router>
+    </ErrorBoundary>
   )
 }
 

@@ -18,14 +18,16 @@ const LoginScreen = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert('Error', 'Please enter email and password');
+      setErrorMessage('Please enter email and password');
       return;
     }
 
     setLoading(true);
+    setErrorMessage('');
 
     try {
       console.log('Attempting login...');
@@ -47,29 +49,28 @@ const LoginScreen = () => {
       console.error('Error response:', error.response);
       console.error('Error message:', error.message);
 
-      let errorMessage = 'Could not connect to server.';
+      let errMsg = 'Could not connect to server.';
 
       // Check for specific Supabase error messages or custom errors from authAPI
       if (error.message.includes('AuthApiError')) {
         // Supabase authentication errors
-        errorMessage = error.message.replace('AuthApiError: ', '');
-        Alert.alert('Login Failed', errorMessage);
+        errMsg = error.message.replace('AuthApiError: ', '');
       } else if (error.message.includes('Access Denied')) {
         // Custom error for role-based access denied
-        Alert.alert('Access Denied', error.message);
+        errMsg = error.message;
       } else if (error.response) {
         // Server responded with error (e.g., from an API call)
-        errorMessage = error.response.data?.message || 'Invalid email or password.';
-        Alert.alert('Login Failed', errorMessage);
+        errMsg = error.response.data?.message || 'Invalid email or password.';
       } else if (error.request) {
         // Request made but no response (network error)
-        errorMessage = 'No response from server. Check your internet connection.';
-        Alert.alert('Login Failed', errorMessage);
+        errMsg = 'No response from server. Check your internet connection.';
       } else {
         // Something else happened
-        errorMessage = error.message || 'Unable to sign in. Please try again.';
-        Alert.alert('Login Failed', errorMessage);
+        errMsg = error.message || 'Unable to sign in. Please try again.';
       }
+      setErrorMessage(errMsg);
+      // Optional: keep Alert if desired, but inline is better for feedback
+      // Alert.alert('Login Failed', errMsg);
     } finally {
       setLoading(false);
     }
@@ -83,6 +84,12 @@ const LoginScreen = () => {
           <Text style={styles.title}>Login</Text>
         </View>
         <Text style={styles.subtitle}>FlowerForge Admin Dashboard</Text>
+
+        {errorMessage ? (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>{errorMessage}</Text>
+          </View>
+        ) : null}
 
         <TextInput
           style={styles.input}
@@ -112,13 +119,14 @@ const LoginScreen = () => {
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color="#fff" />
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <ActivityIndicator color="#fff" />
+              <Text style={[styles.buttonText, { marginLeft: 10 }]}>Please wait...</Text>
+            </View>
           ) : (
             <Text style={styles.buttonText}>Login</Text>
           )}
         </TouchableOpacity>
-
-        <Text style={styles.hint}>Use: admin@flower.com / pa55w0rd</Text>
       </View>
     </SafeAreaView>
   );
@@ -191,12 +199,19 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.6,
   },
-  hint: {
-    marginTop: 20,
+  errorContainer: {
+    backgroundColor: '#f8d7da',
+    borderColor: '#f5c6cb',
+    borderWidth: 1,
+    borderRadius: 5,
+    padding: 10,
+    marginBottom: 15,
+    width: '100%',
+  },
+  errorText: {
+    color: '#721c24',
     textAlign: 'center',
-    color: '#9ca3af',
     fontSize: 14,
-    fontWeight: '500',
   },
 });
 

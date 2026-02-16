@@ -29,11 +29,16 @@ const CatalogueTab = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
-  const [deleteModalVisible, setDeleteModalVisible] = useState(false); // New state
-  const [productToDeleteId, setProductToDeleteId] = useState(null);   // New state
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false); // For Products
+  const [productToDeleteId, setProductToDeleteId] = useState(null);   // For Products
+
+  const [categoryDeleteModalVisible, setCategoryDeleteModalVisible] = useState(false); // For Categories
+  const [categoryToDeleteId, setCategoryToDeleteId] = useState(null); // For Categories
+
   const [categoryModalVisible, setCategoryModalVisible] = useState(false);
   const [manageCategoriesVisible, setManageCategoriesVisible] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [editingCategoryId, setEditingCategoryId] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
     price: '',
@@ -50,6 +55,7 @@ const CatalogueTab = () => {
 
   const loadData = async () => {
     setLoading(true);
+    console.log('Loading data (CatalogueTab)...');
     try {
       const [productsRes, categoriesRes] = await Promise.all([
         productAPI.getAll({ includeInactive: true }),
@@ -239,6 +245,16 @@ const CatalogueTab = () => {
   };
 
 
+  const startCategoryEdit = (category) => {
+    setNewCategoryName(category.name);
+    setEditingCategoryId(category.id);
+  };
+
+  const cancelCategoryEdit = () => {
+    setNewCategoryName('');
+    setEditingCategoryId(null);
+  };
+
   const addCategory = async () => {
     if (!newCategoryName.trim()) {
       Alert.alert('Validation', 'Category name is required');
@@ -246,33 +262,37 @@ const CatalogueTab = () => {
     }
 
     try {
-      await productAPI.createCategory(newCategoryName.trim());
+      if (editingCategoryId) {
+        console.log('Updating category:', editingCategoryId, 'to', newCategoryName.trim());
+        await categoryAPI.updateCategory(editingCategoryId, newCategoryName.trim());
+        console.log('Category updated successfully');
+        Toast.show({ type: 'success', text1: 'Category updated' });
+        setEditingCategoryId(null);
+      } else {
+        console.log('Adding category with name:', newCategoryName.trim());
+        await categoryAPI.createCategory(newCategoryName.trim());
+        console.log('Category added successfully');
+        Toast.show({ type: 'success', text1: 'Category added' });
+      }
       setNewCategoryName('');
       await loadData();
-      Toast.show({ type: 'success', text1: 'Category added' });
     } catch (error) {
-      Alert.alert('Error', error.message || 'Failed to add category');
+      console.error('Category Action Error:', JSON.stringify(error, null, 2));
+      const action = editingCategoryId ? 'update' : 'add';
+      if (error.code === '42501' || error.message?.includes('permission denied') || error.status === 403) {
+        Alert.alert('Permission Error', `Database permissions (RLS) are blocking this action.\nPlease check permissions for '${action}' on 'categories' table.`);
+      } else {
+        Alert.alert('Error', error.message || `Failed to ${action} category`);
+      }
     }
   };
 
-  const deleteCategory = (id) => {
-    Alert.alert('Delete Category', 'Are you sure you want to delete this category?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await productAPI.deleteCategory(id);
-            await loadData();
-            Toast.show({ type: 'success', text1: 'Category deleted' });
-          } catch (error) {
-            Alert.alert('Error', error.message || 'Failed to delete category');
-          }
-        },
-      },
-    ]);
+  const promptDeleteCategory = (id) => {
+    setCategoryToDeleteId(id);
+    setCategoryDeleteModalVisible(true);
   };
+
+  // const deleteCategory = (id) => { ... OLD ... }
 
   const renderProduct = ({ item }) => {
     const imageUrl = item.image_url
@@ -524,13 +544,21 @@ const CatalogueTab = () => {
             <View style={styles.categoryManageRow}>
               <TextInput
                 style={[styles.input, { flex: 1, marginBottom: 0 }]}
-                placeholder="New category"
+                placeholder={editingCategoryId ? "Update name" : "New category"}
                 value={newCategoryName}
                 onChangeText={setNewCategoryName}
               />
               <TouchableOpacity style={styles.categoryAddBtn} onPress={addCategory}>
-                <Text style={styles.buttonText}>Add</Text>
+                <Text style={styles.buttonText}>{editingCategoryId ? 'Save' : 'Add'}</Text>
               </TouchableOpacity>
+              {editingCategoryId && (
+                <TouchableOpacity
+                  style={[styles.categoryAddBtn, { backgroundColor: '#ef4444', marginLeft: 8 }]}
+                  onPress={cancelCategoryEdit}
+                >
+                  <Ionicons name="close" size={20} color="#fff" />
+                </TouchableOpacity>
+              )}
             </View>
 
             <FlatList
@@ -539,9 +567,14 @@ const CatalogueTab = () => {
               renderItem={({ item }) => (
                 <View style={styles.categoryManageItem}>
                   <Text style={styles.categoryPickerItemText}>{item.name}</Text>
-                  <TouchableOpacity onPress={() => deleteCategory(item.id)}>
-                    <Ionicons name="trash-outline" size={20} color="#ef4444" />
-                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <TouchableOpacity onPress={() => startCategoryEdit(item)} style={{ padding: 8 }}>
+                      <Ionicons name="pencil" size={20} color="#3b82f6" />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => promptDeleteCategory(item.id)} style={{ padding: 8 }}>
+                      <Ionicons name="trash-outline" size={20} color="#ef4444" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
               )}
             />
@@ -567,6 +600,35 @@ const CatalogueTab = () => {
         }}
         title="Confirm Deletion"
         message="Are you sure you want to delete this product?"
+      />
+
+      {/* Category Delete Confirmation Modal */}
+      <ConfirmDeleteModal
+        visible={categoryDeleteModalVisible}
+        onClose={() => setCategoryDeleteModalVisible(false)}
+        onConfirm={async () => {
+          setCategoryDeleteModalVisible(false);
+          if (categoryToDeleteId) {
+            try {
+              console.log('Deleting category:', categoryToDeleteId);
+              await categoryAPI.deleteCategory(categoryToDeleteId);
+              console.log('Category deleted successfully');
+              Toast.show({ type: 'success', text1: 'Category deleted' });
+              await loadData();
+            } catch (error) {
+              console.error('Delete Category Error:', JSON.stringify(error, null, 2));
+              if (error.code === '23503') { // Foreign Key Constraint
+                Alert.alert('Cannot Delete', 'This category cannot be deleted because it contains products. Please delete or move the products first.');
+              } else if (error.code === '42501' || error.message?.includes('permission denied')) { // RLS
+                Alert.alert('Permission Error', 'Database permissions (RLS) are blocking this action. Ensure you have a DELETE policy enabled.');
+              } else {
+                Alert.alert('Error', error.message || 'Failed to delete category');
+              }
+            }
+          }
+        }}
+        title="Delete Category"
+        message="Are you sure you want to delete this category? This action cannot be undone."
       />
     </View>
   );

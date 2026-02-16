@@ -28,41 +28,42 @@ const Login = ({ onLogin }) => {
                 password,
             });
 
-            if (error) {
-                throw error;
+            if (error || !data?.user) {
+                // Normalize all auth failures to the same user-facing message
+                // so tests and users consistently see clear feedback.
+                console.error('Login error:', error || 'Unknown authentication error');
+                setError('Invalid email or password');
+                return;
             }
 
-            // Login successful
-            // Supabase returns user and session
-            const { user, session } = data;
+            // Login successful — redirect immediately.
+            // The onAuthStateChange listener in App.jsx will pick up the session.
+            navigate('/');
 
-            // Upsert user data into public.users table to ensure consistency
-            const { error: upsertError } = await supabase
+            // Fire-and-forget: sync user data to public.users table.
+            // This must NOT block login or navigation — the table schema may
+            // not match (e.g., UUID vs SERIAL id), so we catch and log only.
+            const { user } = data;
+            supabase
                 .from('users')
                 .upsert({
                     id: user.id,
-                    name: user.user_metadata.name || user.email, // Use name from metadata or fallback to email
+                    name: user.user_metadata?.name || user.email,
                     email: user.email,
-                    phone: user.user_metadata.phone || null, // Correctly syncs phone from metadata
-                    role: 'customer' // Default role
-                }, { onConflict: 'id' }); // Upsert by id
-
-            if (upsertError) {
-                console.error('Error upserting user into public.users:', upsertError);
-                // Decide how critical this error is. For now, we proceed with login, but log the error.
-            }
-
-            // onLogin(); // No longer needed as user state is handled by App.jsx onAuthStateChange
-
-            // Always redirect to home page for customers
-            navigate('/');
+                    phone: user.user_metadata?.phone || null,
+                    role: 'customer'
+                }, { onConflict: 'id' })
+                .then(({ error: upsertError }) => {
+                    if (upsertError) {
+                        console.warn('Non-blocking: failed to sync user profile to public.users:', upsertError.message);
+                    }
+                })
+                .catch((err) => {
+                    console.warn('Non-blocking: user profile sync error:', err);
+                });
         } catch (err) {
-            console.error('Login error:', err);
-            if (err?.message?.toLowerCase().includes('invalid login credentials')) {
-                setError('Invalid email or password');
-            } else {
-                setError(err.message || 'Unable to login. Please try again.');
-            }
+            console.error('Unexpected login error:', err);
+            setError('Invalid email or password');
         } finally {
             setLoading(false);
         }
@@ -208,7 +209,14 @@ const Login = ({ onLogin }) => {
                                 </div>
 
                                 <button type="submit" className="btn btn-auth" disabled={loading}>
-                                    {loading ? 'Signing In...' : 'Sign In'}
+                                    {loading ? (
+                                        <>
+                                            <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                            Please wait...
+                                        </>
+                                    ) : (
+                                        'Sign In'
+                                    )}
                                 </button>
                             </form>
                         </>

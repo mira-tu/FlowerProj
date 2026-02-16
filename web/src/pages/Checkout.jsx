@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import '../styles/Shop.css';
 import { supabase } from '../config/supabase';
+import InfoModal from '../components/InfoModal';
 import qrCodeImage from '../assets/qr-code-1.jpg';
 
 const paymentMethods = [
@@ -23,6 +24,7 @@ const Checkout = ({ setCart, user }) => {
     const [showQRModal, setShowQRModal] = useState(false);
     const [receiptFile, setReceiptFile] = useState(null);
     const [receiptPreview, setReceiptPreview] = useState(null);
+    const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null });
 
     const [address, setAddress] = useState({
         name: '',
@@ -64,7 +66,7 @@ const Checkout = ({ setCart, user }) => {
                     console.error('Error fetching addresses:', error);
                     return;
                 }
-                
+
                 setSavedAddresses(data);
 
                 if (data && data.length > 0) {
@@ -92,7 +94,7 @@ const Checkout = ({ setCart, user }) => {
 
         fetchAddresses();
     }, [user, handleAddressSelect]);
-    
+
     useEffect(() => {
         const fetchFee = async () => {
             if (deliveryMethod === 'delivery' && address.barangay) {
@@ -151,93 +153,98 @@ const Checkout = ({ setCart, user }) => {
     };
 
     const handlePlaceOrder = async () => {
-            if (!user) {
-                alert('You must be logged in to place an order. Please log in or sign up.');
-                navigate('/login');
-                return;
-            }
-        
-            if (deliveryMethod === 'pickup' && (!selectedPickupDate || !selectedPickupTime)) {
-                alert('Please select a pickup date and time');
-                return;
-            }
-            
-            if (deliveryMethod === 'delivery' && !selectedAddressId) {
-                alert('Please select a saved address for delivery.');
+        if (!user) {
+            setInfoModal({
+                show: true,
+                title: 'Login Required',
+                message: 'You must be logged in to place an order.',
+                linkTo: '/login',
+                linkText: 'Log In'
+            });
+            return;
+        }
+
+        if (deliveryMethod === 'pickup' && (!selectedPickupDate || !selectedPickupTime)) {
+            alert('Please select a pickup date and time');
+            return;
+        }
+
+        if (deliveryMethod === 'delivery' && !selectedAddressId) {
+            alert('Please select a saved address for delivery.');
+            setIsProcessing(false);
+            return;
+        }
+
+        if (selectedPayment === 'gcash' && !receiptFile) {
+            alert('Please upload your GCash payment receipt');
+            return;
+        }
+
+        setIsProcessing(true);
+
+        let finalAddressId = selectedAddressId;
+
+        let uploadedReceiptUrl = null;
+        if (receiptFile && selectedPayment === 'gcash') {
+            const fileExt = receiptFile.name.split('.').pop();
+            const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+            const filePath = `public/${fileName}`;
+
+            const { error: uploadError } = await supabase.storage
+                .from('receipts')
+                .upload(filePath, receiptFile);
+
+            if (uploadError) {
+                console.error('Error uploading receipt:', uploadError);
+                alert('There was an error uploading your receipt. Please try again.');
                 setIsProcessing(false);
                 return;
             }
-        
-            if (selectedPayment === 'gcash' && !receiptFile) {
-                alert('Please upload your GCash payment receipt');
-                return;
-            }
-        
-            setIsProcessing(true);
-        
-            let finalAddressId = selectedAddressId;
-        
-            let uploadedReceiptUrl = null;
-            if (receiptFile && selectedPayment === 'gcash') {
-                const fileExt = receiptFile.name.split('.').pop();
-                const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-                const filePath = `public/${fileName}`;
-        
-                const { error: uploadError } = await supabase.storage
-                    .from('receipts')
-                    .upload(filePath, receiptFile);
-        
-                if (uploadError) {
-                    console.error('Error uploading receipt:', uploadError);
-                    alert('There was an error uploading your receipt. Please try again.');
-                    setIsProcessing(false);
-                    return;
-                }
-        
-                const { data: urlData } = supabase.storage
-                    .from('receipts')
-                    .getPublicUrl(filePath);
-                
-                if (!urlData || !urlData.publicUrl) {
-                    console.error('Error getting public URL for receipt');
-                    alert('Could not retrieve receipt URL. Please try again.');
-                    setIsProcessing(false);
-                    return;
-                }
-                
-                uploadedReceiptUrl = urlData.publicUrl;
-            }
-        
-            const order_number = `JFS-${user.id.substring(0, 8)}-${Date.now()}`;
-        
-            const newOrder = {
-                created_at: new Date().toISOString(),
-                order_number: order_number,
-                user_id: user.id,
-                address_id: deliveryMethod === 'delivery' ? finalAddressId : null,
-                payment_method: selectedPayment,
-                payment_status: selectedPayment === 'cod' ? 'to_pay' : 'waiting_for_confirmation',
-                subtotal: subtotal,
-                shipping_fee: shippingFee,
-                total: total,
-                status: 'pending',
-                delivery_method: deliveryMethod,
-                pickup_time: deliveryMethod === 'pickup' ? `${selectedPickupDate} - ${selectedPickupTime}` : null,
-                receipt_url: uploadedReceiptUrl,
-            };
-        
-            const { data, error } = await supabase
-                .from('orders')
-                .insert([newOrder])
-                .select()
-                .single();
-        
-            if (error) {
-                console.error('Error creating order:', error);
-                alert('There was an error placing your order. Please try again.');
+
+            const { data: urlData } = supabase.storage
+                .from('receipts')
+                .getPublicUrl(filePath);
+
+            if (!urlData || !urlData.publicUrl) {
+                console.error('Error getting public URL for receipt');
+                alert('Could not retrieve receipt URL. Please try again.');
                 setIsProcessing(false);
                 return;
             }
+
+            uploadedReceiptUrl = urlData.publicUrl;
+        }
+
+        const order_number = `JFS-${user.id.substring(0, 8)}-${Date.now()}`;
+
+        const newOrder = {
+            created_at: new Date().toISOString(),
+            order_number: order_number,
+            user_id: user.id,
+            address_id: deliveryMethod === 'delivery' ? finalAddressId : null,
+            payment_method: selectedPayment,
+            payment_status: selectedPayment === 'cod' ? 'to_pay' : 'waiting_for_confirmation',
+            subtotal: subtotal,
+            shipping_fee: shippingFee,
+            total: total,
+            status: 'pending',
+            delivery_method: deliveryMethod,
+            pickup_time: deliveryMethod === 'pickup' ? `${selectedPickupDate} - ${selectedPickupTime}` : null,
+            receipt_url: uploadedReceiptUrl,
+        };
+
+        const { data, error } = await supabase
+            .from('orders')
+            .insert([newOrder])
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error creating order:', error);
+            alert('There was an error placing your order. Please try again.');
+            setIsProcessing(false);
+            return;
+        }
         const newOrderId = data.id; // Correct: Use data.id for the internal ID
         const newOrderNumber = data.order_number; // Correct: Use data.order_number for the human-readable number
 
@@ -276,7 +283,7 @@ const Checkout = ({ setCart, user }) => {
         const currentCart = JSON.parse(localStorage.getItem('cart') || '[]');
         const checkoutItemIds = checkoutItems.map(item => item.id);
         const remainingCart = currentCart.filter(item => !checkoutItemIds.includes(item.id));
-        
+
         localStorage.setItem('cart', JSON.stringify(remainingCart));
         localStorage.removeItem('checkoutItems');
         localStorage.removeItem('orderType');
@@ -286,7 +293,7 @@ const Checkout = ({ setCart, user }) => {
         // --- Send Order Confirmation Email via Gmail ---
         try {
             const { error: functionError } = await supabase.functions.invoke('send-gmail-email', {
-                body: { 
+                body: {
                     order_number: newOrderNumber,
                     order_items: checkoutItems,
                     total: total,
@@ -448,22 +455,22 @@ const Checkout = ({ setCart, user }) => {
                                     ) : (
                                         <div className="alert alert-warning">
                                             <i className="fas fa-info-circle me-2"></i>
-                                            You have no saved addresses. Please <Link to="/profile" state={{ activeMenu: 'addresses' }} style={{color: 'var(--shop-pink)'}}>add an address in your profile</Link> before proceeding.
+                                            You have no saved addresses. Please <Link to="/profile" state={{ activeMenu: 'addresses' }} style={{ color: 'var(--shop-pink)' }}>add an address in your profile</Link> before proceeding.
                                         </div>
                                     )
                                 ) : (
                                     <div className="alert alert-danger">
                                         <i className="fas fa-exclamation-triangle me-2"></i>
-                                        Please <Link to="/login" style={{color: 'var(--shop-pink)'}}>log in</Link> to use the delivery option.
+                                        Please <Link to="/login" style={{ color: 'var(--shop-pink)' }}>log in</Link> to use the delivery option.
                                     </div>
                                 )}
-                                
+
                                 {selectedAddressId && (
-                                     <div className="p-3 rounded" style={{ background: '#f8f9fa' }}>
+                                    <div className="p-3 rounded" style={{ background: '#f8f9fa' }}>
                                         <p className='mb-1'><strong>Recipient:</strong> {address.name}</p>
                                         <p className='mb-1'><strong>Phone:</strong> {address.phone}</p>
                                         <p className='mb-0'><strong>Address:</strong> {`${address.street}, ${address.barangay}, ${address.city}, ${address.province}`}</p>
-                                     </div>
+                                    </div>
                                 )}
                             </div>
                         )}
@@ -669,10 +676,10 @@ const Checkout = ({ setCart, user }) => {
                                         position: 'relative'
                                     }}
                                 >
-                                    <img 
-                                        src={qrCodeImage} 
-                                        alt="GCash QR Code" 
-                                        style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '10px' }} 
+                                    <img
+                                        src={qrCodeImage}
+                                        alt="GCash QR Code"
+                                        style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '10px' }}
                                     />
                                 </div>
                             </div>
@@ -740,6 +747,17 @@ const Checkout = ({ setCart, user }) => {
                     </div>
                 </div>
             )}
+
+
+            <InfoModal
+                show={infoModal.show}
+                onClose={() => setInfoModal({ show: false, title: '', message: '' })}
+                title={infoModal.title}
+                message={infoModal.message}
+                linkTo={infoModal.linkTo}
+                linkText={infoModal.linkText}
+                linkState={infoModal.linkState}
+            />
         </div>
     );
 };
