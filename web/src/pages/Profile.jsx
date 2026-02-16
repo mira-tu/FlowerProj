@@ -29,7 +29,8 @@ const Profile = ({ user, logout }) => {
     const [barangays, setBarangays] = useState([]);
     const [selectedBarangay, setSelectedBarangay] = useState(null);
     const [addressLoading, setAddressLoading] = useState(false);
-    
+    const [formErrors, setFormErrors] = useState({});
+
     useEffect(() => {
         const params = new URLSearchParams(location.search);
         const menu = params.get('menu');
@@ -56,7 +57,7 @@ const Profile = ({ user, logout }) => {
         { id: 'completed', label: 'Completed' },
         { id: 'cancelled', label: 'Cancelled' },
     ];
-    
+
     const formatMessageTime = (timestamp) => {
         if (!timestamp) return '';
         const date = new Date(timestamp);
@@ -69,16 +70,16 @@ const Profile = ({ user, logout }) => {
 
     useEffect(() => {
         if (!user) return;
-    
+
         let staffIds = [];
-    
+
         const setupMessaging = async () => {
             // 1. Get all staff members (admins and employees)
             const { data: staffUsers, error: staffError } = await supabase
                 .from('users')
                 .select('id')
                 .in('role', ['admin', 'employee']);
-            
+
             if (staffError) {
                 console.error('Error fetching staff IDs:', staffError);
                 // As a fallback, we might still want to fetch messages from the primary admin if one exists
@@ -89,7 +90,7 @@ const Profile = ({ user, logout }) => {
             } else {
                 staffIds = staffUsers.map(u => u.id);
             }
-            
+
             if (staffIds.length === 0) {
                 console.warn("No staff users found to fetch messages from.");
                 return;
@@ -101,7 +102,7 @@ const Profile = ({ user, logout }) => {
                 .select('*')
                 .or(`and(sender_id.eq.${user.id},receiver_id.in.(${staffIds.join(',')})),and(receiver_id.eq.${user.id},sender_id.in.(${staffIds.join(',')}))`)
                 .order('created_at', { ascending: true });
-    
+
             if (error) {
                 console.error('Error fetching messages:', error);
             } else {
@@ -119,15 +120,15 @@ const Profile = ({ user, logout }) => {
         };
 
         setupMessaging();
-    
+
         // 4. Set up real-time subscription
         const subscription = supabase
             .channel('public:messages')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
                 const newMessage = payload.new;
                 // A message is relevant if it's TO me from ANY staff, or FROM me to ANY staff.
-                const isRelevant = (staffIds.includes(newMessage.sender_id) && newMessage.receiver_id === user.id) || 
-                                   (newMessage.sender_id === user.id && staffIds.includes(newMessage.receiver_id));
+                const isRelevant = (staffIds.includes(newMessage.sender_id) && newMessage.receiver_id === user.id) ||
+                    (newMessage.sender_id === user.id && staffIds.includes(newMessage.receiver_id));
 
                 if (isRelevant) {
                     setMessages((prevMessages) => {
@@ -136,7 +137,7 @@ const Profile = ({ user, logout }) => {
                     });
                     // Also mark as read if the messages tab is active
                     if (activeMenu === 'messages' && newMessage.receiver_id === user.id) {
-                         supabase
+                        supabase
                             .from('messages')
                             .update({ is_read: true })
                             .eq('id', newMessage.id)
@@ -145,7 +146,7 @@ const Profile = ({ user, logout }) => {
                 }
             })
             .subscribe();
-    
+
         return () => {
             supabase.removeChannel(subscription);
         };
@@ -215,9 +216,9 @@ const Profile = ({ user, logout }) => {
             const { data: urlData } = supabase.storage
                 .from('receipts')
                 .getPublicUrl(filePath);
-            
+
             if (!urlData || !urlData.publicUrl) throw new Error('Could not retrieve receipt URL.');
-            
+
             uploadedReceiptUrl = urlData.publicUrl;
 
             // Now update the request
@@ -231,13 +232,13 @@ const Profile = ({ user, logout }) => {
                 .eq('id', orderForPayment.request_id);
 
             if (updateError) throw updateError;
-            
+
             // Success
             setShowQRModal(false);
             setOrderForPayment(null);
             setReceiptFile(null);
             setReceiptPreview(null);
-            
+
             setModalContent({
                 type: 'info',
                 title: 'Payment Submitted',
@@ -314,7 +315,7 @@ const Profile = ({ user, logout }) => {
                 console.error('Error fetching requests:', requestsError);
                 throw requestsError;
             }
-            
+
             // Fetch all addresses needed for the requests
             const addressIds = (apiRequests || [])
                 .map(req => req.data?.address_id)
@@ -378,12 +379,12 @@ const Profile = ({ user, logout }) => {
                 phone: order.request_data?.phone,
                 photo: order.request_image_url
             }));
-            
+
             // Transform API requests to match the expected format
             const transformedRequests = (apiRequests || []).map(request => {
                 const requestData = typeof request.data === 'string' ? JSON.parse(request.data) : (request.data || {});
                 const address = addressesData.find(addr => addr.id === requestData?.address_id) || null;
-                
+
                 return {
                     id: `request-${request.id}`, // Prefix to avoid conflicts
                     request_id: request.id,
@@ -417,11 +418,11 @@ const Profile = ({ user, logout }) => {
                     phone: requestData?.phone || requestData?.contact_number
                 };
             });
-            
+
             // Combine orders and requests
             // If an order has a request_id, prefer the order (it's the actual order created from booking)
             const allOrders = [...transformedOrders];
-            
+
             // Add requests that don't have corresponding orders
             transformedRequests.forEach(request => {
                 const hasOrder = allOrders.some(order => order.request_id === request.request_id);
@@ -429,19 +430,19 @@ const Profile = ({ user, logout }) => {
                     allOrders.push(request);
                 }
             });
-            
+
             // Sort by date (newest first)
             allOrders.sort((a, b) => {
                 const dateA = new Date(a.date || 0);
                 const dateB = new Date(b.date || 0);
                 return dateB - dateA;
             });
-            
+
             setOrders(allOrders);
         } catch (error) {
             console.error('Error loading orders:', error);
             setOrders([]);
-            
+
             if (error.message?.includes('Authentication')) {
                 navigate('/login');
             } else {
@@ -469,7 +470,8 @@ const Profile = ({ user, logout }) => {
                 if (error) {
                     console.error('Error fetching addresses:', error);
                 } else {
-                    setAddresses(data);
+                    // Filter out soft-deleted addresses
+                    setAddresses(data.filter(addr => !addr.label.startsWith('[DEL]')));
                 }
             }
         };
@@ -494,79 +496,114 @@ const Profile = ({ user, logout }) => {
         }
     }, [showAddressModal]);
 
-        const handleSaveAddress = async () => {
-            if (!addressForm.label || !addressForm.name || !addressForm.phone || !addressForm.street || !addressForm.barangay) {
-                alert('Please fill in all required fields (Label, Name, Phone, Street, Barangay)');
-                return;
-            }
-    
-            const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
-    
-            if (userError || !currentUser) {
-                alert('You must be logged in to save an address.');
-                console.error('Error fetching user for saving address:', userError);
-                return;
-            }
-    
-            const addressData = {
-                user_id: currentUser.id,
-                label: addressForm.label,
-                name: addressForm.name,
-                phone: addressForm.phone,
-                street: addressForm.street,
-                barangay: addressForm.barangay,
-                city: 'Zamboanga City',
-                province: 'Zamboanga Del Sur',
-                is_default: addresses.length === 0 && !editingAddress // If no existing addresses and not editing, set as default
-            };
-    
-            if (editingAddress) {
-                const { data, error } = await supabase
-                    .from('addresses')
-                    .update(addressData)
-                    .eq('id', editingAddress.id)
-                    .select()
-                    .single();
-    
-                if (error) {
-                    console.error('Error updating address:', error);
-                    alert('Failed to update address: ' + error.message);
-                    return;
-                }
-                setAddresses(addresses.map(addr => (addr.id === editingAddress.id ? data : addr)));
-            } else {
-                const { data, error } = await supabase
-                    .from('addresses')
-                    .insert([addressData])
-                    .select()
-                    .single();
-    
-                if (error) {
-                    console.error('Error adding address:', error);
-                    alert('Failed to add address: ' + error.message);
-                    return;
-                    }
-                setAddresses([...addresses, data]);
-            }
-    
-            setShowAddressModal(false);
-            setAddressForm({ label: '', name: user?.user_metadata?.name || user?.email || '', phone: user?.user_metadata?.phone || '', street: '', barangay: '' });
-            setEditingAddress(null);
-        };
-    const handleDeleteAddress = async (id) => {
-        if (!window.confirm('Are you sure you want to delete this address?')) return;
-
-        const { error } = await supabase
-            .from('addresses')
-            .delete()
-            .eq('id', id);
-
-        if (error) {
-            console.error('Error deleting address:', error);
-            alert('Failed to delete address: ' + error.message);
+    const handleSaveAddress = async () => {
+        if (!addressForm.label || !addressForm.name || !addressForm.phone || !addressForm.street || !addressForm.barangay) {
+            alert('Please fill in all required fields (Label, Name, Phone, Street, Barangay)');
             return;
         }
-        setAddresses(addresses.filter(addr => addr.id !== id));
+
+        // Validate phone number (strip non-digits first)
+        const cleanPhone = addressForm.phone.replace(/\D/g, '');
+        const phoneRegex = /^09\d{9}$/;
+
+        if (!phoneRegex.test(cleanPhone)) {
+            setFormErrors({ phone: 'Please enter a valid mobile number (11 digits starting with 09)' });
+            return;
+        }
+
+        const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
+
+        if (userError || !currentUser) {
+            alert('You must be logged in to save an address.');
+            console.error('Error fetching user for saving address:', userError);
+            return;
+        }
+
+        const addressData = {
+            user_id: currentUser.id,
+            label: addressForm.label,
+            name: addressForm.name,
+            phone: addressForm.phone,
+            street: addressForm.street,
+            barangay: addressForm.barangay,
+            city: 'Zamboanga City',
+            province: 'Zamboanga Del Sur',
+            is_default: addresses.length === 0 && !editingAddress // If no existing addresses and not editing, set as default
+        };
+
+        if (editingAddress) {
+            const { data, error } = await supabase
+                .from('addresses')
+                .update(addressData)
+                .eq('id', editingAddress.id)
+                .select()
+                .single();
+
+            if (error) {
+                console.error('Error updating address:', error);
+                alert('Failed to update address: ' + error.message);
+                return;
+            }
+            setAddresses(addresses.map(addr => (addr.id === editingAddress.id ? data : addr)));
+        } else {
+            const { data, error } = await supabase
+                .from('addresses')
+                .insert([addressData])
+                .select()
+                .single();
+
+            if (error) {
+                console.error('Error adding address:', error);
+                alert('Failed to add address: ' + error.message);
+                return;
+            }
+            setAddresses([...addresses, data]);
+        }
+
+        setShowAddressModal(false);
+        setAddressForm({ label: '', name: user?.user_metadata?.name || user?.email || '', phone: user?.user_metadata?.phone || '', street: '', barangay: '' });
+        setEditingAddress(null);
+    };
+    const handleDeleteAddress = (id) => {
+        setModalContent({
+            type: 'confirm',
+            title: 'Delete Address',
+            message: 'Are you sure you want to delete this address?',
+            confirmText: 'Delete',
+            onConfirm: async () => {
+                // Try hard delete first
+                const { error } = await supabase
+                    .from('addresses')
+                    .delete()
+                    .eq('id', id);
+
+                if (error) {
+                    // Soft delete fallback: Update label with [DEL] prefix
+                    const addrToDelete = addresses.find(a => a.id === id);
+                    if (addrToDelete) {
+                        const newLabel = `[DEL] ${addrToDelete.label}`.substring(0, 50);
+
+                        const { error: updateError } = await supabase
+                            .from('addresses')
+                            .update({
+                                label: newLabel,
+                                is_default: false
+                            })
+                            .eq('id', id);
+
+                        if (updateError) {
+                            console.error('Error soft-deleting address:', updateError);
+                            alert('Failed to delete address. It may be in use.');
+                            return;
+                        }
+                    }
+                }
+
+                // Update local state to remove the address (whether hard or soft deleted)
+                setAddresses(addresses.filter(addr => addr.id !== id));
+                setModalContent(null);
+            }
+        });
     };
 
     const handleSetDefaultAddress = async (id) => {
@@ -871,28 +908,28 @@ const Profile = ({ user, logout }) => {
                                 {/* Display order items or request details */}
                                 {order.items && order.items.length > 0 ? (
                                     <>
-                                                                                        {order.items.slice(0, 2).map((item, idx) => (
-                                                                                            <div key={idx} className="order-item">
-                                                                                                <img
-                                                                                                    src={item.products?.image_url || item.image_url || item.image || item.photo} // Prioritize product image_url
-                                                                                                    alt={item.name || 'Item'}
-                                                                                                    className="order-item-img"
-                                                                                                    onError={(e) => e.target.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'} // Replaced external URL with data URI
-                                                                                                />
-                                                                                                <div>
-                                                                                                    <div className="order-item-name">{item.name || 'Custom Item'}</div>
-                                                                                                    {item.variant && (
-                                                                                                        <div className="order-item-variant">{item.variant}</div>
-                                                                                                    )}
-                                                                                                    <div className="order-item-qty">x{item.qty || 1}</div>
-                                                                                                </div>
-                                                                                                {!order.type && (
-                                                                                                    <div className="order-item-price">
-                                                                                                        ₱{((item.price || order.price || 0) * (item.qty || 1)).toLocaleString()}
-                                                                                                    </div>
-                                                                                                )}
-                                                                                            </div>
-                                                                                        ))}                                        {order.items.length > 2 && (
+                                        {order.items.slice(0, 2).map((item, idx) => (
+                                            <div key={idx} className="order-item">
+                                                <img
+                                                    src={item.products?.image_url || item.image_url || item.image || item.photo} // Prioritize product image_url
+                                                    alt={item.name || 'Item'}
+                                                    className="order-item-img"
+                                                    onError={(e) => e.target.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'} // Replaced external URL with data URI
+                                                />
+                                                <div>
+                                                    <div className="order-item-name">{item.name || 'Custom Item'}</div>
+                                                    {item.variant && (
+                                                        <div className="order-item-variant">{item.variant}</div>
+                                                    )}
+                                                    <div className="order-item-qty">x{item.qty || 1}</div>
+                                                </div>
+                                                {!order.type && (
+                                                    <div className="order-item-price">
+                                                        ₱{((item.price || order.price || 0) * (item.qty || 1)).toLocaleString()}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}                                        {order.items.length > 2 && (
                                             <div className="text-muted small mt-2">
                                                 + {order.items.length - 2} more item(s)
                                             </div>
@@ -939,7 +976,7 @@ const Profile = ({ user, logout }) => {
                                                     {order.notes && <div className="order-item-variant"><strong>Notes:</strong> {order.notes}</div>}
                                                 </>
                                             )}
-                                             {order.phone && (
+                                            {order.phone && (
                                                 <div className="order-item-variant">
                                                     <strong>Contact:</strong> {order.phone}
                                                 </div>
@@ -1004,25 +1041,25 @@ const Profile = ({ user, logout }) => {
                             </div>
                             <div className="order-card-footer">
                                 <div className="order-total">
-                                                                    {order.type ? (
-                                                                        order.type === 'customized' ? ( // Special handling for customized bouquets
-                                                                            <>Request Total: <span>₱{(order.total || 0).toLocaleString()}</span></>
-                                                                        ) : ( // Existing logic for other request types
-                                                                            (order.status === 'pending' || order.total === 0) ? (
-                                                                                <>Request Total: <span style={{ color: 'var(--shop-pink)' }}>To be discuss further</span></>
-                                                                            ) : (
-                                                                                <>{order.status === 'quoted' ? 'Quoted Price' : 'Request Total'}: <span>₱{(order.total || 0).toLocaleString()}</span></>
-                                                                            )
-                                                                        )
-                                                                    ) : ( // It's a regular order
-                                                                        <>Order Total: <span>₱{(order.total || order.price || 0).toLocaleString()}</span></>
-                                                                    )}                                </div>
+                                    {order.type ? (
+                                        order.type === 'customized' ? ( // Special handling for customized bouquets
+                                            <>Request Total: <span>₱{(order.total || 0).toLocaleString()}</span></>
+                                        ) : ( // Existing logic for other request types
+                                            (order.status === 'pending' || order.total === 0) ? (
+                                                <>Request Total: <span style={{ color: 'var(--shop-pink)' }}>To be discuss further</span></>
+                                            ) : (
+                                                <>{order.status === 'quoted' ? 'Quoted Price' : 'Request Total'}: <span>₱{(order.total || 0).toLocaleString()}</span></>
+                                            )
+                                        )
+                                    ) : ( // It's a regular order
+                                        <>Order Total: <span>₱{(order.total || order.price || 0).toLocaleString()}</span></>
+                                    )}                                </div>
                                 <div className="order-actions">
                                     {order.status === 'quoted' ? (
                                         <div className="d-flex gap-2">
-                                            <button className="btn-order-action" style={{backgroundColor: 'var(--shop-pink)', color: 'white', border: 'none'}} onClick={() => handleAcceptQuote(order)}>Accept</button>
-                                            <button className="btn-order-action" style={{backgroundColor: 'transparent', color: 'var(--shop-pink)', border: '1px solid var(--shop-pink)'}} onClick={() => handleRequestAdjustment(order)}>Adjust</button>
-                                            <button className="btn-order-action" style={{backgroundColor: '#dc3545', color: 'white', border: '1px solid #dc3545'}} onClick={() => handleCancelClick(order)}>Cancel</button>
+                                            <button className="btn-order-action" style={{ backgroundColor: 'var(--shop-pink)', color: 'white', border: 'none' }} onClick={() => handleAcceptQuote(order)}>Accept</button>
+                                            <button className="btn-order-action" style={{ backgroundColor: 'transparent', color: 'var(--shop-pink)', border: '1px solid var(--shop-pink)' }} onClick={() => handleRequestAdjustment(order)}>Adjust</button>
+                                            <button className="btn-order-action" style={{ backgroundColor: '#dc3545', color: 'white', border: '1px solid #dc3545' }} onClick={() => handleCancelClick(order)}>Cancel</button>
                                         </div>
                                     ) : (
                                         <>
@@ -1034,7 +1071,7 @@ const Profile = ({ user, logout }) => {
                                                     Buy Again
                                                 </button>
                                             )}
-                                            
+
                                             {/* TRACK BUTTONS */}
                                             {['pending', 'processing', 'out_for_delivery', 'ready_for_pickup'].includes(order.status) && (
                                                 order.type ? ( // It's a Request
@@ -1139,7 +1176,7 @@ const Profile = ({ user, logout }) => {
                     </div>
                     <div className="address-name mt-2">{addr.name}</div>
                     <div className="address-phone">{addr.phone}</div>
-                    <div className="address-detail mt-2">{`${addr.street}, ${addr.barangay}, ${addr.city}, ${addr.province}`}</div>
+                    <div className="address-detail mt-2">{`${addr.street}, ${addr.barangay}, Zamboanga City`}</div>
                     {!addr.is_default && (
                         <button
                             className="btn btn-outline-secondary btn-sm mt-3"
@@ -1166,8 +1203,8 @@ const Profile = ({ user, logout }) => {
             // Update the public 'users' table
             const { error: profileError } = await supabase
                 .from('users')
-                .update({ 
-                    name: profileForm.fullName, 
+                .update({
+                    name: profileForm.fullName,
                     phone: profileForm.phone,
                     birthdate: profileForm.dateOfBirth,
                 })
@@ -1218,28 +1255,28 @@ const Profile = ({ user, logout }) => {
                 <div className="row">
                     <div className="col-md-6 mb-3">
                         <label className="form-label">Full Name</label>
-                        <input 
-                            type="text" 
-                            className="form-control" 
+                        <input
+                            type="text"
+                            className="form-control"
                             name="fullName"
                             value={profileForm.fullName}
-                            onChange={handleProfileFormChange} 
+                            onChange={handleProfileFormChange}
                         />
                     </div>
                     <div className="col-md-6 mb-3">
                         <label className="form-label">Email Address</label>
-                        <input 
-                            type="email" 
-                            className="form-control" 
-                            defaultValue={user.email} 
-                            disabled 
+                        <input
+                            type="email"
+                            className="form-control"
+                            defaultValue={user.email}
+                            disabled
                         />
                     </div>
                     <div className="col-md-6 mb-3">
                         <label className="form-label">Phone Number</label>
-                        <input 
-                            type="tel" 
-                            className="form-control" 
+                        <input
+                            type="tel"
+                            className="form-control"
                             name="phone"
                             value={profileForm.phone}
                             onChange={handleProfileFormChange}
@@ -1249,12 +1286,12 @@ const Profile = ({ user, logout }) => {
                     </div>
                     <div className="col-md-6 mb-3">
                         <label className="form-label">Date of Birth</label>
-                        <input 
-                            type="date" 
-                            className="form-control" 
+                        <input
+                            type="date"
+                            className="form-control"
                             name="dateOfBirth"
                             value={profileForm.dateOfBirth}
-                            onChange={handleProfileFormChange} 
+                            onChange={handleProfileFormChange}
                         />
                     </div>
                 </div>
@@ -1283,7 +1320,7 @@ const Profile = ({ user, logout }) => {
     const renderMessagesContent = () => {
         // Check for complete profile from the fetched profile data
         const isProfileComplete = profileData && profileData.name && profileData.phone;
-    
+
         if (!isProfileComplete) {
             return (
                 <div className="text-center p-5">
@@ -1300,7 +1337,7 @@ const Profile = ({ user, logout }) => {
                 </div>
             );
         }
-    
+
         return (
             <>
                 <div className="d-flex justify-content-between align-items-center mb-4">
@@ -1313,16 +1350,16 @@ const Profile = ({ user, logout }) => {
                         Online
                     </span>
                 </div>
-    
+
                 <div className="messages-container">
                     {messages.map((msg, index) => {
                         const isSent = msg.sender_id === user.id;
                         return (
                             <div key={index} className={`message-wrapper ${isSent ? 'sent' : 'received'}`}>
                                 {!isSent && (
-                                     <div className="message-avatar">
+                                    <div className="message-avatar">
                                         <i className="fas fa-store"></i>
-                                     </div>
+                                    </div>
                                 )}
                                 <div className={`message-bubble ${isSent ? 'sent' : 'received'}`}>
                                     <p className="message-text">{msg.message}</p>
@@ -1334,7 +1371,7 @@ const Profile = ({ user, logout }) => {
                         );
                     })}
                 </div>
-    
+
                 <div className="chat-input-container">
                     <input
                         type="text"
@@ -1461,13 +1498,22 @@ const Profile = ({ user, logout }) => {
                                 />
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Phone Number</label>
                                 <input
                                     type="tel"
-                                    className="form-control-custom"
+                                    className={`form-control-custom ${formErrors.phone ? 'is-invalid' : ''}`}
                                     value={addressForm.phone}
-                                    onChange={e => setAddressForm({ ...addressForm, phone: formatPhoneNumber(e.target.value) })}
+                                    onChange={e => {
+                                        const formatted = formatPhoneNumber(e.target.value);
+                                        setAddressForm({ ...addressForm, phone: formatted });
+
+                                        // Check if valid to clear error
+                                        const clean = formatted.replace(/\D/g, '');
+                                        if (/^09\d{9}$/.test(clean)) {
+                                            if (formErrors.phone) setFormErrors({ ...formErrors, phone: null });
+                                        }
+                                    }}
                                 />
+                                {formErrors.phone && <div className="invalid-feedback d-block">{formErrors.phone}</div>}
                             </div>
 
 
@@ -1497,7 +1543,7 @@ const Profile = ({ user, logout }) => {
                                     placeholder="e.g., House No., Street Name, Subdivision"
                                 />
                             </div>
-                            
+
                             <button
                                 className="btn"
                                 style={{ background: 'var(--shop-pink)', color: 'white' }}
@@ -1657,9 +1703,9 @@ const Profile = ({ user, logout }) => {
                             </button>
                         </div>
                         <div className="modal-body-custom">
-                            <p style={{whiteSpace: 'pre-wrap'}}>{modalContent.message}</p>
+                            <p style={{ whiteSpace: 'pre-wrap' }}>{modalContent.message}</p>
                         </div>
-                        <div className="modal-footer-custom" style={{justifyContent: 'flex-end'}}>
+                        <div className="modal-footer-custom" style={{ justifyContent: 'flex-end' }}>
                             {modalContent.type === 'confirm' && (
                                 <button className="btn btn-secondary me-2" onClick={() => {
                                     if (modalContent.onCancel) modalContent.onCancel();
@@ -1694,10 +1740,10 @@ const Profile = ({ user, logout }) => {
                         <div className="modal-body-custom text-center">
                             <p>Please scan the QR code to pay for request #{orderForPayment.request_number}.</p>
                             <div className="mb-3">
-                                <img 
-                                    src={qrCodeImage} 
-                                    alt="GCash QR Code" 
-                                    style={{ width: '100%', height: 'auto', maxWidth: '250px', margin: '0 auto', borderRadius: '10px' }} 
+                                <img
+                                    src={qrCodeImage}
+                                    alt="GCash QR Code"
+                                    style={{ width: '100%', height: 'auto', maxWidth: '250px', margin: '0 auto', borderRadius: '10px' }}
                                 />
                             </div>
                             <div className="p-3 rounded mb-3" style={{ background: '#f8f9fa' }}>
