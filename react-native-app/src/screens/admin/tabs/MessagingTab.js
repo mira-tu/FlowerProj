@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { supabase } from '../../../config/supabase';
 import styles from '../../AdminDashboard.styles';
 import { formatMessageTimestamp } from '../adminHelpers';
@@ -141,7 +141,7 @@ const MessagingTab = ({ customerToMessage, setCustomerToMessage }) => {
         } catch (error) {
             console.error("Error sending message:", error);
             Alert.alert('Error', error.message || 'Could not send message.');
-            setNewMessage(messageText); 
+            setNewMessage(messageText);
         }
     };
 
@@ -150,7 +150,7 @@ const MessagingTab = ({ customerToMessage, setCustomerToMessage }) => {
         return (
             <TouchableOpacity style={styles.chatItem} onPress={() => fetchMessages(item, currentUser)}>
                 <View style={styles.chatAvatar}>
-                     <Text style={styles.chatAvatarText}>{item.user.name ? item.user.name.charAt(0).toUpperCase() : 'U'}</Text>
+                    <Text style={styles.chatAvatarText}>{item.user.name ? item.user.name.charAt(0).toUpperCase() : 'U'}</Text>
                 </View>
                 <View style={styles.chatPreview}>
                     <Text style={[styles.chatName, isUnread && styles.chatNameUnread]}>{item.user.name || 'Unknown User'}</Text>
@@ -193,9 +193,9 @@ const MessagingTab = ({ customerToMessage, setCustomerToMessage }) => {
                         <Ionicons name="arrow-back" size={24} color="#333" />
                     </TouchableOpacity>
                     <Text style={styles.chatHeaderTitle}>{selectedConversation.user.name}</Text>
-                    <View style={{width: 24}}/>
+                    <View style={{ width: 24 }} />
                 </View>
-                {loading && messages.length === 0 ? ( <ActivityIndicator style={{ marginTop: 20 }} size="large" color="#ec4899" /> ) : (
+                {loading && messages.length === 0 ? (<ActivityIndicator style={{ marginTop: 20 }} size="large" color="#ec4899" />) : (
                     <FlatList
                         ref={flatListRef} data={messages} renderItem={renderMessageItem} keyExtractor={(item) => item.id.toString()}
                         style={styles.chatMessagesContainer} contentContainerStyle={{ padding: 10 }}
@@ -214,7 +214,7 @@ const MessagingTab = ({ customerToMessage, setCustomerToMessage }) => {
     return (
         <View style={styles.tabContent}>
             <Text style={styles.tabTitle}>Conversations</Text>
-            {loading && !conversations.length ? ( <ActivityIndicator style={{ marginTop: 20 }} size="large" color="#ec4899" /> ) : (
+            {loading && !conversations.length ? (<ActivityIndicator style={{ marginTop: 20 }} size="large" color="#ec4899" />) : (
                 <FlatList
                     data={conversations} renderItem={renderConversationItem} keyExtractor={(item) => item.user?.id?.toString()}
                     onRefresh={() => fetchConversations(currentUser)} refreshing={loading}

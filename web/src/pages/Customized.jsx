@@ -128,70 +128,70 @@ const Customized = ({ addToCart }) => {
     if (!/^\d*$/.test(value)) return; // Only allow digits
 
     let numValue = value === '' ? 0 : parseInt(value, 10);
-    
+
     let capped = false;
     if (numValue > MAX_STEM_COUNT) {
-        numValue = MAX_STEM_COUNT;
-        capped = true;
+      numValue = MAX_STEM_COUNT;
+      capped = true;
     }
 
     setCustomBundleSizeInput(capped ? String(numValue) : value);
 
     if (numValue >= 2) {
-        setSelection((prev) => ({ ...prev, bundleSize: numValue }));
+      setSelection((prev) => ({ ...prev, bundleSize: numValue }));
     } else {
-        setSelection((prev) => ({ ...prev, bundleSize: 0 }));
+      setSelection((prev) => ({ ...prev, bundleSize: 0 }));
     }
-    
+
     if (capped) {
-        setInfoModal({
-            show: true,
-            title: 'Stem Limit Reached',
-            message: `The maximum number of stems is ${MAX_STEM_COUNT}. Your input has been capped.`,
-        });
+      setInfoModal({
+        show: true,
+        title: 'Stem Limit Reached',
+        message: `The maximum number of stems is ${MAX_STEM_COUNT}. Your input has been capped.`,
+      });
     }
   };
 
   const handleOptionSelect = (type, id) => {
     if (type === 'flowers') {
-        setSelection(prev => {
-            const alreadySelected = prev.flowers.find(f => f.id === id);
-            let newFlowers;
-            if (alreadySelected) {
-                // Deselect
-                newFlowers = prev.flowers.filter(f => f.id !== id);
-            } else {
-                // Select, but with limit
-                if (prev.flowers.length >= 2) {
-                    setInfoModal({
-                        show: true,
-                        title: 'Flower Limit Reached',
-                        message: 'You can select up to 2 types of flowers.'
-                    });
-                    return prev; // No change
-                }
-                const item = flowers.find(f => f.id === id);
-                newFlowers = [...prev.flowers, item];
-            }
-            
-            const next = { ...prev, flowers: newFlowers };
-            if (newFlowers.length > 0 && prev.bundleSize === 0) {
-                next.bundleSize = 3; // Keep default bundle size logic
-            }
-            if (newFlowers.length === 0) {
-                next.bundleSize = 0;
-            }
-            return next;
-        });
-    } else {
-        let item = null;
-        if (type === 'wrappers') {
-            item = wrappers.find((entry) => entry.id === id);
-        } else if (type === 'ribbons') {
-            item = ribbons.find((entry) => entry.id === id);
+      setSelection(prev => {
+        const alreadySelected = prev.flowers.find(f => f.id === id);
+        let newFlowers;
+        if (alreadySelected) {
+          // Deselect
+          newFlowers = prev.flowers.filter(f => f.id !== id);
+        } else {
+          // Select, but with limit
+          if (prev.flowers.length >= 2) {
+            setInfoModal({
+              show: true,
+              title: 'Flower Limit Reached',
+              message: 'You can select up to 2 types of flowers.'
+            });
+            return prev; // No change
+          }
+          const item = flowers.find(f => f.id === id);
+          newFlowers = [...prev.flowers, item];
         }
-        if (!item) return;
-        setSelection((prev) => ({ ...prev, [type === 'wrappers' ? 'wrapper' : 'ribbon']: item }));
+
+        const next = { ...prev, flowers: newFlowers };
+        if (newFlowers.length > 0 && prev.bundleSize === 0) {
+          next.bundleSize = 3; // Keep default bundle size logic
+        }
+        if (newFlowers.length === 0) {
+          next.bundleSize = 0;
+        }
+        return next;
+      });
+    } else {
+      let item = null;
+      if (type === 'wrappers') {
+        item = wrappers.find((entry) => entry.id === id);
+      } else if (type === 'ribbons') {
+        item = ribbons.find((entry) => entry.id === id);
+      }
+      if (!item) return;
+      setSelection((prev) => ({ ...prev, [type === 'wrappers' ? 'wrapper' : 'ribbon']: item }));
     }
   };
 
@@ -203,8 +203,8 @@ const Customized = ({ addToCart }) => {
   const totalPrice = useMemo(() => {
     let total = 0;
     if (selection.flowers.length > 0 && selection.bundleSize) {
-        const avgFlowerPrice = selection.flowers.reduce((sum, f) => sum + f.price, 0) / selection.flowers.length;
-        total += avgFlowerPrice * selection.bundleSize;
+      const avgFlowerPrice = selection.flowers.reduce((sum, f) => sum + f.price, 0) / selection.flowers.length;
+      total += avgFlowerPrice * selection.bundleSize;
     }
     if (selection.wrapper) total += selection.wrapper.price;
     if (selection.ribbon) total += selection.ribbon.price;
@@ -222,41 +222,47 @@ const Customized = ({ addToCart }) => {
     }
 
     try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.user?.id) {
-            alert('You need to be logged in to add to cart.');
-            return;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user?.id) {
+        setInfoModal({
+          show: true,
+          title: 'Login Required',
+          message: 'You need to be logged in to add customized bouquets to your cart.',
+          linkTo: '/login',
+          linkText: 'Log In'
+        });
+        return;
+      }
+
+      let photoBase64 = null;
+      if (previewRef.current) {
+        try {
+          const canvas = await html2canvas(previewRef.current, {
+            backgroundColor: null, scale: 1, logging: false, useCORS: true,
+          });
+          photoBase64 = canvas.toDataURL('image/png');
+        } catch (canvasError) {
+          console.error('Error capturing screenshot:', canvasError);
         }
+      }
 
-        let photoBase64 = null;
-        if (previewRef.current) {
-            try {
-                const canvas = await html2canvas(previewRef.current, {
-                    backgroundColor: null, scale: 1, logging: false, useCORS: true,
-                });
-                photoBase64 = canvas.toDataURL('image/png');
-            } catch (canvasError) {
-                console.error('Error capturing screenshot:', canvasError);
-            }
-        }
+      const customizedBouquet = {
+        id: `custom-${Date.now()}`,
+        name: 'Customized Bouquet',
+        image: photoBase64,
+        flowers: selection.flowers.map(f => ({ id: f.id, name: f.name, price: f.price })),
+        bundleSize: selection.bundleSize,
+        wrapper: selection.wrapper ? { id: selection.wrapper.id, name: selection.wrapper.name, price: selection.wrapper.price } : null,
+        ribbon: selection.ribbon ? { id: selection.ribbon.id, name: selection.ribbon.name, price: selection.ribbon.price } : null,
+        price: totalPrice,
+        qty: 1
+      };
 
-        const customizedBouquet = {
-            id: `custom-${Date.now()}`,
-            name: 'Customized Bouquet',
-            image: photoBase64,
-            flowers: selection.flowers.map(f => ({ id: f.id, name: f.name, price: f.price })),
-            bundleSize: selection.bundleSize,
-            wrapper: selection.wrapper ? { id: selection.wrapper.id, name: selection.wrapper.name, price: selection.wrapper.price } : null,
-            ribbon: selection.ribbon ? { id: selection.ribbon.id, name: selection.ribbon.name, price: selection.ribbon.price } : null,
-            price: totalPrice,
-            qty: 1
-        };
+      const existingCart = JSON.parse(localStorage.getItem('customizedCart') || '[]');
+      const updatedCart = [...existingCart, customizedBouquet];
+      localStorage.setItem('customizedCart', JSON.stringify(updatedCart));
 
-        const existingCart = JSON.parse(localStorage.getItem('customizedCart') || '[]');
-        const updatedCart = [...existingCart, customizedBouquet];
-        localStorage.setItem('customizedCart', JSON.stringify(updatedCart));
-
-        navigate('/customized-cart');
+      navigate('/customized-cart');
 
     } catch (error) {
       console.error('Error adding to cart:', error);
@@ -370,32 +376,32 @@ const Customized = ({ addToCart }) => {
                   const flowerIndex = index % selection.flowers.length;
                   const flower = selection.flowers[flowerIndex];
                   const stemImage = flower?.stemImg || flower?.layerImg || placeholderStemImg;
-                  
+
                   return (
-                  <Draggable
-                    key={`stem-${index}`}
-                    bounds="parent"
-                    defaultPosition={{ x: slot.x, y: slot.y }}
-                    nodeRef={stemRefs[index]}
-                    handle=".drag-handle"
-                  >
-                    <div
-                      ref={stemRefs[index]}
-                      className="drag-handle"
-                      style={{
-                        position: 'absolute',
-                        zIndex: slot.zIndex,
-                        cursor: 'grab',
-                        width: '100px',
-                        height: '100px',
-                        touchAction: 'none'
-                      }}
+                    <Draggable
+                      key={`stem-${index}`}
+                      bounds="parent"
+                      defaultPosition={{ x: slot.x, y: slot.y }}
+                      nodeRef={stemRefs[index]}
+                      handle=".drag-handle"
                     >
-                      <div style={{ transform: `rotate(${slot.rotate}deg)`, width: '100%', height: '100%' }}>
-                        <img src={stemImage} alt="Selected stem" className="stem-slot" draggable="false" />
+                      <div
+                        ref={stemRefs[index]}
+                        className="drag-handle"
+                        style={{
+                          position: 'absolute',
+                          zIndex: slot.zIndex,
+                          cursor: 'grab',
+                          width: '100px',
+                          height: '100px',
+                          touchAction: 'none'
+                        }}
+                      >
+                        <div style={{ transform: `rotate(${slot.rotate}deg)`, width: '100%', height: '100%' }}>
+                          <img src={stemImage} alt="Selected stem" className="stem-slot" draggable="false" />
+                        </div>
                       </div>
-                    </div>
-                  </Draggable>
+                    </Draggable>
                   );
                 })}
               </div>

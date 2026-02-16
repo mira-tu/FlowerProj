@@ -5,23 +5,23 @@ import '../styles/About.css';
 
 const About = () => {
     const [aboutData, setAboutData] = useState({
-        story: "Loading...",
-        about_description: "Loading...",
-        promise: "Loading...",
-        ownerQuote: "Loading...",
+        story: "Jocery's Flower Shop was born from a love for flowers and a desire to make every occasion feel special.",
+        about_description: "We are a local flower shop in Zamboanga City, offering fresh floral arrangements through a simple and convenient online store.",
+        promise: "We promise thoughtfully crafted arrangements, reliable service, and flowers that help you celebrate life’s most meaningful moments.",
+        ownerQuote: "Where flowers bloom, hope takes root.",
         ownerImage: "https://via.placeholder.com/150",
         ourShopImage: "https://via.placeholder.com/600x400",
-        customBouquetsDescription: "Loading...",
+        customBouquetsDescription: "Create your own unique arrangement with your choice of flowers, colors, and wrapping.",
         customBouquetsImage: "https://via.placeholder.com/400x250",
-        eventDecorationsDescription: "Loading...",
+        eventDecorationsDescription: "Beautiful floral arrangements for weddings, parties, and corporate events.",
         eventDecorationsImage: "https://via.placeholder.com/400x250",
-        specialOrdersDescription: "Loading...",
+        specialOrdersDescription: "Add chocolates, teddy bears, and personalized gifts to make your surprise extra special.",
         specialOrdersImage: "https://via.placeholder.com/400x250",
-        promises_responsibly_sourced_description: "Loading...",
+        promises_responsibly_sourced_description: "We work with ethical suppliers to ensure our flowers are fresh, sustainable, and responsibly grown.",
         promises_responsibly_sourced_image: "https://via.placeholder.com/150",
-        promises_crafted_by_experts_description: "Loading...",
+        promises_crafted_by_experts_description: "Each bouquet is arranged by skilled florists who put heart and creativity into every detail.",
         promises_crafted_by_experts_image: "https://via.placeholder.com/150",
-        promises_caring_for_moments_description: "Loading...",
+        promises_caring_for_moments_description: "Whether it’s a celebration, a comfort, or a simple thank you, we craft for your emotions.",
         promises_caring_for_moments_image: "https://via.placeholder.com/150",
     });
 
@@ -63,26 +63,7 @@ const About = () => {
                     if (item.key === 'promises_caring_for_moments_description') acc.promises_caring_for_moments_description = item.value;
                     if (item.key === 'promises_caring_for_moments_image') acc.promises_caring_for_moments_image = item.value;
                     return acc;
-                }, { 
-                    story: "Jocery's Flower Shop was born from a love for flowers...",
-                    about_description: "A short description for the about page...",
-                    promise: "We built our shop on the foundation of those relationships...",
-                    ownerQuote: "Flowers have always been my passion...",
-                    ownerImage: "https://via.placeholder.com/150",
-                    ourShopImage: "https://via.placeholder.com/600x400",
-                    customBouquetsDescription: "Create your own unique arrangement with your choice of flowers, colors, and wrapping.",
-                    customBouquetsImage: "https://via.placeholder.com/400x250",
-                    eventDecorationsDescription: "Beautiful floral arrangements for weddings, parties, and corporate events.",
-                    eventDecorationsImage: "https://via.placeholder.com/400x250",
-                    specialOrdersDescription: "Add chocolates, teddy bears, and personalized gifts to make your surprise extra special.",
-                    specialOrdersImage: "https://via.placeholder.com/400x250",
-                    promises_responsibly_sourced_description: "We work with ethical suppliers to ensure our flowers are fresh, sustainable, and responsibly grown.",
-                    promises_responsibly_sourced_image: "https://via.placeholder.com/150",
-                    promises_crafted_by_experts_description: "Each bouquet is arranged by skilled florists who put heart and creativity into every detail.",
-                    promises_crafted_by_experts_image: "https://via.placeholder.com/150",
-                    promises_caring_for_moments_description: "Whether it’s a celebration, a comfort, or a simple “thank you,” we craft for your emotions.",
-                    promises_caring_for_moments_image: "https://via.placeholder.com/150",
-                });
+                }, aboutData);
 
                 setAboutData(newAboutData);
             } catch (error) {

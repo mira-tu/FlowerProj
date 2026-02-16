@@ -63,24 +63,25 @@ const Signup = () => {
             if (data.user && data.session) {
                 // User signed up and logged in (e.g., no email confirmation needed)
                 setSuccess('Registration successful! Redirecting to login...');
-                
-                // Insert user data into public.users table
-                const { error: userInsertError } = await supabase
+
+                // Fire-and-forget: sync to public.users table (non-blocking)
+                supabase
                     .from('users')
                     .insert({
                         id: data.user.id,
                         name: `${formData.firstName} ${formData.lastName}`,
                         email: formData.email,
-                        phone: null, // Phone is not collected in signup form
-                        role: 'customer' // Default role
+                        phone: null,
+                        role: 'customer'
+                    })
+                    .then(({ error: userInsertError }) => {
+                        if (userInsertError) {
+                            console.warn('Non-blocking: failed to sync signup profile to public.users:', userInsertError.message);
+                        }
+                    })
+                    .catch((err) => {
+                        console.warn('Non-blocking: signup profile sync error:', err);
                     });
-
-                if (userInsertError) {
-                    console.error('Error inserting user into public.users:', userInsertError);
-                    setError('Registration failed: Could not save user profile. Please try again.');
-                    setLoading(false);
-                    return;
-                }
 
                 setTimeout(() => {
                     navigate('/login');
@@ -89,23 +90,24 @@ const Signup = () => {
                 // User signed up, but email confirmation is required
                 setSuccess('Registration successful! Please check your email to confirm your account before logging in.');
 
-                // Insert user data into public.users table (even if not yet confirmed, they exist)
-                const { error: userInsertError } = await supabase
+                // Fire-and-forget: sync to public.users table (non-blocking)
+                supabase
                     .from('users')
                     .insert({
                         id: data.user.id,
                         name: `${formData.firstName} ${formData.lastName}`,
                         email: formData.email,
-                        password: null,
                         phone: null,
                         role: 'customer'
+                    })
+                    .then(({ error: userInsertError }) => {
+                        if (userInsertError) {
+                            console.warn('Non-blocking: failed to sync signup profile to public.users (email confirmation path):', userInsertError.message);
+                        }
+                    })
+                    .catch((err) => {
+                        console.warn('Non-blocking: signup profile sync error:', err);
                     });
-                
-                if (userInsertError) {
-                    console.error('Error inserting user into public.users (email confirmation path):', userInsertError);
-                    // This error might not be critical enough to stop signup but should be logged.
-                    // For now, we'll let the user proceed to email confirmation message.
-                }
 
                 setTimeout(() => {
                     navigate('/login');

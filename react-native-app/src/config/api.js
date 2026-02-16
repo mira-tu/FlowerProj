@@ -17,8 +17,11 @@ export const productAPI = {
                 stock_quantity,
                 is_active,
                 categories ( name )
-            `)
-            .eq('is_active', true);
+            `);
+
+        if (!params?.includeInactive) {
+            query = query.eq('is_active', true);
+        }
 
         if (params?.category_id) {
             query = query.eq('category_id', parseInt(params.category_id, 10));
@@ -50,7 +53,7 @@ export const productAPI = {
             console.error('Error fetching product:', error);
             return { data: null };
         }
-        
+
         const formattedProduct = {
             ...product,
             category_name: product.categories ? product.categories.name : 'Uncategorized'
@@ -62,7 +65,7 @@ export const productAPI = {
     create: async (formData) => {
         let imageUrl = null;
         const imageFile = formData.image;
-        
+
         console.log('=== CREATE PRODUCT DEBUG ===');
         console.log('imageFile type:', typeof imageFile);
         console.log('imageFile:', imageFile);
@@ -72,12 +75,12 @@ export const productAPI = {
                 const fileName = imageFile.fileName || `product-${Date.now()}.jpg`;
                 // The expo-image-picker result includes mimeType.
                 const contentType = imageFile.mimeType || 'image/jpeg';
-                
+
                 console.log(`Uploading ${fileName} with contentType: ${contentType}`);
 
                 // Decode base64 to ArrayBuffer, which is more reliable for uploads.
                 const arrayBuffer = decode(imageFile.base64);
-                
+
                 // Upload to Supabase Storage
                 const { data: uploadData, error: uploadError } = await supabase.storage
                     .from('product-images')
@@ -91,17 +94,17 @@ export const productAPI = {
                     console.error('Supabase upload error:', uploadError);
                     throw uploadError;
                 }
-                
+
                 console.log('Upload successful, path:', uploadData.path);
-                
+
                 // Get public URL
                 const { data: publicUrlData } = supabase.storage
                     .from('product-images')
                     .getPublicUrl(uploadData.path);
-                
+
                 imageUrl = publicUrlData.publicUrl;
                 console.log('Public URL generated:', imageUrl);
-                
+
             } catch (error) {
                 console.error('Error processing image:', error);
                 throw new Error('Failed to upload image: ' + error.message);
@@ -118,7 +121,7 @@ export const productAPI = {
             description: formData.description || '',
             category_id: parseInt(formData.category_id, 10),
             image_url: imageUrl,
-            is_active: true,
+            is_active: formData.is_active !== false,
         };
 
         console.log('Inserting product to database:', productToInsert);
@@ -141,7 +144,7 @@ export const productAPI = {
         return { data: newProduct };
     },
 
-    update: async function(id, formData) {
+    update: async function (id, formData) {
         let imageUrl = formData.image_url_hidden;
         const imageFile = formData.image;
         console.log('productAPI.update: existing imageUrl (hidden):', imageUrl);
@@ -171,7 +174,7 @@ export const productAPI = {
                 const { data: publicUrlData } = supabase.storage.from('product-images').getPublicUrl(uploadData.path);
                 imageUrl = publicUrlData.publicUrl; // Set new image URL
             } catch (error) {
-                 console.error('Error processing image for update:', error);
+                console.error('Error processing image for update:', error);
                 throw new Error('Failed to upload image for update: ' + error.message);
             }
         } else if (imageFile && imageFile.uri && imageFile.uri.startsWith('http')) {
@@ -186,8 +189,9 @@ export const productAPI = {
             description: formData.description,
             category_id: parseInt(formData.category_id, 10),
             image_url: imageUrl,
+            is_active: formData.is_active !== false,
         };
-        
+
         Object.keys(productToUpdate).forEach(key => (productToUpdate[key] === undefined || Number.isNaN(productToUpdate[key])) && delete productToUpdate[key]);
 
         const { data: updatedProduct, error } = await supabase
@@ -229,7 +233,8 @@ export const productAPI = {
         }
 
         return { data: { success: true } };
-    }
+    },
+
 };
 
 // Categories API
@@ -244,8 +249,66 @@ export const categoryAPI = {
             console.error('Error fetching categories:', error);
             return { data: { categories: [] } };
         }
-        
+
         return { data: { categories: categories || [] } };
+    },
+
+    createCategory: async (name) => {
+        // Auto-generate a URL-friendly slug from the name.
+        // The DB requires slug as NOT NULL UNIQUE.
+        const slug = name
+            .toLowerCase()
+            .trim()
+            .replace(/[^a-z0-9\s-]/g, '')  // remove special chars
+            .replace(/\s+/g, '-')           // spaces → hyphens
+            .replace(/-+/g, '-');           // collapse multiple hyphens
+
+        const { data, error } = await supabase
+            .from('categories')
+            .insert({ name, slug, is_active: true })
+            .select()
+            .single();
+
+        if (error) {
+            throw error;
+        }
+
+        return { data };
+    },
+
+    updateCategory: async (id, name) => {
+        const slug = name
+            .toLowerCase()
+            .trim()
+            .replace(/[^a-z0-9\s-]/g, '')
+            .replace(/\s+/g, '-')
+            .replace(/-+/g, '-');
+
+        const { data, error } = await supabase
+            .from('categories')
+            .update({ name, slug })
+            .eq('id', parseInt(id, 10))
+            .select()
+            .single();
+
+        if (error) {
+            throw error;
+        }
+
+        return { data };
+    },
+
+    deleteCategory: async (id) => {
+        const { error } = await supabase
+            .from('categories')
+            .delete()
+            .eq('id', parseInt(id, 10));
+
+        if (error) {
+            throw error;
+        }
+
+        return { data: { success: true } };
     }
 };
 
@@ -337,7 +400,7 @@ export const authAPI = {
             .select('role, name')
             .eq('id', user.id)
             .single();
-        
+
         return { data: { ...user, ...profile } };
     }
 };
@@ -395,7 +458,7 @@ export const adminAPI = {
             const customerName = order.users ? order.users.name : 'N/A';
             const customerEmail = order.users ? order.users.email : 'N/A';
             const customerPhone = order.users ? order.users.phone : 'N/A';
-            
+
             const items = order.order_items.map(item => ({
                 product_id: item.product_id,
                 quantity: item.quantity,
@@ -533,23 +596,25 @@ export const adminAPI = {
             .from('requests')
             .select('*', { count: 'exact', head: true })
             .eq('status', 'completed');
-            
+
         const { count: pendingRequests, error: pendingRequestsError } = await supabase
             .from('requests')
             .select('*', { count: 'exact', head: true })
             .eq('status', 'pending');
 
-        if(completedOrdersError || pendingOrdersError || completedRequestsError || pendingRequestsError) {
-            console.error({completedOrdersError, pendingOrdersError, completedRequestsError, pendingRequestsError});
+        if (completedOrdersError || pendingOrdersError || completedRequestsError || pendingRequestsError) {
+            console.error({ completedOrdersError, pendingOrdersError, completedRequestsError, pendingRequestsError });
             throw new Error("Could not fetch stats");
         }
 
-        return { data: { 
-            completedOrders: completedOrders || 0,
-            pendingOrders: pendingOrders || 0,
-            completedRequests: completedRequests || 0,
-            pendingRequests: pendingRequests || 0,
-        } };
+        return {
+            data: {
+                completedOrders: completedOrders || 0,
+                pendingOrders: pendingOrders || 0,
+                completedRequests: completedRequests || 0,
+                pendingRequests: pendingRequests || 0,
+            }
+        };
     },
 
 
@@ -559,7 +624,7 @@ export const adminAPI = {
 
         // 1. Calculate sales figures from `sales` table
         const { data: sales, error: salesError } = await supabase.from('sales').select('total_amount, sale_date');
-        
+
         console.log("Sales data from Supabase:", sales);
         console.log("Error from Supabase:", salesError);
 
@@ -567,12 +632,12 @@ export const adminAPI = {
             console.error("Error fetching sales:", salesError);
             throw salesError;
         }
-        
+
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
         const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        
+
         let totalSales = 0, todaySales = 0, weekSales = 0, monthSales = 0;
 
         console.log(`Found ${sales ? sales.length : 0} sales records to process.`);
@@ -597,7 +662,7 @@ export const adminAPI = {
 
         // 2. Get other stats for other cards
         const { data: stats, error: statsError } = await adminAPI.getStats();
-        if(statsError) {
+        if (statsError) {
             console.error("Error fetching stats:", statsError);
             throw statsError;
         }
@@ -609,7 +674,7 @@ export const adminAPI = {
             console.error("Error fetching total orders:", totalOrdersError);
             throw totalOrdersError;
         }
-        
+
         const { count: totalRequests, error: totalRequestsError } = await supabase
             .from('requests')
             .select('*', { count: 'exact', head: true });
@@ -700,7 +765,7 @@ export const adminAPI = {
                     requestData = {};
                 }
             }
-            
+
             // If it's a customized request, prioritize fields from the 'data' JSONB
             if (req.type === 'customized' && requestData) {
                 paymentStatusToUse = requestData.payment_status !== undefined ? requestData.payment_status : paymentStatusToUse;
@@ -737,9 +802,9 @@ export const adminAPI = {
     provideQuote: async (id, price) => {
         const { data: request, error } = await supabase
             .from('requests')
-            .update({ 
+            .update({
                 final_price: price,
-                status: 'quoted' 
+                status: 'quoted'
             })
             .eq('id', id)
             .select()
@@ -749,7 +814,7 @@ export const adminAPI = {
             console.error('Error providing quote:', error);
             throw error;
         }
-        
+
         // Send notification to the user who made the request
         if (request && request.user_id) {
             const notification = {
@@ -763,7 +828,7 @@ export const adminAPI = {
             const { error: notificationError } = await supabase
                 .from('notifications')
                 .insert([notification]);
-            
+
             if (notificationError) {
                 // Log the error but don't fail the whole operation
                 console.error("Failed to send quote notification:", notificationError);
@@ -825,7 +890,7 @@ export const adminAPI = {
                     requestData = {};
                 }
             }
-            
+
             // Update the payment_status within the data JSONB object
             const updatedData = {
                 ...requestData,
@@ -883,7 +948,7 @@ export const adminAPI = {
                 const fileName = imageFile.fileName || `stock-${Date.now()}.jpg`;
                 const contentType = imageFile.mimeType || 'image/jpeg';
                 const arrayBuffer = decode(imageFile.base64);
-                
+
                 const { data: uploadData, error: uploadError } = await supabase.storage
                     .from('stock-images')
                     .upload(fileName, arrayBuffer, {
@@ -895,13 +960,13 @@ export const adminAPI = {
                 if (uploadError) {
                     throw uploadError;
                 }
-                
+
                 const { data: publicUrlData } = supabase.storage
                     .from('stock-images')
                     .getPublicUrl(uploadData.path);
-                
+
                 imageUrl = publicUrlData.publicUrl;
-                
+
             } catch (error) {
                 console.error('Error processing stock image:', error);
                 throw new Error('Failed to upload stock image: ' + error.message);
@@ -955,11 +1020,11 @@ export const adminAPI = {
                 if (uploadError) {
                     throw uploadError;
                 }
-                
+
                 const { data: publicUrlData } = supabase.storage
                     .from('stock-images')
                     .getPublicUrl(uploadData.path);
-                
+
                 imageUrl = publicUrlData.publicUrl;
 
                 // Delete old image if it exists and a new one was uploaded
@@ -967,7 +1032,7 @@ export const adminAPI = {
                     const oldFileName = oldImageUrl.split('/').pop();
                     await supabase.storage.from('stock-images').remove([oldFileName]);
                 }
-                
+
             } catch (error) {
                 console.error('Error processing stock image for update:', error);
                 throw new Error('Failed to upload stock image for update: ' + error.message);
@@ -996,7 +1061,7 @@ export const adminAPI = {
             image_url: imageUrl,
             updated_at: new Date().toISOString(),
         };
-        
+
         const { data: updatedStock, error } = await supabase
             .from('stock_products')
             .update(stockToUpdate)
@@ -1078,7 +1143,7 @@ export const adminAPI = {
             }
             return { data };
         }
-        
+
         // If no user_id, it's a broadcast to all customers.
         const { data: users, error: usersError } = await supabase
             .from('users')
@@ -1182,7 +1247,7 @@ export const adminAPI = {
 
         const sortedConversations = Array.from(conversations.values())
             .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-            
+
         return { data: sortedConversations };
     },
 
@@ -1214,7 +1279,7 @@ export const adminAPI = {
         };
 
         const { data, error } = await supabase.from('messages').insert([message]).select().single();
-        
+
         if (error) {
             console.error('Error sending message:', error);
             return { error };
