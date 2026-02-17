@@ -439,7 +439,9 @@ export const adminAPI = {
                         name,
                         image_url
                     )
-                )
+                ),
+                third_party_rider_name,
+                third_party_rider_info
             `)
             .order('created_at', { ascending: false });
 
@@ -566,10 +568,22 @@ export const adminAPI = {
         return { data: { success: true, order: data } };
     },
 
-    assignRider: async (orderId, riderId) => {
+    assignRider: async (orderId, riderId, thirdPartyName = null, thirdPartyInfo = null) => {
+        const updateData = {};
+
+        if (riderId) {
+            updateData.assigned_rider = riderId;
+            updateData.third_party_rider_name = null;
+            updateData.third_party_rider_info = null;
+        } else {
+            updateData.assigned_rider = null;
+            updateData.third_party_rider_name = thirdPartyName;
+            updateData.third_party_rider_info = thirdPartyInfo;
+        }
+
         const { data, error } = await supabase
             .from('orders')
-            .update({ assigned_rider: riderId })
+            .update(updateData)
             .eq('id', orderId)
             .select()
             .single();

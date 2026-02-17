@@ -34,14 +34,14 @@ const EmployeesTab = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-        const { data, error } = await supabase
-            .from('users')
-            .select('*')
-            .eq('role', 'employee');
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('role', 'employee');
 
-        if (error) {
-            throw error;
-        }
+      if (error) {
+        throw error;
+      }
       setEmployees(data || []);
     } catch (error) {
       console.error('Error loading employees:', error);
@@ -57,8 +57,8 @@ const EmployeesTab = () => {
       return;
     }
     if (formData.password.length < 6) {
-        Alert.alert('Error', 'Password must be at least 6 characters long.');
-        return;
+      Alert.alert('Error', 'Password must be at least 6 characters long.');
+      return;
     }
 
     setLoading(true);
@@ -81,7 +81,7 @@ const EmployeesTab = () => {
       }
 
       if (!authData.user) {
-          throw new Error("User was not created in authentication system.");
+        throw new Error("User was not created in authentication system.");
       }
 
       // 2. Insert the user into the public.users table
@@ -96,9 +96,9 @@ const EmployeesTab = () => {
         });
 
       if (insertError) {
-          // If insert fails, we should ideally delete the auth user to avoid orphans
-          await supabase.auth.admin.deleteUser(authData.user.id);
-          throw insertError;
+        // If insert fails, we should ideally delete the auth user to avoid orphans
+        await supabase.auth.admin.deleteUser(authData.user.id);
+        throw insertError;
       }
 
       let successMessage = 'Employee added successfully.';
@@ -110,7 +110,8 @@ const EmployeesTab = () => {
       setFormData({ name: '', email: '', password: '', phone: '' });
       loadData();
     } catch (error) {
-      Alert.alert('Error', error.message || 'Failed to add employee');
+      console.error('Full error object:', error);
+      Alert.alert('Error', error.message || error.error_description || JSON.stringify(error) || 'Failed to add employee');
     } finally {
       setLoading(false);
     }
@@ -120,27 +121,27 @@ const EmployeesTab = () => {
     setEmployeeToDelete(employee);
     setDeleteModalVisible(true);
   };
-  
+
   const confirmDelete = async () => {
     if (!employeeToDelete) return;
-    
+
     setLoading(true);
     setDeleteModalVisible(false);
 
     try {
-        const { error } = await supabase.rpc('delete_user', { user_id: employeeToDelete.id });
+      const { error } = await supabase.rpc('delete_user', { user_id: employeeToDelete.id });
 
-        if (error) {
-            throw error;
-        }
+      if (error) {
+        throw error;
+      }
 
-        Alert.alert('Success', 'Employee deleted successfully.');
-        loadData();
+      Alert.alert('Success', 'Employee deleted successfully.');
+      loadData();
     } catch (error) {
-        Alert.alert('Error', error.message || 'Failed to delete employee.');
+      Alert.alert('Error', error.message || 'Failed to delete employee.');
     } finally {
-        setLoading(false);
-        setEmployeeToDelete(null);
+      setLoading(false);
+      setEmployeeToDelete(null);
     }
   };
 
@@ -162,13 +163,13 @@ const EmployeesTab = () => {
           <View style={styles.stockCard}>
             <View style={styles.stockInfo}>
               <Text style={styles.stockName}>{item.name}</Text>
-              <View style={{marginTop: 4}}>
+              <View style={{ marginTop: 4 }}>
                 <Text style={styles.stockQuantity}>
-                  <Text style={{fontWeight: 'bold'}}>Email: </Text>
+                  <Text style={{ fontWeight: 'bold' }}>Email: </Text>
                   {item.email}
                 </Text>
                 <Text style={styles.stockQuantity}>
-                  <Text style={{fontWeight: 'bold'}}>Phone: </Text>
+                  <Text style={{ fontWeight: 'bold' }}>Phone: </Text>
                   {item.phone}
                 </Text>
               </View>
@@ -255,7 +256,7 @@ const EmployeesTab = () => {
           </View>
         </View>
       </Modal>
-      
+
       {/* Delete Confirmation Modal */}
       <ConfirmDeleteModal
         visible={deleteModalVisible}

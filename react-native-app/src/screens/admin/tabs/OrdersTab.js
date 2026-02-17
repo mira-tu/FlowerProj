@@ -12,6 +12,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Switch,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,7 +26,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  
+
   // State for Modals
   const [statusModalVisible, setStatusModalVisible] = useState(false);
   const [orderToUpdate, setOrderToUpdate] = useState(null);
@@ -42,6 +43,11 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const [orderToAssignRider, setOrderToAssignRider] = useState(null);
   const [riderSearchQuery, setRiderSearchQuery] = useState('');
   const [riderSortOption, setRiderSortOption] = useState('name_asc');
+
+  // Third party rider state
+  const [isThirdParty, setIsThirdParty] = useState(false);
+  const [thirdPartyName, setThirdPartyName] = useState('');
+  const [thirdPartyInfo, setThirdPartyInfo] = useState('');
 
   const filteredAndSortedRiders = React.useMemo(() => {
     let result = riders;
@@ -87,10 +93,10 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   ];
 
   const pickupStepperStatuses = [
-      { id: 'pending', label: 'Pending', description: 'Order received' },
-      { id: 'processing', label: 'Processing', description: 'Being prepared' },
-      { id: 'ready_for_pickup', label: 'Ready for Pick Up', description: 'Ready for customer' },
-      { id: 'completed', label: 'Completed', description: 'Picked up by customer' }
+    { id: 'pending', label: 'Pending', description: 'Order received' },
+    { id: 'processing', label: 'Processing', description: 'Being prepared' },
+    { id: 'ready_for_pickup', label: 'Ready for Pick Up', description: 'Ready for customer' },
+    { id: 'completed', label: 'Completed', description: 'Picked up by customer' }
   ];
 
   const openReceiptModal = (url) => {
@@ -207,7 +213,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const confirmStatusChange = async () => {
     if (!orderToUpdate || !selectedStatus) return;
     const orderId = orderToUpdate.id;
-    
+
     try {
       await adminAPI.updateOrderStatus(orderId, selectedStatus);
 
@@ -241,7 +247,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       default: return { backgroundColor: '#6B7280' };
     }
   };
-  
+
   const getProgressWidth = (status) => {
     const progress = {
       completed: '100%',
@@ -270,11 +276,11 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
         <View style={{ flex: 1, gap: 4 }}>
           <Text style={styles.eoLabel}>Order ID</Text>
           <Text style={styles.eoOrderId}>#{item.order_number}</Text>
-          <View style={[styles.eoDeliveryTypeBadge, {backgroundColor: item.delivery_method === 'delivery' ? '#3B82F6' : '#10B981'}]}>
-              <Ionicons name={item.delivery_method === 'delivery' ? 'rocket-outline' : 'storefront-outline'} size={12} color="#fff" />
-              <Text style={styles.eoDeliveryTypeBadgeText}>
-                  {item.delivery_method === 'delivery' ? 'Delivery' : 'Pick-up'}
-              </Text>
+          <View style={[styles.eoDeliveryTypeBadge, { backgroundColor: item.delivery_method === 'delivery' ? '#3B82F6' : '#10B981' }]}>
+            <Ionicons name={item.delivery_method === 'delivery' ? 'rocket-outline' : 'storefront-outline'} size={12} color="#fff" />
+            <Text style={styles.eoDeliveryTypeBadgeText}>
+              {item.delivery_method === 'delivery' ? 'Delivery' : 'Pick-up'}
+            </Text>
           </View>
         </View>
         <View style={{ alignItems: 'flex-end' }}>
@@ -291,42 +297,42 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       {/* Progress Bar */}
       <View style={styles.eoProgressSection}>
         <View style={styles.eoProgressMeta}>
-            <Text style={styles.eoProgressLabel}>Order Progress</Text>
-            <Text style={styles.eoProgressLabel}>{getProgressWidth(item.status)}</Text>
+          <Text style={styles.eoProgressLabel}>Order Progress</Text>
+          <Text style={styles.eoProgressLabel}>{getProgressWidth(item.status)}</Text>
         </View>
         <View style={styles.eoProgressBarBg}>
           <View style={[styles.eoProgressBarFill, getStatusStyle(item.status), { width: getProgressWidth(item.status) }]} />
         </View>
       </View>
-      
+
       {/* Customer Info */}
       <View style={styles.eoSection}>
         <View style={styles.eoCustomerHeader}>
-            <View style={styles.eoAvatarContainer}>
-                <View style={styles.eoAvatar}>
-                    <Text style={styles.eoAvatarText}>{getCustomerInitials(item.customer_name)}</Text>
-                </View>
-                <View>
-                    <Text style={styles.eoLabel}>Customer</Text>
-                    <Text style={styles.eoCustomerName}>{item.customer_name}</Text>
-                </View>
+          <View style={styles.eoAvatarContainer}>
+            <View style={styles.eoAvatar}>
+              <Text style={styles.eoAvatarText}>{getCustomerInitials(item.customer_name)}</Text>
             </View>
-            <View style={styles.eoActionButtons}>
-                <TouchableOpacity style={styles.eoIconBtnGreen} onPress={() => onPhoneCall(item.customer_phone)}>
-                    <Ionicons name="call" size={16} color="#fff" />
-                </TouchableOpacity>
-                <TouchableOpacity
-                    style={styles.eoIconBtnBlue}
-                    onPress={() => onMessageCustomer(item.users.id, item.users.name, item.users.email)}
-                >
-                    <Ionicons name="chatbubble" size={16} color="#fff" />
-                </TouchableOpacity>
+            <View>
+              <Text style={styles.eoLabel}>Customer</Text>
+              <Text style={styles.eoCustomerName}>{item.customer_name}</Text>
             </View>
+          </View>
+          <View style={styles.eoActionButtons}>
+            <TouchableOpacity style={styles.eoIconBtnGreen} onPress={() => onPhoneCall(item.customer_phone)}>
+              <Ionicons name="call" size={16} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.eoIconBtnBlue}
+              onPress={() => onMessageCustomer(item.users.id, item.users.name, item.users.email)}
+            >
+              <Ionicons name="chatbubble" size={16} color="#fff" />
+            </TouchableOpacity>
+          </View>
         </View>
         <View style={styles.eoContactInfo}>
-            {item.customer_email && (<View style={styles.eoInfoRow}>
-              <Ionicons name="mail" size={14} color="#9CA3AF" />
-              <Text style={styles.eoInfoText}>{item.customer_email}</Text>
+          {item.customer_email && (<View style={styles.eoInfoRow}>
+            <Ionicons name="mail" size={14} color="#9CA3AF" />
+            <Text style={styles.eoInfoText}>{item.customer_email}</Text>
           </View>)}
           {item.delivery_method === 'pickup' && item.pickup_time && (
             <View style={styles.eoInfoRow}>
@@ -336,122 +342,139 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
           )}
           {item.shipping_address?.description && (
             <View style={styles.eoInfoRow}>
-                <Ionicons name="location" size={14} color="#9CA3AF" />
-                <Text style={styles.eoInfoText}>{item.shipping_address.description}</Text>
+              <Ionicons name="location" size={14} color="#9CA3AF" />
+              <Text style={styles.eoInfoText}>{item.shipping_address.description}</Text>
             </View>
-            )}
+          )}
         </View>
       </View>
 
       {/* Items */}
       {item.items?.length > 0 && (
         <View style={styles.eoSection}>
-            <View style={styles.eoSectionHeader}>
-              <Ionicons name="archive" size={16} color="#6B7280"/>
-              <Text style={styles.eoSectionTitle}>Items ({item.items.length})</Text>
-            </View>
-            {item.items.map((orderItem, index) => (
-              <View key={index} style={[styles.eoItemCard, index > 0 && {marginTop: 8}]}>
-                <View style={styles.eoItemImage}>
-                  {orderItem.image_url ? (
-                    <Image
-                      source={{ uri: orderItem.image_url }}
-                      style={{ width: '100%', height: '100%', resizeMode: 'contain' }}
-                    />
-                  ) : (
-                    <Ionicons name="image-outline" size={24} color="#666" /> // Placeholder icon
-                  )}
-                </View>
-                <View style={{flex: 1}}>
-                  <Text style={styles.eoItemName}>{orderItem.name}</Text>
-                  <Text style={styles.eoItemQuantity}>Quantity: {orderItem.quantity}</Text>
-                  <Text style={styles.eoItemPrice}>₱{orderItem.price.toFixed(2)}</Text>
-                </View>
+          <View style={styles.eoSectionHeader}>
+            <Ionicons name="archive" size={16} color="#6B7280" />
+            <Text style={styles.eoSectionTitle}>Items ({item.items.length})</Text>
+          </View>
+          {item.items.map((orderItem, index) => (
+            <View key={index} style={[styles.eoItemCard, index > 0 && { marginTop: 8 }]}>
+              <View style={styles.eoItemImage}>
+                {orderItem.image_url ? (
+                  <Image
+                    source={{ uri: orderItem.image_url }}
+                    style={{ width: '100%', height: '100%', resizeMode: 'contain' }}
+                  />
+                ) : (
+                  <Ionicons name="image-outline" size={24} color="#666" /> // Placeholder icon
+                )}
               </View>
-            ))}
-            {item.special_instructions && (
-                <View style={styles.eoInstructions}>
-                    <Text style={styles.eoInstructionsTitle}>Special Instructions:</Text>
-                    <Text style={styles.eoInstructionsText}>{item.special_instructions}</Text>
-                </View>
-            )}
+              <View style={{ flex: 1 }}>
+                <Text style={styles.eoItemName}>{orderItem.name}</Text>
+                <Text style={styles.eoItemQuantity}>Quantity: {orderItem.quantity}</Text>
+                <Text style={styles.eoItemPrice}>₱{orderItem.price.toFixed(2)}</Text>
+              </View>
+            </View>
+          ))}
+          {item.special_instructions && (
+            <View style={styles.eoInstructions}>
+              <Text style={styles.eoInstructionsTitle}>Special Instructions:</Text>
+              <Text style={styles.eoInstructionsText}>{item.special_instructions}</Text>
+            </View>
+          )}
         </View>
       )}
 
       {/* Assigned Rider Info */}
-      {item.rider && (
+      {item.rider ? (
         <View style={styles.eoSection}>
-            <View style={styles.eoSectionHeader}>
-              <Ionicons name="bicycle-outline" size={16} color="#6B7280"/>
-              <Text style={styles.eoSectionTitle}>Assigned Rider</Text>
-            </View>
-            <View style={styles.eoFlexBetween}>
-                <Text style={styles.eoDetailText}>Name:</Text>
-                <Text style={styles.eoInfoTextBold}>{item.rider.name}</Text>
-            </View>
+          <View style={styles.eoSectionHeader}>
+            <Ionicons name="bicycle-outline" size={16} color="#6B7280" />
+            <Text style={styles.eoSectionTitle}>Assigned Rider</Text>
+          </View>
+          <View style={styles.eoFlexBetween}>
+            <Text style={styles.eoDetailText}>Name:</Text>
+            <Text style={styles.eoInfoTextBold}>{item.rider.name}</Text>
+          </View>
         </View>
-      )}
-      
+      ) : item.third_party_rider_name ? (
+        <View style={styles.eoSection}>
+          <View style={styles.eoSectionHeader}>
+            <Ionicons name="bicycle-outline" size={16} color="#6B7280" />
+            <Text style={styles.eoSectionTitle}>Assigned Rider (Third Party)</Text>
+          </View>
+          <View style={styles.eoFlexBetween}>
+            <Text style={styles.eoDetailText}>Name:</Text>
+            <Text style={styles.eoInfoTextBold}>{item.third_party_rider_name}</Text>
+          </View>
+          {item.third_party_rider_info ? (
+            <View style={styles.eoFlexBetween}>
+              <Text style={styles.eoDetailText}>Info:</Text>
+              <Text style={styles.eoInfoTextBold}>{item.third_party_rider_info}</Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
       {/* Payment */}
       <View style={styles.eoSection}>
         <View style={styles.eoSectionHeader}>
-            <Ionicons name="card" size={16} color="#6B7280"/>
-            <Text style={styles.eoSectionTitle}>Payment Details</Text>
+          <Ionicons name="card" size={16} color="#6B7280" />
+          <Text style={styles.eoSectionTitle}>Payment Details</Text>
         </View>
-        <View style={{gap: 8}}>
-            <View style={styles.eoFlexBetween}>
-                <Text style={styles.eoDetailText}>Method</Text>
-                <Text style={styles.eoInfoTextBold}>
-                  {item.payment_method?.toLowerCase() === 'cod' ? 'Cash On Delivery' : getStatusLabel(item.payment_method) || 'Not specified'}
-                </Text>
+        <View style={{ gap: 8 }}>
+          <View style={styles.eoFlexBetween}>
+            <Text style={styles.eoDetailText}>Method</Text>
+            <Text style={styles.eoInfoTextBold}>
+              {item.payment_method?.toLowerCase() === 'cod' ? 'Cash On Delivery' : getStatusLabel(item.payment_method) || 'Not specified'}
+            </Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+            <View style={[styles.eoPaymentStatus, { backgroundColor: item.payment_status === 'paid' ? '#22C55E' : '#FFA726' }]}>
+              <Text style={styles.eoPaymentStatusText}>{getPaymentStatusDisplay(item.payment_status, item.payment_method)}</Text>
+            </View>                {item.payment_method?.toLowerCase() === 'gcash' && item.receipt_url && (
+              <TouchableOpacity onPress={() => openReceiptModal(item.receipt_url)}>
+                <Text style={styles.eoViewReceipt}>View Receipt</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          <View style={styles.eoDivider}>
+            <View style={styles.eoPriceRow}>
+              <Text style={styles.eoDetailText}>Subtotal:</Text>
+              <Text style={styles.eoDetailText}>₱{item.subtotal?.toFixed(2) || '0.00'}</Text>
             </View>
-            <View style={{flexDirection: 'row', gap: 8, alignItems: 'center'}}>
-                                            <View style={[styles.eoPaymentStatus, {backgroundColor: item.payment_status === 'paid' ? '#22C55E' : '#FFA726'}]}>
-                                                <Text style={styles.eoPaymentStatusText}>{getPaymentStatusDisplay(item.payment_status, item.payment_method)}</Text>
-                                            </View>                {item.payment_method?.toLowerCase() === 'gcash' && item.receipt_url && (
-                    <TouchableOpacity onPress={() => openReceiptModal(item.receipt_url)}>
-                        <Text style={styles.eoViewReceipt}>View Receipt</Text>
-                    </TouchableOpacity>
-                )}
-            </View>
-            <View style={styles.eoDivider}>
+            {item.shipping_fee > 0 && (
               <View style={styles.eoPriceRow}>
-                <Text style={styles.eoDetailText}>Subtotal:</Text>
-                <Text style={styles.eoDetailText}>₱{item.subtotal?.toFixed(2) || '0.00'}</Text>
+                <Text style={styles.eoDetailText}>Delivery Fee:</Text>
+                <Text style={styles.eoDetailText}>₱{item.shipping_fee.toFixed(2)}</Text>
               </View>
-              {item.shipping_fee > 0 && (
-                <View style={styles.eoPriceRow}>
-                  <Text style={styles.eoDetailText}>Delivery Fee:</Text>
-                  <Text style={styles.eoDetailText}>₱{item.shipping_fee.toFixed(2)}</Text>
-                </View>
-              )}
-              <View style={[styles.eoPriceRow, {marginTop: 8}]}>
-                <Text style={styles.eoTotalLabel}>Total:</Text>
-                <Text style={styles.eoTotalValue}>₱{item.total}</Text>
-              </View>
+            )}
+            <View style={[styles.eoPriceRow, { marginTop: 8 }]}>
+              <Text style={styles.eoTotalLabel}>Total:</Text>
+              <Text style={styles.eoTotalValue}>₱{item.total}</Text>
             </View>
+          </View>
         </View>
       </View>
 
       {/* Actions */}
       <View style={styles.eoFooter}>
         {item.status === 'pending' ? (
-            <View style={{flexDirection: 'row', gap: 12}}>
-                <TouchableOpacity style={[styles.eoMainBtn, {backgroundColor: '#22C55E', flex: 1}]} onPress={() => handleAccept(item.id)}>
-                    <Text style={styles.eoMainBtnText}>Accept</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.eoMainBtn, {backgroundColor: '#EF4444', flex: 1}]} onPress={() => handleDecline(item)}>
-                    <Text style={styles.eoMainBtnText}>Decline</Text>
-                </TouchableOpacity>
-            </View>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <TouchableOpacity style={[styles.eoMainBtn, { backgroundColor: '#22C55E', flex: 1 }]} onPress={() => handleAccept(item.id)}>
+              <Text style={styles.eoMainBtnText}>Accept</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.eoMainBtn, { backgroundColor: '#EF4444', flex: 1 }]} onPress={() => handleDecline(item)}>
+              <Text style={styles.eoMainBtnText}>Decline</Text>
+            </TouchableOpacity>
+          </View>
         ) : (!['completed', 'cancelled'].includes(item.status) &&
           <View>
-            <TouchableOpacity style={[styles.eoMainBtn, {backgroundColor: '#3B82F6'}]} onPress={() => openStatusModal(item)}>
-                <Ionicons name="time" size={18} color="#fff" />
-                <Text style={styles.eoMainBtnText}>Change Status</Text>
+            <TouchableOpacity style={[styles.eoMainBtn, { backgroundColor: '#3B82F6' }]} onPress={() => openStatusModal(item)}>
+              <Ionicons name="time" size={18} color="#fff" />
+              <Text style={styles.eoMainBtnText}>Change Status</Text>
             </TouchableOpacity>
             {item.delivery_method === 'delivery' && item.status === 'processing' && (
-              <TouchableOpacity style={[styles.eoMainBtn, {backgroundColor: '#10B981', marginTop: 10}]} onPress={() => onAssignRider(item)}>
+              <TouchableOpacity style={[styles.eoMainBtn, { backgroundColor: '#10B981', marginTop: 10 }]} onPress={() => onAssignRider(item)}>
                 <Ionicons name="person-add-outline" size={18} color="#fff" />
                 <Text style={styles.eoMainBtnText}>Assign Rider</Text>
               </TouchableOpacity>
@@ -473,6 +496,10 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const handleAssignRider = (order) => {
     setOrderToAssignRider(order);
     setSelectedRider(order.rider); // pre-select if already assigned
+    // Reset third party state
+    setIsThirdParty(!!order.third_party_rider_name);
+    setThirdPartyName(order.third_party_rider_name || '');
+    setThirdPartyInfo(order.third_party_rider_info || '');
     setAssignRiderModalVisible(true);
   };
 
@@ -481,9 +508,19 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   };
 
   const handleConfirmAssignRider = async () => {
-    if (!orderToAssignRider || !selectedRider) return;
+    if (!orderToAssignRider) return;
+    if (!isThirdParty && !selectedRider) return;
+    if (isThirdParty && !thirdPartyName) {
+      Alert.alert('Error', 'Please enter rider name');
+      return;
+    }
+
     try {
-      await adminAPI.assignRider(orderToAssignRider.id, selectedRider.id);
+      if (isThirdParty) {
+        await adminAPI.assignRider(orderToAssignRider.id, null, thirdPartyName, thirdPartyInfo);
+      } else {
+        await adminAPI.assignRider(orderToAssignRider.id, selectedRider.id);
+      }
       Toast.show({ type: 'success', text1: 'Rider Assigned' });
       setAssignRiderModalVisible(false);
       loadOrders();
@@ -505,19 +542,19 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       <Text style={styles.eoTitle}>Orders Management</Text>
       <FlatList
         data={ordersWithRiderDetails}
-        renderItem={({item}) => <EnhancedOrderCard item={item} onMessageCustomer={handleMessageCustomer} onPhoneCall={handlePhoneCall} onAssignRider={handleAssignRider} />}
+        renderItem={({ item }) => <EnhancedOrderCard item={item} onMessageCustomer={handleMessageCustomer} onPhoneCall={handlePhoneCall} onAssignRider={handleAssignRider} />}
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={{ paddingBottom: 20, paddingHorizontal: 16 }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ec4899']} />
         }
         ListEmptyComponent={
-          <View style={{marginTop: 50, alignItems: 'center'}}>
+          <View style={{ marginTop: 50, alignItems: 'center' }}>
             <Text style={styles.emptyText}>No orders found</Text>
           </View>
         }
       />
-      
+
       {/* Decline Confirmation Modal */}
       <Modal visible={declineModalVisible} animationType="fade" transparent>
         <View style={styles.modalContainer}>
@@ -541,47 +578,84 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       {/* Assign Rider Modal */}
       <Modal visible={assignRiderModalVisible} animationType="fade" transparent>
         <View style={styles.modalContainer}>
-          <View style={[styles.modalContent, {maxHeight: '70%'}]}>
+          <View style={[styles.modalContent, { maxHeight: '70%' }]}>
             <Text style={styles.modalTitle}>Assign Rider</Text>
 
 
             {/* Clean Search Bar */}
-            <View style={styles.riderSearchContainer}>
-              <Ionicons name="search" size={20} color="#999" style={styles.riderSearchIcon} />
-              <TextInput
-                style={styles.riderSearchInput}
-                placeholder="Search riders..."
-                placeholderTextColor="#999"
-                value={riderSearchQuery}
-                onChangeText={setRiderSearchQuery}
+            {!isThirdParty && (
+              <View style={styles.riderSearchContainer}>
+                <Ionicons name="search" size={20} color="#999" style={styles.riderSearchIcon} />
+                <TextInput
+                  style={styles.riderSearchInput}
+                  placeholder="Search riders..."
+                  placeholderTextColor="#999"
+                  value={riderSearchQuery}
+                  onChangeText={setRiderSearchQuery}
+                />
+              </View>
+            )}
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <Text style={{ fontSize: 16, fontWeight: '500' }}>Third Party Rider?</Text>
+              <Switch
+                trackColor={{ false: "#767577", true: "#81b0ff" }}
+                thumbColor={isThirdParty ? "#f5dd4b" : "#f4f3f4"}
+                ios_backgroundColor="#3e3e3e"
+                onValueChange={setIsThirdParty}
+                value={isThirdParty}
               />
             </View>
-            
-            <FlatList
-              data={filteredAndSortedRiders}
-              renderItem={({ item: rider }) => (
-                <TouchableOpacity
-                  style={styles.radioButtonContainer}
-                  onPress={() => setSelectedRider(rider)}
-                >
-                  <View style={[styles.radioButton, selectedRider?.id === rider.id && styles.radioButtonSelected]}>
-                    {selectedRider?.id === rider.id && <View style={styles.radioButtonInner} />}
-                  </View>
-                  <View style={{flex: 1}}>
-                    <Text style={styles.riderName}>{rider.name}</Text>
-                    <Text style={styles.riderEmail}>{rider.phone}</Text>
-                  </View>
-                </TouchableOpacity>
-              )}
-              keyExtractor={(item) => item.id.toString()}
-              ListEmptyComponent={<Text style={styles.emptyText}>No riders found.</Text>}
-              style={{ marginVertical: 10 }}
-            />
+
+            {isThirdParty ? (
+              <View style={{ gap: 10, marginVertical: 10 }}>
+                <View>
+                  <Text style={{ marginBottom: 5, fontWeight: '500' }}>Rider Name *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter rider name"
+                    value={thirdPartyName}
+                    onChangeText={setThirdPartyName}
+                  />
+                </View>
+                <View>
+                  <Text style={{ marginBottom: 5, fontWeight: '500' }}>Rider Info (Optional)</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Plate number, contact, etc."
+                    value={thirdPartyInfo}
+                    onChangeText={setThirdPartyInfo}
+                    multiline
+                  />
+                </View>
+              </View>
+            ) : (
+              <FlatList
+                data={filteredAndSortedRiders}
+                renderItem={({ item: rider }) => (
+                  <TouchableOpacity
+                    style={styles.radioButtonContainer}
+                    onPress={() => setSelectedRider(rider)}
+                  >
+                    <View style={[styles.radioButton, selectedRider?.id === rider.id && styles.radioButtonSelected]}>
+                      {selectedRider?.id === rider.id && <View style={styles.radioButtonInner} />}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.riderName}>{rider.name}</Text>
+                      <Text style={styles.riderEmail}>{rider.phone}</Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
+                keyExtractor={(item) => item.id.toString()}
+                ListEmptyComponent={<Text style={styles.emptyText}>No riders found.</Text>}
+                style={{ marginVertical: 10 }}
+              />
+            )}
             <View style={styles.modalButtons}>
               <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={() => { setAssignRiderModalVisible(false); setRiderSearchQuery(''); }}>
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalButton, styles.saveButton]} onPress={handleConfirmAssignRider} disabled={!selectedRider}>
+              <TouchableOpacity style={[styles.modalButton, styles.saveButton]} onPress={handleConfirmAssignRider} disabled={(!isThirdParty && !selectedRider) || (isThirdParty && !thirdPartyName)}>
                 <Text style={styles.buttonText}>Confirm</Text>
               </TouchableOpacity>
             </View>
@@ -591,109 +665,109 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
       {/* Change Status Modal (Timeline UI) */}
       <Modal visible={statusModalVisible} transparent animationType="fade" onRequestClose={() => setStatusModalVisible(false)}>
-          <View style={styles.statusModalBackdrop}>
-              <View style={styles.timelineModalContainer}>
-                  <View style={styles.statusModalHeader}>
-                      <Text style={styles.statusModalTitle}>Change Order Status</Text>
-                  </View>
+        <View style={styles.statusModalBackdrop}>
+          <View style={styles.timelineModalContainer}>
+            <View style={styles.statusModalHeader}>
+              <Text style={styles.statusModalTitle}>Change Order Status</Text>
+            </View>
 
-                  <ScrollView contentContainerStyle={styles.timelineScrollView}>
-                      {orderToUpdate && <Text style={styles.timelineOrderNumber}>Order #{orderToUpdate.order_number}</Text>}
-                      {(() => {
-                          if (!orderToUpdate) return null;
-                          const isDelivery = orderToUpdate.delivery_method === 'delivery';
-                          const stepperStatuses = isDelivery ? deliveryStepperStatuses : pickupStepperStatuses;
-                          const getStepperIndex = (status) => stepperStatuses.findIndex(s => s.id === status);
-                          const selectedIndex = getStepperIndex(selectedStatus);
-                          const currentStatusIndex = getStepperIndex(orderToUpdate.status);
+            <ScrollView contentContainerStyle={styles.timelineScrollView}>
+              {orderToUpdate && <Text style={styles.timelineOrderNumber}>Order #{orderToUpdate.order_number}</Text>}
+              {(() => {
+                if (!orderToUpdate) return null;
+                const isDelivery = orderToUpdate.delivery_method === 'delivery';
+                const stepperStatuses = isDelivery ? deliveryStepperStatuses : pickupStepperStatuses;
+                const getStepperIndex = (status) => stepperStatuses.findIndex(s => s.id === status);
+                const selectedIndex = getStepperIndex(selectedStatus);
+                const currentStatusIndex = getStepperIndex(orderToUpdate.status);
 
-                          return (
-                              <>
-                                  {stepperStatuses.map((status, index) => {
-                                      const isSelected = selectedIndex === index;
-                                      const isPast = selectedIndex > index;
-                                      const isLast = index === stepperStatuses.length - 1;
+                return (
+                  <>
+                    {stepperStatuses.map((status, index) => {
+                      const isSelected = selectedIndex === index;
+                      const isPast = selectedIndex > index;
+                      const isLast = index === stepperStatuses.length - 1;
 
-                                      return (
-                                          <View key={status.id} style={styles.timelineStepContainer}>
-                                              {/* Line */}
-                                              {!isLast && (
-                                                  <View style={[
-                                                      styles.timelineLine,
-                                                      (isPast || isSelected) && styles.timelineLineActive
-                                                  ]}/>
-                                              )}
-                                              {/* Content */}
-                                              <TouchableOpacity
-                                                onPress={() => setSelectedStatus(status.id)}
-                                                style={styles.timelineStep}
-                                                disabled={isPast}
-                                              >
-                                                  <View style={styles.timelineIconContainer}>
-                                                      <View style={[
-                                                          styles.timelineCircle,
-                                                          isPast && styles.timelineCirclePast,
-                                                          isSelected && styles.timelineCircleSelected
-                                                      ]}>
-                                                          {isPast ? (
-                                                              <Ionicons name="checkmark" size={18} color="#fff" />
-                                                          ) : (
-                                                              <Text style={[styles.timelineCircleText, isSelected && {color: '#fff'}]}>{index + 1}</Text>
-                                                          )}
-                                                      </View>
-                                                  </View>
-                                                  <View style={styles.timelineTextContainer}>
-                                                      <Text style={[
-                                                          styles.timelineLabel,
-                                                          isPast && styles.timelineLabelPast,
-                                                          isSelected && styles.timelineLabelSelected
-                                                      ]}>
-                                                          {status.label}
-                                                      </Text>
-                                                      <Text style={[
-                                                          styles.timelineDescription,
-                                                          isSelected && styles.timelineDescriptionSelected
-                                                      ]}>
-                                                          {status.description}
-                                                      </Text>
-                                                  </View>
-                                              </TouchableOpacity>
-                                          </View>
-                                      );
-                                  })}
-                                  {/* Special Status Buttons */}
-                                  <View style={styles.timelineActions}>
-                                      <TouchableOpacity
-                                          onPress={() => setSelectedStatus('cancelled')}
-                                          style={[
-                                              styles.timelineCancelButton,
-                                              selectedStatus === 'cancelled' && styles.timelineCancelButtonSelected
-                                          ]}
-                                      >
-                                          <Ionicons name="close-circle-outline" size={16} color={selectedStatus === 'cancelled' ? '#fff' : '#EF4444'} />
-                                          <Text style={[
-                                              styles.timelineCancelButtonText,
-                                              selectedStatus === 'cancelled' && { color: '#fff' }
-                                          ]}>
-                                              Cancel Order
-                                          </Text>
-                                      </TouchableOpacity>
-                                  </View>
-                              </>
-                          );
-                      })()}
-                  </ScrollView>
-
-                  <View style={styles.statusModalFooter}>
-                      <TouchableOpacity onPress={confirmStatusChange} style={styles.statusConfirmButton}>
-                          <Text style={styles.statusConfirmButtonText}>Confirm</Text>
+                      return (
+                        <View key={status.id} style={styles.timelineStepContainer}>
+                          {/* Line */}
+                          {!isLast && (
+                            <View style={[
+                              styles.timelineLine,
+                              (isPast || isSelected) && styles.timelineLineActive
+                            ]} />
+                          )}
+                          {/* Content */}
+                          <TouchableOpacity
+                            onPress={() => setSelectedStatus(status.id)}
+                            style={styles.timelineStep}
+                            disabled={isPast}
+                          >
+                            <View style={styles.timelineIconContainer}>
+                              <View style={[
+                                styles.timelineCircle,
+                                isPast && styles.timelineCirclePast,
+                                isSelected && styles.timelineCircleSelected
+                              ]}>
+                                {isPast ? (
+                                  <Ionicons name="checkmark" size={18} color="#fff" />
+                                ) : (
+                                  <Text style={[styles.timelineCircleText, isSelected && { color: '#fff' }]}>{index + 1}</Text>
+                                )}
+                              </View>
+                            </View>
+                            <View style={styles.timelineTextContainer}>
+                              <Text style={[
+                                styles.timelineLabel,
+                                isPast && styles.timelineLabelPast,
+                                isSelected && styles.timelineLabelSelected
+                              ]}>
+                                {status.label}
+                              </Text>
+                              <Text style={[
+                                styles.timelineDescription,
+                                isSelected && styles.timelineDescriptionSelected
+                              ]}>
+                                {status.description}
+                              </Text>
+                            </View>
+                          </TouchableOpacity>
+                        </View>
+                      );
+                    })}
+                    {/* Special Status Buttons */}
+                    <View style={styles.timelineActions}>
+                      <TouchableOpacity
+                        onPress={() => setSelectedStatus('cancelled')}
+                        style={[
+                          styles.timelineCancelButton,
+                          selectedStatus === 'cancelled' && styles.timelineCancelButtonSelected
+                        ]}
+                      >
+                        <Ionicons name="close-circle-outline" size={16} color={selectedStatus === 'cancelled' ? '#fff' : '#EF4444'} />
+                        <Text style={[
+                          styles.timelineCancelButtonText,
+                          selectedStatus === 'cancelled' && { color: '#fff' }
+                        ]}>
+                          Cancel Order
+                        </Text>
                       </TouchableOpacity>
-                      <TouchableOpacity onPress={() => setStatusModalVisible(false)} style={styles.statusCloseButton}>
-                          <Text style={styles.statusCloseButtonText}>Cancel</Text>
-                      </TouchableOpacity>
-                  </View>
-              </View>
+                    </View>
+                  </>
+                );
+              })()}
+            </ScrollView>
+
+            <View style={styles.statusModalFooter}>
+              <TouchableOpacity onPress={confirmStatusChange} style={styles.statusConfirmButton}>
+                <Text style={styles.statusConfirmButtonText}>Confirm</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setStatusModalVisible(false)} style={styles.statusCloseButton}>
+                <Text style={styles.statusCloseButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
           </View>
+        </View>
       </Modal>
 
       {/* Receipt View Modal */}

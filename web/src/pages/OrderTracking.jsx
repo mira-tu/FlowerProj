@@ -70,7 +70,7 @@ const OrderTracking = () => {
                     baseDeliverySteps[1], // Processing
                     baseDeliverySteps[2], // Ready for Delivery
                     baseDeliverySteps[3], // Out for Delivery
-                    paymentStep, 
+                    paymentStep,
                     baseDeliverySteps[4], // Delivered
                 ];
             }
@@ -83,13 +83,13 @@ const OrderTracking = () => {
         if (!order) return '';
         const orderDate = new Date(order.date);
         const stepDate = new Date(orderDate.getTime() + (stepId - 1) * 2 * 60 * 60 * 1000);
-        
+
         if (stepId <= currentStep) {
-            return stepDate.toLocaleString('en-PH', { 
-                month: 'short', 
-                day: 'numeric', 
-                hour: '2-digit', 
-                minute: '2-digit' 
+            return stepDate.toLocaleString('en-PH', {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
             });
         }
         return 'Pending';
@@ -99,9 +99,9 @@ const OrderTracking = () => {
         if (!order) return '';
         const orderDate = new Date(order.date);
         const expectedDate = new Date(orderDate.getTime() + 24 * 60 * 60 * 1000); // 24 hours from order date
-        return expectedDate.toLocaleDateString('en-PH', { 
+        return expectedDate.toLocaleDateString('en-PH', {
             weekday: 'long',
-            month: 'long', 
+            month: 'long',
             day: 'numeric'
         });
     };
@@ -110,7 +110,7 @@ const OrderTracking = () => {
         if (!order) return '';
         const isCustom = order.type; // Use order.type instead of order.orderType
         const isPickup = order.deliveryMethod === 'pickup';
-        
+
         if (isCustom) {
             return isPickup ? 'Custom/Event Arrangement - Pick Up' : 'Custom/Event Arrangement - Delivery';
         }
@@ -147,7 +147,7 @@ const OrderTracking = () => {
             setLoading(true);
             const { data: foundOrder, error: dbError } = await supabase
                 .from('orders')
-                .select('*, order_items(*, products(image_url)), addresses(*)')
+                .select('*, order_items(*, products(image_url)), addresses(*), third_party_rider_name, third_party_rider_info')
                 .eq('order_number', orderNumber)
                 .single();
 
@@ -167,6 +167,14 @@ const OrderTracking = () => {
                     } else {
                         riderDetails = rider;
                     }
+                }
+
+                // If no employee rider is assigned, check for third-party rider
+                if (!riderDetails && foundOrder.third_party_rider_name) {
+                    riderDetails = {
+                        name: foundOrder.third_party_rider_name,
+                        phone: foundOrder.third_party_rider_info || ''
+                    };
                 }
 
                 const transformedOrder = {
@@ -201,7 +209,7 @@ const OrderTracking = () => {
                         'out_for_delivery': 'out_for_delivery',
                         'ready_for_pickup': 'ready_for_pickup',
                     };
-                    
+
                     let currentTimelineStatus = statusMap[transformedOrder.status] || 'order_received';
 
                     // Explicitly mark payment as current if accepted and not COD
@@ -301,7 +309,7 @@ const OrderTracking = () => {
                         </div>
                         <div className="tracking-current-status">
                             {(order.status === 'out_for_delivery' || order.status === 'ready_for_pickup') && (
-                                <button 
+                                <button
                                     style={{
                                         padding: '8px 20px',
                                         backgroundColor: '#e8f5e9', // Light green
@@ -320,7 +328,7 @@ const OrderTracking = () => {
                                 </button>
                             )}
 
-                            <div 
+                            <div
                                 className="current-status-badge"
                                 style={order.status === 'cancelled' ? { backgroundColor: '#f44336', color: '#fff' } : {}}
                             >
@@ -331,8 +339,8 @@ const OrderTracking = () => {
                             </div>
                             <div className="expected-delivery">
                                 {!isFinalStep && (
-                                    isPickup 
-                                        ? `Expected pickup: ${getExpectedDate()}` 
+                                    isPickup
+                                        ? `Expected pickup: ${getExpectedDate()}`
                                         : `Expected delivery: ${getExpectedDate()}`
                                 )}
                                 {isFinalStep && (isPickup ? 'Picked up successfully!' : 'Delivered successfully!')}
@@ -348,15 +356,14 @@ const OrderTracking = () => {
                                 <i className="fas fa-route me-2" style={{ color: 'var(--shop-pink)' }}></i>
                                 Tracking Timeline
                             </h5>
-                            
+
                             <div className="timeline">
                                 {trackingSteps.map((step) => (
-                                    <div 
+                                    <div
                                         key={step.id}
-                                        className={`timeline-item ${
-                                            step.id < currentStep ? 'completed' : 
+                                        className={`timeline-item ${step.id < currentStep ? 'completed' :
                                             step.id === currentStep ? 'current' : ''
-                                        }`}
+                                            }`}
                                     >
                                         <div className="timeline-marker">
                                             <i className={`fas ${step.icon}`}></i>
@@ -385,7 +392,7 @@ const OrderTracking = () => {
                                 <i className={`fas ${isPickup ? 'fa-store' : 'fa-map-marker-alt'} me-2`} style={{ color: 'var(--shop-pink)' }}></i>
                                 {isPickup ? 'Pickup Details' : 'Delivery Details'}
                             </h5>
-                            
+
                             {isPickup ? (
                                 <>
                                     <div className="delivery-info-row">
@@ -402,8 +409,8 @@ const OrderTracking = () => {
                                         <div className="delivery-label">Payment</div>
                                         <div className="delivery-value">
                                             {order.payment_method === 'cod' ? 'Cash on Delivery' :
-                                             order.payment_method === 'gcash' ? 'GCash' :
-                                             order.payment_method}
+                                                order.payment_method === 'gcash' ? 'GCash' :
+                                                    order.payment_method}
                                         </div>
                                     </div>
                                 </>
@@ -427,8 +434,8 @@ const OrderTracking = () => {
                                         <div className="delivery-label">Payment</div>
                                         <div className="delivery-value">
                                             {order.payment_method === 'cod' ? 'Cash on Delivery' :
-                                             order.payment_method === 'gcash' ? 'GCash' :
-                                             order.payment_method}
+                                                order.payment_method === 'gcash' ? 'GCash' :
+                                                    order.payment_method}
                                         </div>
                                     </div>
                                 </>
@@ -442,11 +449,11 @@ const OrderTracking = () => {
                                 <i className="fas fa-box me-2" style={{ color: 'var(--shop-pink)' }}></i>
                                 Order Items
                             </h5>
-                            
+
                             {order.items?.map((item, index) => (
                                 <div key={index} className="order-item">
-                                    <img 
-                                        src={item.image} 
+                                    <img
+                                        src={item.image}
                                         alt={item.name}
                                         className="order-item-img"
                                         onError={(e) => e.target.src = 'https://via.placeholder.com/70'}
