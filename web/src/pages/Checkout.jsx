@@ -27,6 +27,7 @@ const Checkout = ({ setCart, user }) => {
     const [receiptFile, setReceiptFile] = useState(null);
     const [receiptPreview, setReceiptPreview] = useState(null);
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null });
+    const showInfoModal = (title, message) => setInfoModal({ show: true, title, message, linkTo: null, linkText: '', linkState: null });
 
     const [address, setAddress] = useState({
         name: '',
@@ -357,18 +358,18 @@ const Checkout = ({ setCart, user }) => {
         }
 
         if (deliveryMethod === 'pickup' && (!selectedPickupDate || !selectedPickupTime)) {
-            alert('Please select a pickup date and time');
+            showInfoModal('Pickup Time Required', 'Please select a pickup date and time before placing your order.');
             return;
         }
 
         if (deliveryMethod === 'delivery' && !selectedAddressId) {
-            alert('Please select a saved address for delivery.');
+            showInfoModal('Address Required', 'Please select a saved delivery address before placing your order.');
             setIsProcessing(false);
             return;
         }
 
         if (selectedPayment === 'gcash' && !receiptFile) {
-            alert('Please upload your GCash payment receipt');
+            showInfoModal('Receipt Required', 'Please upload your GCash payment receipt screenshot before placing your order.');
             return;
         }
 

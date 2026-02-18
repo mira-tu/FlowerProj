@@ -726,6 +726,123 @@ export const adminAPI = {
         return { data };
     },
 
+    getBestSellingProducts: async () => {
+        // Get all completed order items with product info
+        const { data: orderItems, error } = await supabase
+            .from('order_items')
+            .select(`
+                product_id,
+                quantity,
+                products (
+                    name,
+                    image_url,
+                    price
+                )
+            `);
+
+        if (error) {
+            console.error('Error fetching best selling products:', error);
+            throw error;
+        }
+
+        // Aggregate by product_id
+        const productMap = {};
+        (orderItems || []).forEach(item => {
+            const id = item.product_id;
+            if (!productMap[id]) {
+                productMap[id] = {
+                    product_id: id,
+                    name: item.products?.name || 'Unknown',
+                    image_url: item.products?.image_url || null,
+                    price: item.products?.price || 0,
+                    total_sold: 0,
+                    total_revenue: 0,
+                };
+            }
+            productMap[id].total_sold += item.quantity;
+            productMap[id].total_revenue += item.quantity * parseFloat(item.products?.price || 0);
+        });
+
+        const sorted = Object.values(productMap).sort((a, b) => b.total_sold - a.total_sold);
+        return { data: sorted.slice(0, 5) };
+    },
+
+    getTransactionHistory: async (period = 'all') => {
+        let query = supabase
+            .from('sales')
+            .select(`
+                id,
+                order_id,
+                request_id,
+                user_id,
+                sale_date,
+                total_amount,
+                orders (
+                    order_number,
+                    delivery_method,
+                    payment_method,
+                    order_items (
+                        quantity,
+                        price,
+                        products ( name )
+                    )
+                ),
+                requests (
+                    request_number,
+                    type
+                ),
+                users (
+                    name,
+                    email
+                )
+            `)
+            .order('sale_date', { ascending: false });
+
+        // Apply period filter
+        const now = new Date();
+        if (period === 'week') {
+            const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            query = query.gte('sale_date', weekAgo.toISOString());
+        } else if (period === 'month') {
+            const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            query = query.gte('sale_date', monthAgo.toISOString());
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+            console.error('Error fetching transaction history:', error);
+            throw error;
+        }
+
+        const transactions = (data || []).map(sale => {
+            const isOrder = !!sale.order_id;
+            const refNumber = isOrder
+                ? sale.orders?.order_number
+                : sale.requests?.request_number;
+            const sourceType = isOrder ? 'Order' : (sale.requests?.type || 'Request');
+            const items = isOrder && sale.orders?.order_items
+                ? sale.orders.order_items.map(oi => ({
+                    name: oi.products?.name || 'Unknown',
+                    quantity: oi.quantity,
+                    price: oi.price,
+                }))
+                : [];
+
+            return {
+                id: sale.id,
+                date: sale.sale_date,
+                amount: parseFloat(sale.total_amount),
+                customerName: sale.users?.name || 'N/A',
+                customerEmail: sale.users?.email || '',
+                refNumber: refNumber || 'N/A',
+                sourceType,
+                items,
+            };
+        });
+
+        return { data: transactions };
+    },
 
     getAllRequests: async (params) => {
         let query = supabase
@@ -746,6 +863,8 @@ export const adminAPI = {
                 shipping_fee,
                 payment_status,
                 receipt_url,
+                amount_received,
+                additional_receipts,
                 assigned_rider,
                 users (
                     id,
@@ -766,10 +885,6 @@ export const adminAPI = {
         const formattedRequests = requests.map(req => {
             const userData = req.users || {};
 
-            let paymentStatusToUse = req.payment_status; // Default to top-level
-            let paymentMethodToUse = req.payment_method; // Default to top-level
-            let receiptUrlToUse = req.receipt_url;     // Default to top-level
-
             let requestData = req.data;
             if (typeof requestData === 'string') {
                 try {
@@ -780,23 +895,17 @@ export const adminAPI = {
                 }
             }
 
-            // If it's a customized request, prioritize fields from the 'data' JSONB
-            if (req.type === 'customized' && requestData) {
-                paymentStatusToUse = requestData.payment_status !== undefined ? requestData.payment_status : paymentStatusToUse;
-                paymentMethodToUse = requestData.payment_method !== undefined ? requestData.payment_method : paymentMethodToUse;
-                receiptUrlToUse = requestData.receipt_url !== undefined ? requestData.receipt_url : receiptUrlToUse;
-            }
-            // For other types like 'booking' or 'special_order', if they also happen to store these in data
-            // (even if there are top-level columns), this ensures `data` takes precedence if present.
-            // If they are only top-level, paymentStatusToUse, paymentMethodToUse, receiptUrlToUse remain `req.payment_status`, etc.
+            // Prioritize fields from the 'data' JSONB if they exist
+            const paymentStatusToUse = requestData?.payment_status !== undefined ? requestData.payment_status : req.payment_status;
+            const paymentMethodToUse = requestData?.payment_method !== undefined ? requestData.payment_method : 'gcash'; // Default to gcash if not found
+            const receiptUrlToUse = requestData?.receipt_url !== undefined ? requestData.receipt_url : req.receipt_url;
 
             const deliveryMethodFromData = requestData?.delivery_method;
             const pickupTimeFromData = requestData?.pickup_time;
 
             return {
-                ...req, // Keep all original top-level fields (including original payment_status, etc. if they exist)
+                ...req,
                 status: req.status === 'accepted' ? 'processing' : req.status,
-                // Explicitly set these to the determined values
                 payment_status: paymentStatusToUse,
                 payment_method: paymentMethodToUse,
                 receipt_url: receiptUrlToUse,
@@ -806,7 +915,7 @@ export const adminAPI = {
                 user_email: userData.email,
                 user_phone: userData.phone,
                 users: userData,
-                data: requestData, // Keep the parsed data object
+                data: requestData,
             };
         });
 
@@ -882,8 +991,6 @@ export const adminAPI = {
         const requestType = requestToUpdate.type;
 
         if (requestType === 'customized') {
-            // Logic for customized requests (update within data JSONB)
-            // First, fetch the current request to get its 'data' JSONB object
             const { data: currentRequest, error: fetchError } = await supabase
                 .from('requests')
                 .select('data')
@@ -905,7 +1012,6 @@ export const adminAPI = {
                 }
             }
 
-            // Update the payment_status within the data JSONB object
             const updatedData = {
                 ...requestData,
                 payment_status: newStatus,
@@ -913,7 +1019,7 @@ export const adminAPI = {
 
             const { data, error } = await supabase
                 .from('requests')
-                .update({ data: updatedData }) // Update the entire data JSONB column
+                .update({ data: updatedData })
                 .eq('id', requestId)
                 .select()
                 .single();
@@ -924,7 +1030,6 @@ export const adminAPI = {
             }
             return { data: { success: true, request: data } };
         } else {
-            // Logic for booking and special_order requests (update top-level payment_status)
             const { data, error } = await supabase
                 .from('requests')
                 .update({ payment_status: newStatus })
@@ -938,6 +1043,33 @@ export const adminAPI = {
             }
             return { data: { success: true, request: data } };
         }
+    },
+
+    assignRiderToRequest: async (requestId, riderId, thirdPartyName = null, thirdPartyInfo = null) => {
+        const updateData = {};
+
+        if (riderId) {
+            updateData.assigned_rider = riderId;
+            updateData.third_party_rider_name = null;
+            updateData.third_party_rider_info = null;
+        } else {
+            updateData.assigned_rider = null;
+            updateData.third_party_rider_name = thirdPartyName;
+            updateData.third_party_rider_info = thirdPartyInfo;
+        }
+
+        const { data, error } = await supabase
+            .from('requests')
+            .update(updateData)
+            .eq('id', requestId)
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error assigning rider to request:', error);
+            throw error;
+        }
+        return { data: { success: true, request: data } };
     },
 
     getAllStock: async () => {

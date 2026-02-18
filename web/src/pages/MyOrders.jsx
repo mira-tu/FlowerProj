@@ -69,10 +69,10 @@ const MyOrders = () => {
                 console.error('Error fetching requests:', requestsError);
                 throw requestsError;
             }
-            
+
             console.log('--- Supabase Orders API Response (apiOrders) ---', apiOrders);
             console.log('--- Supabase Requests API Response (apiRequests) ---', apiRequests);
-            
+
             console.log(`Loaded ${apiOrders.length} orders and ${apiRequests.length} requests for current user`);
 
             // Transform API orders to match the expected format
@@ -121,7 +121,7 @@ const MyOrders = () => {
                 photo: order.request_photo_url
             }));
             console.log('--- Transformed Orders (Status & Items) ---', transformedOrders.map(o => ({ id: o.id, status: o.status, items: o.items })));
-            
+
             // Transform API requests to match the expected format
             const transformedRequests = (apiRequests || []).map(request => {
                 const requestData = typeof request.data === 'string' ? JSON.parse(request.data) : request.data;
@@ -157,11 +157,11 @@ const MyOrders = () => {
                 };
             });
             console.log('--- Transformed Requests (Status) ---', transformedRequests.map(r => ({ id: r.id, status: r.status })));
-            
+
             // Combine orders and requests
             // If an order has a request_id, prefer the order (it's the actual order created from booking)
             const allOrders = [...transformedOrders];
-            
+
             // Add requests that don't have corresponding orders
             transformedRequests.forEach(request => {
                 const hasOrder = allOrders.some(order => order.request_id === request.request_id);
@@ -169,14 +169,14 @@ const MyOrders = () => {
                     allOrders.push(request);
                 }
             });
-            
+
             // Sort by date (newest first)
             allOrders.sort((a, b) => {
                 const dateA = new Date(a.date || 0);
                 const dateB = new Date(b.date || 0);
                 return dateB - dateA;
             });
-            
+
             console.log('--- Final All Orders before setOrders (Status) ---', allOrders.map(o => ({ id: o.id, status: o.status })));
             setOrders(allOrders);
             loadOrderMessages(allOrders);
@@ -184,7 +184,7 @@ const MyOrders = () => {
             console.error('Error loading orders:', error);
             setOrders([]);
             loadOrderMessages([]);
-            
+
             if (error.message?.includes('Authentication')) {
                 navigate('/login');
             } else {
@@ -200,15 +200,15 @@ const MyOrders = () => {
 
         ordersList.forEach(order => {
             if (order.id) {
-                const orderMsgs = allMessages.filter(msg => 
+                const orderMsgs = allMessages.filter(msg =>
                     msg.orderId && msg.orderId.toString() === order.id.toString()
                 );
-                
-                const unreadCount = orderMsgs.filter(msg => 
+
+                const unreadCount = orderMsgs.filter(msg =>
                     msg.sender === 'admin' && !msg.readByUser
                 ).length;
-                
-                const lastMessage = orderMsgs.length > 0 
+
+                const lastMessage = orderMsgs.length > 0
                     ? orderMsgs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0]
                     : null;
 
@@ -236,14 +236,14 @@ const MyOrders = () => {
         const handleMessageUpdate = () => {
             loadOrderMessages(orders); // orders is the state variable, already updated by loadOrders
         };
-        
+
         window.addEventListener('messageUpdated', handleMessageUpdate);
         const handleStorageChange = (e) => {
             if (e.key === 'messages') {
                 loadOrderMessages(orders);
             }
         };
-        
+
         window.addEventListener('storage', handleStorageChange);
 
         return () => {
@@ -253,13 +253,13 @@ const MyOrders = () => {
         };
     }, [orders]);
 
-    const filteredOrders = activeOrderTab === 'all' 
-        ? orders 
+    const filteredOrders = activeOrderTab === 'all'
+        ? orders
         : orders.filter(o => {
             const status = o.status?.toLowerCase();
             const tab = activeOrderTab.toLowerCase();
             console.log(`Filtering: Order ID: ${o.id}, Status: ${status}, Active Tab: ${tab}`);
-            
+
             // Map statuses to tabs
             if (tab === 'pending') {
                 return status === 'pending';
@@ -308,7 +308,15 @@ const MyOrders = () => {
         if (order.status === 'pending' && order.type) {
             setShowWaitingModal(true);
         } else {
-            handleTrackOrder(order.order_number || order.request_number || order.id);
+            const id = order.order_number || order.request_number || (typeof order.id === 'string' && order.id.startsWith('request-') ? order.id.replace('request-', '') : order.id);
+
+            if (order.type === 'customized') {
+                navigate(`/customized-request-tracking/${id}`);
+            } else if (order.type === 'booking' || order.type === 'special_order') {
+                navigate(`/request-tracking/${id}`);
+            } else {
+                navigate(`/order-tracking/${id}`);
+            }
         }
     };
 
@@ -350,16 +358,16 @@ const MyOrders = () => {
             // Create cancellation notification
             const notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
             const orderTypeLabel = orderToCancel.isFromBooking ? 'Event Booking' :
-                orderToCancel.type 
-                    ? (orderToCancel.type === 'booking' ? 'Event Booking' 
-                        : orderToCancel.type === 'special_order' ? 'Special Order' 
-                        : orderToCancel.type === 'customized' ? 'Customized Bouquet' 
-                        : 'Request')
+                orderToCancel.type
+                    ? (orderToCancel.type === 'booking' ? 'Event Booking'
+                        : orderToCancel.type === 'special_order' ? 'Special Order'
+                            : orderToCancel.type === 'customized' ? 'Customized Bouquet'
+                                : 'Request')
                     : 'Order';
-            const orderId = orderToCancel.order_number || orderToCancel.request_number || orderToCancel.id 
-                ? `#${orderToCancel.order_number || orderToCancel.request_number || orderToCancel.id}` 
+            const orderId = orderToCancel.order_number || orderToCancel.request_number || orderToCancel.id
+                ? `#${orderToCancel.order_number || orderToCancel.request_number || orderToCancel.id}`
                 : '';
-            
+
             const newNotification = {
                 id: `notif-${Date.now()}`,
                 type: 'cancellation',
@@ -398,12 +406,12 @@ const MyOrders = () => {
         try {
             const date = new Date(timestamp);
             const now = new Date();
-            
+
             const isToday = now.toDateString() === date.toDateString();
             if (isToday) {
                 return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
             }
-            
+
             // not today, calculate days ago
             const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
             const startOfMessageDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -411,11 +419,11 @@ const MyOrders = () => {
             const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
             if (diffDays === 1) {
-              return '1 day ago';
+                return '1 day ago';
             }
-            
+
             if (diffDays > 1) {
-              return `${diffDays} days ago`;
+                return `${diffDays} days ago`;
             }
 
             // Fallback for dates that are somehow in the future or same day but `isToday` is false (edge case)
@@ -464,7 +472,7 @@ const MyOrders = () => {
             setChatMessages([]);
             return;
         }
-        
+
         const allMessages = JSON.parse(localStorage.getItem('messages') || '[]');
         const orderMessages = allMessages
             .filter(msg => msg.orderId && msg.orderId.toString() === orderId.toString())
@@ -480,11 +488,11 @@ const MyOrders = () => {
             }
             return msg;
         });
-        
+
         if (hasUnread) {
             localStorage.setItem('messages', JSON.stringify(updatedMessages));
         }
-        
+
         // Scroll to bottom
         setTimeout(() => {
             chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -514,19 +522,19 @@ const MyOrders = () => {
         const allMessages = JSON.parse(localStorage.getItem('messages') || '[]');
         const updatedMessages = [...allMessages, message];
         localStorage.setItem('messages', JSON.stringify(updatedMessages));
-        
+
         // Dispatch custom event to notify other components
         window.dispatchEvent(new Event('messageUpdated'));
-        
+
         // Create notification for admin
         const notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
-        const orderType = selectedOrderForChat.type 
-            ? (selectedOrderForChat.type === 'booking' ? 'Event Booking' 
-                : selectedOrderForChat.type === 'special_order' ? 'Special Order' 
-                : selectedOrderForChat.type === 'customized' ? 'Customized Bouquet' 
-                : 'Request')
+        const orderType = selectedOrderForChat.type
+            ? (selectedOrderForChat.type === 'booking' ? 'Event Booking'
+                : selectedOrderForChat.type === 'special_order' ? 'Special Order'
+                    : selectedOrderForChat.type === 'customized' ? 'Customized Bouquet'
+                        : 'Request')
             : 'Order';
-        
+
         const notification = {
             id: `notif-${Date.now()}`,
             type: 'message',
@@ -538,12 +546,12 @@ const MyOrders = () => {
             link: '/admin/dashboard'
         };
         localStorage.setItem('notifications', JSON.stringify([notification, ...notifications]));
-        
+
         setNewChatMessage('');
         // Reload messages immediately and force update
         loadChatMessages(orderId);
         loadOrderMessages(orders);
-        
+
         // Also reload after a short delay to ensure sync
         setTimeout(() => {
             loadChatMessages(orderId);
@@ -566,16 +574,16 @@ const MyOrders = () => {
 
     const handleSubmitReceipt = (paymentRequestId, receiptBase64) => {
         const allMessages = JSON.parse(localStorage.getItem('messages') || '[]');
-        const updatedMessages = allMessages.map(msg => 
-            msg.id === paymentRequestId 
+        const updatedMessages = allMessages.map(msg =>
+            msg.id === paymentRequestId
                 ? { ...msg, receipt: receiptBase64, status: 'pending', receiptUploadedAt: new Date().toISOString() }
                 : msg
         );
         localStorage.setItem('messages', JSON.stringify(updatedMessages));
-        
+
         // Dispatch custom event
         window.dispatchEvent(new Event('messageUpdated'));
-        
+
         // Create notification for admin
         const notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
         const notification = {
@@ -599,32 +607,32 @@ const MyOrders = () => {
     useEffect(() => {
         if (showChatModal && selectedOrderForChat) {
             loadChatMessages(selectedOrderForChat.id);
-            
+
             // Listen for storage changes (when messages are added from another tab/window)
             const handleStorageChange = (e) => {
                 if (e.key === 'messages' && selectedOrderForChat && selectedOrderForChat.id) {
                     loadChatMessages(selectedOrderForChat.id);
                 }
             };
-            
+
             window.addEventListener('storage', handleStorageChange);
-            
+
             // Also listen for custom events (same tab updates)
             const handleMessageUpdate = () => {
                 if (selectedOrderForChat && selectedOrderForChat.id) {
                     loadChatMessages(selectedOrderForChat.id);
                 }
             };
-            
+
             window.addEventListener('messageUpdated', handleMessageUpdate);
-            
+
             // Auto-refresh messages every 1 second for real-time feel
             const interval = setInterval(() => {
                 if (selectedOrderForChat && selectedOrderForChat.id) {
                     loadChatMessages(selectedOrderForChat.id);
                 }
             }, 1000);
-            
+
             return () => {
                 clearInterval(interval);
                 window.removeEventListener('storage', handleStorageChange);
@@ -653,10 +661,10 @@ const MyOrders = () => {
 
                 <div className="order-tabs" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                     {orderTabs.map(tab => {
-                        const orderCount = tab.id !== 'all' 
-                            ? orders.filter(o => o.status === tab.id).length 
+                        const orderCount = tab.id !== 'all'
+                            ? orders.filter(o => o.status === tab.id).length
                             : orders.length;
-                        
+
                         return (
                             <button
                                 key={tab.id}
@@ -717,22 +725,20 @@ const MyOrders = () => {
                                             {getStatusLabel(order.status)}
                                         </span>
                                         {order.paymentStatus && (
-                                            <span className={`badge ${
-                                                order.paymentStatus === 'paid' 
-                                                    ? 'bg-success' 
-                                                    : order.paymentStatus === 'waiting_for_confirmation' 
-                                                        ? 'bg-info' 
+                                            <span className={`badge ${order.paymentStatus === 'paid'
+                                                    ? 'bg-success'
+                                                    : order.paymentStatus === 'waiting_for_confirmation'
+                                                        ? 'bg-info'
                                                         : 'bg-warning'
-                                            }`}>
-                                                <i className={`fas ${
-                                                    order.paymentStatus === 'paid' 
-                                                        ? 'fa-check-circle' 
+                                                }`}>
+                                                <i className={`fas ${order.paymentStatus === 'paid'
+                                                        ? 'fa-check-circle'
                                                         : order.paymentStatus === 'waiting_for_confirmation'
                                                             ? 'fa-hourglass-half'
                                                             : 'fa-clock'
-                                                } me-1`}></i>
-                                                {order.paymentStatus === 'paid' 
-                                                    ? 'Paid' 
+                                                    } me-1`}></i>
+                                                {order.paymentStatus === 'paid'
+                                                    ? 'Paid'
                                                     : order.paymentStatus === 'waiting_for_confirmation'
                                                         ? 'Waiting for Confirmation'
                                                         : 'To Pay'}
@@ -746,8 +752,8 @@ const MyOrders = () => {
                                         <>
                                             {order.items.slice(0, 2).map((item, idx) => (
                                                 <div key={idx} className="order-item">
-                                                    <img 
-                                                        src={item.image || item.photo} 
+                                                    <img
+                                                        src={item.image || item.photo}
                                                         alt={item.name || 'Item'}
                                                         className="order-item-img"
                                                         onError={(e) => e.target.src = 'https://via.placeholder.com/70'}
@@ -774,8 +780,8 @@ const MyOrders = () => {
                                         // Display request details for bookings, special orders, and customized
                                         <div className="order-item">
                                             {(order.photo || order.photo_url) && (
-                                                <img 
-                                                    src={order.photo || order.photo_url} 
+                                                <img
+                                                    src={order.photo || order.photo_url}
                                                     alt="Request preview"
                                                     className="order-item-img"
                                                     style={{ objectFit: 'cover' }}
@@ -816,8 +822,8 @@ const MyOrders = () => {
                                                 {order.type === 'booking' && (order.data?.details || order.notes) && (
                                                     <div className="order-item-variant" style={{ fontSize: '0.85rem', color: '#666' }}>
                                                         <i className="fas fa-info-circle me-1"></i>
-                                                        {(order.data?.details || order.notes || '').length > 80 
-                                                            ? `${(order.data?.details || order.notes || '').substring(0, 80)}...` 
+                                                        {(order.data?.details || order.notes || '').length > 80
+                                                            ? `${(order.data?.details || order.notes || '').substring(0, 80)}...`
                                                             : (order.data?.details || order.notes || '')}
                                                     </div>
                                                 )}
@@ -851,7 +857,7 @@ const MyOrders = () => {
                                             </div>
                                         </div>
                                     )}
-                                    
+
                                     {/* Show additional booking information */}
                                     {order.type === 'booking' && order.data?.fullName && (
                                         <div className="mt-3 pt-3 border-top">
@@ -861,7 +867,7 @@ const MyOrders = () => {
                                             </div>
                                         </div>
                                     )}
-                                    
+
                                     {/* Payment Method Information */}
                                     {order.payment && (
                                         <div className="mt-3 pt-3 border-top">
@@ -876,7 +882,7 @@ const MyOrders = () => {
                                             </div>
                                         </div>
                                     )}
-                                    
+
                                     {/* Delivery/Pickup Information */}
                                     {(order.deliveryMethod || order.address) && (
                                         <div className="mt-3 pt-3 border-top">
@@ -904,8 +910,8 @@ const MyOrders = () => {
                                                         <div className="flex-grow-1">
                                                             <div className="small fw-bold mb-1">Delivery Address</div>
                                                             <div className="small text-muted">
-                                                                {typeof order.address === 'string' 
-                                                                    ? order.address 
+                                                                {typeof order.address === 'string'
+                                                                    ? order.address
                                                                     : `${order.address.street}, ${order.address.city}, ${order.address.province} ${order.address.zip}`
                                                                 }
                                                             </div>
@@ -915,7 +921,7 @@ const MyOrders = () => {
                                             )}
                                         </div>
                                     )}
-                                    
+
                                     {/* Message Preview */}
                                     {orderMessages[order.id] && orderMessages[order.id].lastMessage && (
                                         <div className="mt-3 pt-3 border-top">
@@ -925,8 +931,8 @@ const MyOrders = () => {
                                                     <div className="small fw-bold mb-1 d-flex align-items-center gap-2">
                                                         Messages
                                                         {orderMessages[order.id].unreadCount > 0 && (
-                                                            <span className="badge" style={{ 
-                                                                background: 'var(--shop-pink)', 
+                                                            <span className="badge" style={{
+                                                                background: 'var(--shop-pink)',
                                                                 color: 'white',
                                                                 fontSize: '0.7rem',
                                                                 padding: '2px 6px'
@@ -935,9 +941,9 @@ const MyOrders = () => {
                                                             </span>
                                                         )}
                                                     </div>
-                                                    <div className="small text-muted" style={{ 
-                                                        overflow: 'hidden', 
-                                                        textOverflow: 'ellipsis', 
+                                                    <div className="small text-muted" style={{
+                                                        overflow: 'hidden',
+                                                        textOverflow: 'ellipsis',
                                                         whiteSpace: 'nowrap',
                                                         fontStyle: orderMessages[order.id].unreadCount > 0 ? 'normal' : 'normal'
                                                     }}>
@@ -963,7 +969,7 @@ const MyOrders = () => {
                                     </div>
                                     <div className="order-actions">
                                         {order.status === 'completed' && order.items && (
-                                            <button 
+                                            <button
                                                 className="btn-order-action secondary"
                                                 onClick={() => {
                                                     const cart = JSON.parse(localStorage.getItem('cart') || '[]');
@@ -983,7 +989,7 @@ const MyOrders = () => {
                                             </button>
                                         )}
                                         {order.status === 'pending' && order.type && (
-                                            <button 
+                                            <button
                                                 className="btn-order-action primary"
                                                 onClick={() => handleTrackStatus(order)}
                                             >
@@ -991,22 +997,22 @@ const MyOrders = () => {
                                             </button>
                                         )}
                                         {order.status !== 'cancelled' && order.status !== 'completed' && !(order.status === 'pending' && order.type) && (
-                                            <button 
+                                            <button
                                                 className="btn-order-action primary"
                                                 onClick={() => handleTrackOrder(order.order_number || order.request_number || order.id)}
                                             >
                                                 Track Order
                                             </button>
                                         )}
-                                        <button 
+                                        <button
                                             className="btn-order-action primary"
                                             onClick={() => {
                                                 setSelectedOrderForChat(order);
                                                 setShowChatModal(true);
                                                 loadChatMessages(order.id);
                                             }}
-                                            style={{ 
-                                                background: 'var(--shop-pink)', 
+                                            style={{
+                                                background: 'var(--shop-pink)',
                                                 color: 'white',
                                                 border: 'none',
                                                 position: 'relative'
@@ -1035,11 +1041,11 @@ const MyOrders = () => {
                                             )}
                                         </button>
                                         {order.status !== 'cancelled' && order.status !== 'completed' && (
-                                            <button 
+                                            <button
                                                 className="btn-order-action danger"
                                                 onClick={() => handleCancelClick(order)}
-                                                style={{ 
-                                                    background: '#dc3545', 
+                                                style={{
+                                                    background: '#dc3545',
                                                     color: 'white',
                                                     border: 'none'
                                                 }}
@@ -1057,8 +1063,8 @@ const MyOrders = () => {
 
             {/* Cancellation Confirmation Modal */}
             {showCancelModal && (
-                <div 
-                    className="modal-overlay" 
+                <div
+                    className="modal-overlay"
                     onClick={() => {
                         setShowCancelModal(false);
                         setOrderToCancel(null);
@@ -1076,8 +1082,8 @@ const MyOrders = () => {
                         zIndex: 1000
                     }}
                 >
-                    <div 
-                        className="modal-content-custom" 
+                    <div
+                        className="modal-content-custom"
                         onClick={e => e.stopPropagation()}
                         style={{
                             backgroundColor: 'white',
@@ -1135,8 +1141,8 @@ const MyOrders = () => {
 
             {/* Waiting for Approval Modal */}
             {showWaitingModal && (
-                <div 
-                    className="modal-overlay" 
+                <div
+                    className="modal-overlay"
                     onClick={() => setShowWaitingModal(false)}
                     style={{
                         position: 'fixed',
@@ -1151,8 +1157,8 @@ const MyOrders = () => {
                         zIndex: 1000
                     }}
                 >
-                    <div 
-                        className="modal-content-custom" 
+                    <div
+                        className="modal-content-custom"
                         onClick={e => e.stopPropagation()}
                         style={{
                             backgroundColor: 'white',
@@ -1194,8 +1200,8 @@ const MyOrders = () => {
 
             {/* Chat Modal */}
             {showChatModal && selectedOrderForChat && (
-                <div 
-                    className="modal-overlay" 
+                <div
+                    className="modal-overlay"
                     onClick={() => {
                         setShowChatModal(false);
                         setSelectedOrderForChat(null);
@@ -1219,8 +1225,8 @@ const MyOrders = () => {
                         zIndex: 1000
                     }}
                 >
-                    <div 
-                        className="modal-content-custom" 
+                    <div
+                        className="modal-content-custom"
                         onClick={e => e.stopPropagation()}
                         style={{
                             backgroundColor: 'white',
@@ -1233,8 +1239,8 @@ const MyOrders = () => {
                             boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
                         }}
                     >
-                        <div style={{ 
-                            padding: '1.5rem', 
+                        <div style={{
+                            padding: '1.5rem',
                             borderBottom: '1px solid #e3e6f0',
                             display: 'flex',
                             justifyContent: 'space-between',
@@ -1271,9 +1277,9 @@ const MyOrders = () => {
                                 ×
                             </button>
                         </div>
-                        <div style={{ 
-                            flex: 1, 
-                            overflowY: 'auto', 
+                        <div style={{
+                            flex: 1,
+                            overflowY: 'auto',
                             padding: '20px',
                             background: '#f0f2f5',
                             minHeight: '300px',
@@ -1297,7 +1303,7 @@ const MyOrders = () => {
                                                 </div>
                                             );
                                         }
-                                        
+
                                         // Payment Request Message
                                         if (item.type === 'payment_request') {
                                             return (
@@ -1324,9 +1330,9 @@ const MyOrders = () => {
                                                             <i className="fas fa-money-bill-wave" style={{ color: 'var(--shop-pink)', fontSize: '1.2rem' }}></i>
                                                             <strong style={{ fontSize: '1rem' }}>Payment Request</strong>
                                                         </div>
-                                                        
-                                                        <div style={{ 
-                                                            fontSize: '1.5rem', 
+
+                                                        <div style={{
+                                                            fontSize: '1.5rem',
                                                             fontWeight: 'bold',
                                                             color: 'var(--shop-pink)',
                                                             marginBottom: '16px'
@@ -1397,12 +1403,12 @@ const MyOrders = () => {
                                                                     <i className="fas fa-check-circle text-success"></i>
                                                                     <strong>Receipt Uploaded</strong>
                                                                 </div>
-                                                                <img 
-                                                                    src={item.receipt} 
-                                                                    alt="Receipt" 
-                                                                    style={{ 
-                                                                        maxWidth: '100%', 
-                                                                        maxHeight: '200px', 
+                                                                <img
+                                                                    src={item.receipt}
+                                                                    alt="Receipt"
+                                                                    style={{
+                                                                        maxWidth: '100%',
+                                                                        maxHeight: '200px',
                                                                         borderRadius: '8px',
                                                                         border: '1px solid #ddd'
                                                                     }}
@@ -1426,8 +1432,8 @@ const MyOrders = () => {
                                                             </div>
                                                         )}
 
-                                                        <div style={{ 
-                                                            fontSize: '0.7rem', 
+                                                        <div style={{
+                                                            fontSize: '0.7rem',
                                                             opacity: 0.7,
                                                             marginTop: '12px',
                                                             textAlign: 'right'
@@ -1438,7 +1444,7 @@ const MyOrders = () => {
                                                 </div>
                                             );
                                         }
-                                        
+
                                         // Regular Message
                                         return (
                                             <div
@@ -1455,24 +1461,24 @@ const MyOrders = () => {
                                                     maxWidth: '65%',
                                                     padding: '10px 14px',
                                                     borderRadius: '18px',
-                                                    background: item.sender === 'user' 
-                                                        ? 'linear-gradient(135deg, var(--shop-pink), #d65d7a)' 
+                                                    background: item.sender === 'user'
+                                                        ? 'linear-gradient(135deg, var(--shop-pink), #d65d7a)'
                                                         : 'white',
                                                     color: item.sender === 'user' ? 'white' : '#1a1a1a',
                                                     boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
                                                     borderBottomLeftRadius: item.sender === 'user' ? '18px' : '4px',
                                                     borderBottomRightRadius: item.sender === 'user' ? '4px' : '18px'
                                                 }}>
-                                                    <div style={{ 
-                                                        margin: 0, 
-                                                        lineHeight: '1.4', 
+                                                    <div style={{
+                                                        margin: 0,
+                                                        lineHeight: '1.4',
                                                         fontSize: '0.95rem',
                                                         marginBottom: '4px'
                                                     }}>
                                                         {item.message}
                                                     </div>
-                                                    <div style={{ 
-                                                        fontSize: '0.7rem', 
+                                                    <div style={{
+                                                        fontSize: '0.7rem',
                                                         opacity: 0.7,
                                                         display: 'flex',
                                                         alignItems: 'center',
@@ -1493,8 +1499,8 @@ const MyOrders = () => {
                                 </>
                             )}
                         </div>
-                        <div style={{ 
-                            padding: '12px 20px', 
+                        <div style={{
+                            padding: '12px 20px',
                             borderTop: '1px solid #e3e6f0',
                             background: 'white'
                         }}>
@@ -1516,8 +1522,8 @@ const MyOrders = () => {
                                     onFocus={(e) => e.target.style.borderColor = 'var(--shop-pink)'}
                                     onBlur={(e) => e.target.style.borderColor = '#e3e6f0'}
                                 />
-                                <button 
-                                    type="submit" 
+                                <button
+                                    type="submit"
                                     style={{
                                         width: '44px',
                                         height: '44px',

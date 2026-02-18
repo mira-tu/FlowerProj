@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 import { supabase } from '../config/supabase';
+import TrackingPaymentDetails from '../components/TrackingPaymentDetails';
 import '../styles/Shop.css';
 
 const paymentStep = { status: 'payment', title: 'Payment', description: 'Payment confirmed', icon: 'fa-credit-card' };
@@ -27,6 +28,8 @@ const OrderTracking = () => {
     const [order, setOrder] = useState(null);
     const [currentStep, setCurrentStep] = useState(1);
     const [loading, setLoading] = useState(true);
+    const [additionalFile, setAdditionalFile] = useState(null);
+    const [uploadingReceipt, setUploadingReceipt] = useState(false);
 
     const getTrackingSteps = (orderData) => {
         if (!orderData) return baseDeliverySteps;
@@ -133,6 +136,57 @@ const OrderTracking = () => {
         }
     };
 
+    const handleUploadReceipt = async () => {
+        if (!additionalFile || !order) return;
+
+        setUploadingReceipt(true);
+        try {
+            const fileExt = additionalFile.name.split('.').pop();
+            const fileName = `${order.order_number}_${Date.now()}.${fileExt}`;
+            const filePath = `${fileName}`;
+
+            const { error: uploadError } = await supabase.storage
+                .from('receipts')
+                .upload(filePath, additionalFile);
+
+            if (uploadError) throw uploadError;
+
+            const { data: urlData } = supabase.storage
+                .from('receipts')
+                .getPublicUrl(filePath);
+
+            if (!urlData.publicUrl) throw new Error('Failed to get public URL');
+
+            const newReceipt = {
+                url: urlData.publicUrl,
+                uploaded_at: new Date().toISOString()
+            };
+
+            const currentReceipts = order.additional_receipts || [];
+            const updatedReceipts = [...currentReceipts, newReceipt];
+
+            const { error: updateError } = await supabase
+                .from('orders')
+                .update({
+                    additional_receipts: updatedReceipts,
+                    // If they upload a new receipt, maybe we set status to pending again? 
+                    // For now, let's just update the receipts list.
+                })
+                .eq('id', order.id);
+
+            if (updateError) throw updateError;
+
+            alert('Receipt uploaded successfully!');
+            setAdditionalFile(null);
+            // The realtime subscription should pick up the change and reload
+        } catch (error) {
+            console.error('Error uploading receipt:', error);
+            alert('Failed to upload receipt. Please try again.');
+        } finally {
+            setUploadingReceipt(false);
+        }
+    };
+
     const trackingSteps = getTrackingSteps(order);
     const isPickup = order?.deliveryMethod === 'pickup';
     const isFinalStep = currentStep >= trackingSteps.length;
@@ -185,13 +239,31 @@ const OrderTracking = () => {
                     payment_method: foundOrder.payment_method,
                     shippingFee: foundOrder.shipping_fee,
                     pickupTime: foundOrder.pickup_time,
-                    address: foundOrder.addresses,
+                    shipping_address: (() => {
+                        const addr = foundOrder.addresses || foundOrder.address;
+                        const addressData = Array.isArray(addr) ? addr[0] : addr;
+                        if (!addressData) return null;
+                        return {
+                            name: addressData.name,
+                            phone: addressData.phone,
+                            description: [
+                                addressData.street,
+                                addressData.barangay,
+                                addressData.city,
+                                addressData.province
+                            ].filter(Boolean).join(', ')
+                        };
+                    })(),
                     type: foundOrder.request_type || null,
                     items: foundOrder.order_items.map(item => ({
                         ...item,
                         image: item.products?.image_url || item.image_url,
                         qty: item.quantity,
                     })),
+                    amount_received: foundOrder.amount_received || 0,
+                    additional_receipts: foundOrder.additional_receipts || [],
+                    payment_status: foundOrder.payment_status,
+                    total: foundOrder.total,
                 };
                 setOrder(transformedOrder);
 
@@ -351,11 +423,25 @@ const OrderTracking = () => {
 
                 <div className="row">
                     <div className="col-lg-8">
+                        <TrackingPaymentDetails
+                            paymentMethod={order.payment_method || 'gcash'}
+                            paymentStatus={order.payment_status}
+                            totalAmount={order.total}
+                            amountPaid={order.amount_received}
+                            receiptUrl={order.receipt_url}
+                            additionalReceipts={order.additional_receipts}
+                            onUploadReceipt={handleUploadReceipt}
+                            uploadingReceipt={uploadingReceipt}
+                            additionalFile={additionalFile}
+                            setAdditionalFile={setAdditionalFile}
+                        />
+
                         <div className="tracking-timeline">
                             <h5 className="fw-bold mb-4">
                                 <i className="fas fa-route me-2" style={{ color: 'var(--shop-pink)' }}></i>
                                 Tracking Timeline
                             </h5>
+
 
                             <div className="timeline">
                                 {trackingSteps.map((step) => (
@@ -370,8 +456,24 @@ const OrderTracking = () => {
                                         </div>
                                         <div className="timeline-content">
                                             <h5>{step.title}</h5>
-                                            <p>
+                                            <div className="timeline-info-container">
                                                 {step.description}
+                                                {step.status === 'payment' && (order.payment_status === 'partial' || (order.payment_status !== 'paid' && order.amount_received > 0)) && (
+                                                    <div className="mt-2 p-2 rounded shadow-sm border-start border-4 border-warning" style={{ backgroundColor: '#fffbeb', fontSize: '0.85rem' }}>
+                                                        <div className="d-flex align-items-center text-warning-emphasis fw-bold mb-1">
+                                                            <i className="fas fa-info-circle me-2"></i>
+                                                            Partial Payment Received
+                                                        </div>
+                                                        <div className="d-flex justify-content-between">
+                                                            <span>Paid:</span>
+                                                            <span className="text-success">₱{(order.amount_received || 0).toLocaleString()}</span>
+                                                        </div>
+                                                        <div className="d-flex justify-content-between border-top mt-1 pt-1 fw-bold">
+                                                            <span>Remaining Balance:</span>
+                                                            <span className="text-danger">₱{((order.total || 0) - (order.amount_received || 0)).toLocaleString()}</span>
+                                                        </div>
+                                                    </div>
+                                                )}
                                                 {step.status === 'out_for_delivery' && ['out_for_delivery', 'delivered', 'completed', 'claimed'].includes(order.status) && order.rider && (
                                                     <>
                                                         <br />
@@ -379,7 +481,7 @@ const OrderTracking = () => {
                                                         {order.rider.phone && ` (${order.rider.phone})`}
                                                     </>
                                                 )}
-                                            </p>
+                                            </div>
                                             <div className="timeline-date">{getTimelineDate(step.id)}</div>
                                         </div>
                                     </div>
@@ -399,49 +501,45 @@ const OrderTracking = () => {
                                         <div className="delivery-label">Pickup Location</div>
                                         <div className="delivery-value">Jocery's Flower Shop, 123 Flower St., Quezon City</div>
                                     </div>
-                                    {order.pickupTime && (
+                                    {order.pickup_time && (
                                         <div className="delivery-info-row">
                                             <div className="delivery-label">Pickup Time</div>
-                                            <div className="delivery-value">{order.pickupTime}</div>
+                                            <div className="delivery-value">{order.pickup_time}</div>
                                         </div>
                                     )}
-                                    <div className="delivery-info-row">
-                                        <div className="delivery-label">Payment</div>
-                                        <div className="delivery-value">
-                                            {order.payment_method === 'cod' ? 'Cash on Delivery' :
-                                                order.payment_method === 'gcash' ? 'GCash' :
-                                                    order.payment_method}
+                                    {order.payment_method && (
+                                        <div className="delivery-info-row">
+                                            <div className="delivery-label">Payment</div>
+                                            <div className="delivery-value">{order.payment_method === 'gcash' ? 'GCash' : order.payment_method.toUpperCase()}</div>
                                         </div>
-                                    </div>
+                                    )}
                                 </>
                             ) : (
                                 <>
                                     <div className="delivery-info-row">
                                         <div className="delivery-label">Recipient</div>
-                                        <div className="delivery-value">{order.address?.name}</div>
+                                        <div className="delivery-value">{order.shipping_address?.name}</div>
                                     </div>
                                     <div className="delivery-info-row">
                                         <div className="delivery-label">Phone</div>
-                                        <div className="delivery-value">{order.address?.phone}</div>
+                                        <div className="delivery-value">{order.shipping_address?.phone}</div>
                                     </div>
                                     <div className="delivery-info-row">
                                         <div className="delivery-label">Address</div>
-                                        <div className="delivery-value">
-                                            {order.address?.street}, {order.address?.city}, {order.address?.province} {order.address?.zip}
-                                        </div>
+                                        <div className="delivery-value">{order.shipping_address?.description}</div>
                                     </div>
-                                    <div className="delivery-info-row">
-                                        <div className="delivery-label">Payment</div>
-                                        <div className="delivery-value">
-                                            {order.payment_method === 'cod' ? 'Cash on Delivery' :
-                                                order.payment_method === 'gcash' ? 'GCash' :
-                                                    order.payment_method}
+                                    {order.payment_method && (
+                                        <div className="delivery-info-row">
+                                            <div className="delivery-label">Payment</div>
+                                            <div className="delivery-value">{order.payment_method === 'gcash' ? 'GCash' : order.payment_method.toUpperCase()}</div>
                                         </div>
-                                    </div>
+                                    )}
                                 </>
                             )}
+
                         </div>
                     </div>
+
 
                     <div className="col-lg-4">
                         <div className="tracking-items">

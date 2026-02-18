@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabase';
+import TrackingPaymentDetails from '../components/TrackingPaymentDetails';
 import '../styles/Shop.css';
 
 // Timeline steps for Delivery Requests
@@ -28,6 +29,8 @@ const OrderCustomizedTracking = () => {
     const [request, setRequest] = useState(null);
     const [currentStep, setCurrentStep] = useState(1);
     const [loading, setLoading] = useState(true);
+    const [additionalFile, setAdditionalFile] = useState(null);
+    const [uploadingReceipt, setUploadingReceipt] = useState(false);
 
     useEffect(() => {
         const fetchRequest = async () => {
@@ -57,7 +60,7 @@ const OrderCustomizedTracking = () => {
                     .select('*')
                     .eq('id', foundRequest.data.address_id)
                     .single();
-                
+
                 if (addressError) {
                     console.error('Error fetching address:', addressError);
                 } else {
@@ -98,7 +101,7 @@ const OrderCustomizedTracking = () => {
 
             const steps = transformedRequest.deliveryMethod === 'pickup' ? requestPickupSteps : requestDeliverySteps;
             const finalRequestStatuses = ['completed', 'claimed', 'declined', 'cancelled'];
-            
+
             if (finalRequestStatuses.includes(transformedRequest.status)) {
                 if (transformedRequest.status === 'completed' || transformedRequest.status === 'claimed') {
                     setCurrentStep(steps.length + 1);
@@ -107,19 +110,19 @@ const OrderCustomizedTracking = () => {
                 }
             } else {
                 let currentStepKey;
-            if (transformedRequest.status === 'pending') {
-                currentStepKey = 'payment';
-            } else {
-                currentStepKey = transformedRequest.status;
-            }
+                if (transformedRequest.status === 'pending') {
+                    currentStepKey = 'payment';
+                } else {
+                    currentStepKey = transformedRequest.status;
+                }
 
-            let stepIndex = steps.findIndex(step => step.key === currentStepKey);
+                let stepIndex = steps.findIndex(step => step.key === currentStepKey);
 
-            if (stepIndex === -1) {
-                stepIndex = 0; // Default to first step if no match
-            }
-            
-            setCurrentStep(stepIndex + 1);
+                if (stepIndex === -1) {
+                    stepIndex = 0; // Default to first step if no match
+                }
+
+                setCurrentStep(stepIndex + 1);
             }
 
             setLoading(false);
@@ -148,6 +151,67 @@ const OrderCustomizedTracking = () => {
         };
     }, [requestNumber]);
 
+    const handleUploadReceipt = async () => {
+        if (!additionalFile || !request) return;
+
+        setUploadingReceipt(true);
+        try {
+            const fileExt = additionalFile.name.split('.').pop();
+            const fileName = `${Date.now()}.${fileExt}`;
+            const filePath = `additional/${fileName}`;
+
+            const { error: uploadError } = await supabase.storage
+                .from('receipts')
+                .upload(filePath, additionalFile);
+
+            if (uploadError) throw uploadError;
+
+            const { data: urlData } = supabase.storage
+                .from('receipts')
+                .getPublicUrl(filePath);
+
+            if (!urlData.publicUrl) throw new Error('Failed to get public URL');
+
+            const newReceipt = {
+                url: urlData.publicUrl,
+                uploaded_at: new Date().toISOString()
+            };
+
+            const currentReceipts = request.additional_receipts || [];
+            const updatedReceipts = [...currentReceipts, newReceipt];
+
+            const { error: updateError } = await supabase
+                .from('requests')
+                .update({
+                    additional_receipts: updatedReceipts
+                })
+                .eq('id', request.id);
+
+            if (updateError) throw updateError;
+
+            alert('Receipt uploaded successfully!');
+            setAdditionalFile(null);
+            // Refresh request data manually
+            const { data: updatedRequest } = await supabase
+                .from('requests')
+                .select('*')
+                .eq('id', request.id)
+                .single();
+
+            if (updatedRequest) {
+                setRequest({
+                    ...request,
+                    additional_receipts: updatedRequest.additional_receipts || []
+                });
+            }
+        } catch (error) {
+            console.error('Error uploading receipt:', error);
+            alert('Failed to upload receipt. Please try again.');
+        } finally {
+            setUploadingReceipt(false);
+        }
+    };
+
     const getTrackingSteps = () => {
         if (!request) return requestDeliverySteps;
         return request.deliveryMethod === 'pickup' ? requestPickupSteps : requestDeliverySteps;
@@ -157,13 +221,13 @@ const OrderCustomizedTracking = () => {
         if (!request) return '';
         const requestDate = new Date(request.date);
         const stepDate = new Date(requestDate.getTime() + (stepId - 1) * 6 * 60 * 60 * 1000);
-        
+
         if (stepId <= currentStep && currentStep !== -1) {
-            return stepDate.toLocaleString('en-PH', { 
-                month: 'short', 
-                day: 'numeric', 
-                hour: '2-digit', 
-                minute: '2-digit' 
+            return stepDate.toLocaleString('en-PH', {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
             });
         }
         return currentStep === -1 ? 'N/A' : 'Pending';
@@ -173,9 +237,9 @@ const OrderCustomizedTracking = () => {
         if (!request) return '';
         const requestDate = new Date(request.date);
         const expectedDate = new Date(requestDate.getTime() + 48 * 60 * 60 * 1000);
-        return expectedDate.toLocaleDateString('en-PH', { 
+        return expectedDate.toLocaleDateString('en-PH', {
             weekday: 'long',
-            month: 'long', 
+            month: 'long',
             day: 'numeric'
         });
     };
@@ -259,7 +323,7 @@ const OrderCustomizedTracking = () => {
                         </div>
                         <div className="tracking-current-status">
                             {request.status === 'out_for_delivery' && (
-                                <button 
+                                <button
                                     style={{
                                         padding: '8px 20px',
                                         backgroundColor: '#e8f5e9',
@@ -298,38 +362,67 @@ const OrderCustomizedTracking = () => {
 
                 <div className="row">
                     <div className="col-lg-8">
+                        <TrackingPaymentDetails
+                            paymentMethod={request.payment_method || request.requestData?.payment_method || 'gcash'}
+                            paymentStatus={request.payment_status}
+                            totalAmount={request.finalPrice}
+                            amountPaid={request.amount_received}
+                            receiptUrl={request.receipt_url}
+                            additionalReceipts={request.additional_receipts}
+                            onUploadReceipt={handleUploadReceipt}
+                            uploadingReceipt={uploadingReceipt}
+                            additionalFile={additionalFile}
+                            setAdditionalFile={setAdditionalFile}
+                        />
+
                         <div className="tracking-timeline">
+
                             <h5 className="fw-bold mb-4">
                                 <i className="fas fa-route me-2" style={{ color: 'var(--shop-pink)' }}></i>
                                 Request Timeline
                             </h5>
                             <div className="timeline">
                                 {trackingSteps.map((step) => (
-                                    <div 
+                                    <div
                                         key={step.id}
-                                        className={`timeline-item ${
-                                            step.id < currentStep ? 'completed' : 
+                                        className={`timeline-item ${step.id < currentStep ? 'completed' :
                                             step.id === currentStep ? 'current' : ''
-                                        }`}
+                                            }`}
                                     >
                                         <div className="timeline-marker">
                                             <i className={`fas ${step.icon}`}></i>
                                         </div>
                                         <div className="timeline-content">
                                             <h5>{step.title}</h5>
-                                            <p>
+                                            <div className="timeline-info-container">
                                                 {step.description}
+                                                {step.key === 'payment' && (request.payment_status === 'partial' || (request.payment_status !== 'paid' && request.amount_received > 0)) && (
+                                                    <div className="mt-2 p-2 rounded shadow-sm border-start border-4 border-warning" style={{ backgroundColor: '#fffbeb', fontSize: '0.85rem' }}>
+                                                        <div className="d-flex align-items-center text-warning-emphasis fw-bold mb-1">
+                                                            <i className="fas fa-info-circle me-2"></i>
+                                                            Partial Payment Received
+                                                        </div>
+                                                        <div className="d-flex justify-content-between">
+                                                            <span>Paid:</span>
+                                                            <span className="text-success">₱{(request.amount_received || 0).toLocaleString()}</span>
+                                                        </div>
+                                                        <div className="d-flex justify-content-between border-top mt-1 pt-1 fw-bold">
+                                                            <span>Remaining Balance:</span>
+                                                            <span className="text-danger">₱{((request.finalPrice || 0) - (request.amount_received || 0)).toLocaleString()}</span>
+                                                        </div>
+                                                    </div>
+                                                )}
                                                 {step.key === 'out_for_delivery' && ['out_for_delivery', 'delivered', 'completed', 'claimed'].includes(request.status) && request.rider && (
                                                     <><br /><span className="fw-bold">Rider:</span> {request.rider.name} {request.rider.phone && `(${request.rider.phone})`}</>
                                                 )}
-                                            </p>
+                                            </div>
                                             <div className="timeline-date">{getTimelineDate(step.id)}</div>
                                         </div>
                                     </div>
                                 ))}
                                 {isDeclinedOrCancelled && (
-                                     <div className="timeline-item current">
-                                        <div className="timeline-marker" style={{backgroundColor: '#f44336', borderColor: '#f44336', color: '#fff'}}>
+                                    <div className="timeline-item current">
+                                        <div className="timeline-marker" style={{ backgroundColor: '#f44336', borderColor: '#f44336', color: '#fff' }}>
                                             <i className="fas fa-times-circle"></i>
                                         </div>
                                         <div className="timeline-content">
@@ -347,7 +440,7 @@ const OrderCustomizedTracking = () => {
                                 <i className={`fas ${isPickup ? 'fa-store' : 'fa-map-marker-alt'} me-2`} style={{ color: 'var(--shop-pink)' }}></i>
                                 {isPickup ? 'Pickup Details' : 'Delivery Details'}
                             </h5>
-                            
+
                             {isPickup ? (
                                 <>
                                     <div className="delivery-info-row">
@@ -380,9 +473,9 @@ const OrderCustomizedTracking = () => {
                                     <div className="delivery-info-row">
                                         <div className="delivery-label">Address</div>
                                         <div className="delivery-value">
-                                            {request.address ? 
+                                            {request.address ?
                                                 `${request.address.street}, ${request.address.barangay}, ${request.address.city}, ${request.address.province}` :
-                                                'N/A'
+                                                (request.requestData?.deliveryAddress || 'N/A')
                                             }
                                         </div>
                                     </div>
@@ -395,7 +488,9 @@ const OrderCustomizedTracking = () => {
                                 </>
                             )}
                         </div>
+
                     </div>
+
 
                     <div className="col-lg-4">
                         <div className="tracking-items">
@@ -403,7 +498,7 @@ const OrderCustomizedTracking = () => {
                                 <i className="fas fa-info-circle me-2" style={{ color: 'var(--shop-pink)' }}></i>
                                 Request Details
                             </h5>
-                            
+
                             {request.requestData && request.requestData.items && request.requestData.items.map((item, index) => (
                                 <div key={item.id || index} className="mb-4">
                                     <div className="d-flex align-items-center mb-3">
