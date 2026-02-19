@@ -1,7 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const runtimeConfig = typeof window !== 'undefined' ? window.__APP_CONFIG || {} : {};
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || runtimeConfig.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || runtimeConfig.VITE_SUPABASE_ANON_KEY;
 
 // Fallback to a lightweight mock client when Supabase is not configured.
 // This keeps the SPA from crashing or going blank in local/test environments
@@ -188,4 +190,3 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 export { supabase };
-
