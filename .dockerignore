@@ -1,0 +1,7 @@
+.git
+.gitignore
+**/node_modules
+**/dist
+react-native-app
+supabase
+*.log
