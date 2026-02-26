@@ -8,7 +8,64 @@ import ResetPasswordScreen from './src/screens/ResetPasswordScreen';
 import { initializeAsyncStorage } from './src/utils/mockData';
 import { supabase } from './src/config/supabase';
 import { Linking } from 'react-native';
-import Toast from 'react-native-toast-message';
+import Toast, { BaseToast, ErrorToast } from 'react-native-toast-message';
+
+const toastConfig = {
+  success: (props) => (
+    <BaseToast
+      {...props}
+      style={{ borderLeftColor: '#22C55E', backgroundColor: '#F0FDF4', borderRadius: 12, height: 'auto', paddingVertical: 12, paddingHorizontal: 8, elevation: 4, width: '90%' }}
+      contentContainerStyle={{ paddingHorizontal: 15 }}
+      text1Style={{
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#166534'
+      }}
+      text2Style={{
+        fontSize: 14,
+        color: '#15803D'
+      }}
+      text1NumberOfLines={2}
+      text2NumberOfLines={3}
+    />
+  ),
+  error: (props) => (
+    <ErrorToast
+      {...props}
+      style={{ borderLeftColor: '#EF4444', backgroundColor: '#FEF2F2', borderRadius: 12, height: 'auto', paddingVertical: 12, paddingHorizontal: 8, elevation: 4, width: '90%' }}
+      contentContainerStyle={{ paddingHorizontal: 15 }}
+      text1Style={{
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#991B1B'
+      }}
+      text2Style={{
+        fontSize: 14,
+        color: '#B91C1C'
+      }}
+      text1NumberOfLines={2}
+      text2NumberOfLines={3}
+    />
+  ),
+  info: (props) => (
+    <BaseToast
+      {...props}
+      style={{ borderLeftColor: '#3B82F6', backgroundColor: '#EFF6FF', borderRadius: 12, height: 'auto', paddingVertical: 12, paddingHorizontal: 8, elevation: 4, width: '90%' }}
+      contentContainerStyle={{ paddingHorizontal: 15 }}
+      text1Style={{
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#1E40AF'
+      }}
+      text2Style={{
+        fontSize: 14,
+        color: '#1D4ED8'
+      }}
+      text1NumberOfLines={2}
+      text2NumberOfLines={3}
+    />
+  )
+};
 
 const Stack = createNativeStackNavigator();
 
@@ -102,7 +159,7 @@ function App() {
           />
         </Stack.Navigator>
       </NavigationContainer>
-      <Toast />
+      <Toast config={toastConfig} />
     </View>
   );
 }

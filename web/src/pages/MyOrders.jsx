@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabase';
+import InfoModal from '../components/InfoModal';
 import '../styles/Shop.css';
 
 const orderTabs = [
@@ -31,6 +32,7 @@ const MyOrders = () => {
     const [uploadingReceiptFor, setUploadingReceiptFor] = useState(null);
     const [orderMessages, setOrderMessages] = useState({}); // Store message info for each order
     const [totalUnreadMessages, setTotalUnreadMessages] = useState(0);
+    const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null });
 
     useEffect(() => {
         const checkUser = async () => {
@@ -338,7 +340,7 @@ const MyOrders = () => {
 
                 if (error) {
                     console.error('Error cancelling request:', error);
-                    alert('Failed to cancel request. Please try again.');
+                    setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel request. Please try again.' });
                     return;
                 }
             } else {
@@ -350,7 +352,7 @@ const MyOrders = () => {
 
                 if (error) {
                     console.error('Error cancelling order:', error);
-                    alert('Failed to cancel order. Please try again.');
+                    setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel order. Please try again.' });
                     return;
                 }
             }
@@ -387,7 +389,7 @@ const MyOrders = () => {
             setOrderToCancel(null);
         } catch (error) {
             console.error('Error cancelling order:', error);
-            alert('Failed to cancel order. Please try again.');
+            setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel order. Please try again.' });
         }
     };
 
@@ -726,16 +728,16 @@ const MyOrders = () => {
                                         </span>
                                         {order.paymentStatus && (
                                             <span className={`badge ${order.paymentStatus === 'paid'
-                                                    ? 'bg-success'
-                                                    : order.paymentStatus === 'waiting_for_confirmation'
-                                                        ? 'bg-info'
-                                                        : 'bg-warning'
+                                                ? 'bg-success'
+                                                : order.paymentStatus === 'waiting_for_confirmation'
+                                                    ? 'bg-info'
+                                                    : 'bg-warning'
                                                 }`}>
                                                 <i className={`fas ${order.paymentStatus === 'paid'
-                                                        ? 'fa-check-circle'
-                                                        : order.paymentStatus === 'waiting_for_confirmation'
-                                                            ? 'fa-hourglass-half'
-                                                            : 'fa-clock'
+                                                    ? 'fa-check-circle'
+                                                    : order.paymentStatus === 'waiting_for_confirmation'
+                                                        ? 'fa-hourglass-half'
+                                                        : 'fa-clock'
                                                     } me-1`}></i>
                                                 {order.paymentStatus === 'paid'
                                                     ? 'Paid'
@@ -1549,6 +1551,16 @@ const MyOrders = () => {
                     </div>
                 </div>
             )}
+
+            <InfoModal
+                show={infoModal.show}
+                onClose={() => setInfoModal({ show: false, title: '', message: '' })}
+                title={infoModal.title}
+                message={infoModal.message}
+                linkTo={infoModal.linkTo}
+                linkText={infoModal.linkText}
+                linkState={infoModal.linkState}
+            />
         </div>
     );
 };

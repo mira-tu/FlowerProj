@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabase';
 import TrackingPaymentDetails from '../components/TrackingPaymentDetails';
+import InfoModal from '../components/InfoModal';
 import '../styles/Shop.css';
 
 // Timeline steps for Delivery Requests
@@ -31,6 +32,7 @@ const OrderCustomizedTracking = () => {
     const [loading, setLoading] = useState(true);
     const [additionalFile, setAdditionalFile] = useState(null);
     const [uploadingReceipt, setUploadingReceipt] = useState(false);
+    const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
 
     useEffect(() => {
         const fetchRequest = async () => {
@@ -137,11 +139,12 @@ const OrderCustomizedTracking = () => {
                 {
                     event: 'UPDATE',
                     schema: 'public',
-                    table: 'requests',
-                    filter: `request_number=eq.${requestNumber}`,
+                    table: 'requests'
                 },
                 (payload) => {
-                    fetchRequest();
+                    if (payload.new && payload.new.request_number === requestNumber) {
+                        fetchRequest();
+                    }
                 }
             )
             .subscribe();
@@ -172,24 +175,31 @@ const OrderCustomizedTracking = () => {
 
             if (!urlData.publicUrl) throw new Error('Failed to get public URL');
 
-            const newReceipt = {
-                url: urlData.publicUrl,
-                uploaded_at: new Date().toISOString()
-            };
-
-            const currentReceipts = request.additional_receipts || [];
-            const updatedReceipts = [...currentReceipts, newReceipt];
+            let updatePayload = {};
+            if (!request.receipt_url) {
+                updatePayload = {
+                    receipt_url: urlData.publicUrl,
+                    payment_status: 'waiting_for_confirmation'
+                };
+            } else {
+                const newReceipt = {
+                    url: urlData.publicUrl,
+                    uploaded_at: new Date().toISOString()
+                };
+                const currentReceipts = request.additional_receipts || [];
+                updatePayload = {
+                    additional_receipts: [...currentReceipts, newReceipt]
+                };
+            }
 
             const { error: updateError } = await supabase
                 .from('requests')
-                .update({
-                    additional_receipts: updatedReceipts
-                })
+                .update(updatePayload)
                 .eq('id', request.id);
 
             if (updateError) throw updateError;
 
-            alert('Receipt uploaded successfully!');
+            setInfoModal({ show: true, title: 'Success', message: 'Receipt uploaded successfully!' });
             setAdditionalFile(null);
             // Refresh request data manually
             const { data: updatedRequest } = await supabase
@@ -199,14 +209,16 @@ const OrderCustomizedTracking = () => {
                 .single();
 
             if (updatedRequest) {
-                setRequest({
-                    ...request,
+                setRequest(prev => ({
+                    ...prev,
+                    receipt_url: updatedRequest.receipt_url,
+                    payment_status: updatedRequest.payment_status,
                     additional_receipts: updatedRequest.additional_receipts || []
-                });
+                }));
             }
         } catch (error) {
             console.error('Error uploading receipt:', error);
-            alert('Failed to upload receipt. Please try again.');
+            setInfoModal({ show: true, title: 'Upload Failed', message: error.message || 'Failed to upload receipt. Please try again.' });
         } finally {
             setUploadingReceipt(false);
         }
@@ -254,9 +266,9 @@ const OrderCustomizedTracking = () => {
 
         if (error) {
             console.error('Error updating request status:', error);
-            alert('There was an error confirming your request. Please try again.');
+            setInfoModal({ show: true, title: 'Error', message: 'There was an error confirming your request. Please try again.' });
         } else {
-            alert('Thank you for confirming! Your request is now marked as completed.');
+            setInfoModal({ show: true, title: 'Request Confirmed', message: 'Thank you for confirming! Your request is now marked as completed.' });
         }
     };
 
@@ -373,6 +385,7 @@ const OrderCustomizedTracking = () => {
                             uploadingReceipt={uploadingReceipt}
                             additionalFile={additionalFile}
                             setAdditionalFile={setAdditionalFile}
+                            shippingFee={request.shipping_fee}
                         />
 
                         <div className="tracking-timeline">
@@ -560,6 +573,13 @@ const OrderCustomizedTracking = () => {
                     </div>
                 </div>
             </div>
+
+            <InfoModal
+                show={infoModal.show}
+                onClose={() => setInfoModal({ ...infoModal, show: false })}
+                title={infoModal.title}
+                message={infoModal.message}
+            />
         </div>
     );
 };

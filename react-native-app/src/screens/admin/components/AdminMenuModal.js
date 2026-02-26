@@ -44,9 +44,9 @@ const AdminMenuModal = ({ visible, onClose, setActiveTab, currentUser, onLogoutP
             <Text style={styles.menuItemText}>Stock</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('notifications'); onClose(); }}>
-            <Ionicons name="notifications-outline" size={20} color="#333" />
-            <Text style={styles.menuItemText}>Notifications</Text>
+          <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('fees'); onClose(); }}>
+            <Ionicons name="cash-outline" size={20} color="#333" />
+            <Text style={styles.menuItemText}>Delivery Fees</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('messaging'); onClose(); }}>

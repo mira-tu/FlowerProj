@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../config/supabase';
 import { Link, useNavigate } from 'react-router-dom';
+import ConfirmModal from '../components/ConfirmModal';
 import '../styles/Shop.css';
 
 const Notifications = () => {
     const navigate = useNavigate();
     const [notifications, setNotifications] = useState([]);
     const [filter, setFilter] = useState('all'); // all, unread, read
+    const [confirmModal, setConfirmModal] = useState({ show: false, onConfirm: null, title: '', message: '' });
 
     useEffect(() => {
         const loadFromLocalStorage = () => {
@@ -82,25 +84,30 @@ const Notifications = () => {
     };
 
     const clearAllNotifications = async () => {
-        if (window.confirm('Are you sure you want to clear all notifications?')) {
-            const allIds = notifications.map(n => n.id);
-            
-            // Optimistic UI update
-            localStorage.setItem('notifications', JSON.stringify([]));
-            setNotifications([]);
+        setConfirmModal({
+            show: true,
+            title: 'Clear Notifications',
+            message: 'Are you sure you want to clear all notifications?',
+            onConfirm: async () => {
+                const allIds = notifications.map(n => n.id);
 
-            // Update database
-            if (allIds.length > 0) {
-                try {
-                    await supabase
-                        .from('notifications')
-                        .delete()
-                        .in('id', allIds);
-                } catch (error) {
-                    console.error("Error clearing all notifications from DB:", error);
+                // Optimistic UI update
+                localStorage.setItem('notifications', JSON.stringify([]));
+                setNotifications([]);
+
+                // Update database
+                if (allIds.length > 0) {
+                    try {
+                        await supabase
+                            .from('notifications')
+                            .delete()
+                            .in('id', allIds);
+                    } catch (error) {
+                        console.error("Error clearing all notifications from DB:", error);
+                    }
                 }
             }
-        }
+        });
     };
 
     const deleteNotification = async (notificationId) => {
@@ -142,7 +149,7 @@ const Notifications = () => {
         if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
         if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
         if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-        
+
         return date.toLocaleString('en-PH', {
             month: 'short',
             day: 'numeric',
@@ -216,11 +223,11 @@ const Notifications = () => {
                         </div>
                         <h3>No notifications</h3>
                         <p>
-                            {filter === 'all' 
+                            {filter === 'all'
                                 ? "You don't have any notifications yet."
                                 : filter === 'unread'
-                                ? "You don't have any unread notifications."
-                                : "You don't have any read notifications."}
+                                    ? "You don't have any unread notifications."
+                                    : "You don't have any read notifications."}
                         </p>
                         {filter !== 'all' && (
                             <button
@@ -241,7 +248,7 @@ const Notifications = () => {
                                 style={{ cursor: 'pointer' }}
                             >
                                 <div className="d-flex align-items-start gap-3">
-                                    <div 
+                                    <div
                                         className="notification-icon-large"
                                         style={{
                                             width: '50px',
@@ -261,7 +268,7 @@ const Notifications = () => {
                                         <div className="d-flex justify-content-between align-items-start mb-1">
                                             <h6 className="mb-0 fw-bold">{notification.title}</h6>
                                             {!notification.read && (
-                                                <span 
+                                                <span
                                                     className="badge bg-primary"
                                                     style={{ background: 'var(--shop-pink)' }}
                                                 >
@@ -295,6 +302,14 @@ const Notifications = () => {
                     </div>
                 )}
             </div>
+
+            <ConfirmModal
+                show={confirmModal.show}
+                onClose={() => setConfirmModal({ ...confirmModal, show: false })}
+                onConfirm={confirmModal.onConfirm}
+                title={confirmModal.title}
+                message={confirmModal.message}
+            />
         </div>
     );
 };

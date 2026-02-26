@@ -58,6 +58,7 @@ const getStatusColor = (status) => {
     case 'ready_for_pick_up': return '#6366F1';
     case 'out_for_delivery': return '#8B5CF6';
     case 'processing': return '#2196F3';
+    case 'accepted': return '#0891B2'; // Teal - between pending and processing
     case 'cancelled': return '#f44336';
     case 'pending': return '#FFA726';
     default: return '#999';

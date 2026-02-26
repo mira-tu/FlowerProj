@@ -419,6 +419,7 @@ export const adminAPI = {
                 payment_status,
                 payment_method,
                 receipt_url,
+                additional_receipts,
                 pickup_time,
                 total,
                 subtotal,
@@ -441,7 +442,8 @@ export const adminAPI = {
                     )
                 ),
                 third_party_rider_name,
-                third_party_rider_info
+                third_party_rider_info,
+                amount_received
             `)
             .order('created_at', { ascending: false });
 
@@ -895,10 +897,11 @@ export const adminAPI = {
                 }
             }
 
-            // Prioritize fields from the 'data' JSONB if they exist
-            const paymentStatusToUse = requestData?.payment_status !== undefined ? requestData.payment_status : req.payment_status;
-            const paymentMethodToUse = requestData?.payment_method !== undefined ? requestData.payment_method : 'gcash'; // Default to gcash if not found
-            const receiptUrlToUse = requestData?.receipt_url !== undefined ? requestData.receipt_url : req.receipt_url;
+            // Always prefer the top-level DB column for payment fields (they are updated by admin actions).
+            // Only fall back to JSONB 'data' if the top-level column is null/undefined.
+            const paymentStatusToUse = req.payment_status !== undefined && req.payment_status !== null ? req.payment_status : requestData?.payment_status;
+            const paymentMethodToUse = req.payment_method !== undefined && req.payment_method !== null ? req.payment_method : (requestData?.payment_method || 'gcash');
+            const receiptUrlToUse = req.receipt_url !== undefined && req.receipt_url !== null ? req.receipt_url : requestData?.receipt_url;
 
             const deliveryMethodFromData = requestData?.delivery_method;
             const pickupTimeFromData = requestData?.pickup_time;
@@ -922,11 +925,12 @@ export const adminAPI = {
         return { data: { requests: formattedRequests } };
     },
 
-    provideQuote: async (id, price) => {
+    provideQuote: async (id, price, shippingFee = 0) => {
         const { data: request, error } = await supabase
             .from('requests')
             .update({
-                final_price: price,
+                final_price: price + shippingFee,
+                shipping_fee: shippingFee,
                 status: 'quoted'
             })
             .eq('id', id)

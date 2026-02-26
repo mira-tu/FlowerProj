@@ -22,7 +22,7 @@ import CatalogueTab from './admin/tabs/CatalogueTab';
 import ContactTab from './admin/tabs/ContactTab';
 import EmployeesTab from './admin/tabs/EmployeesTab';
 import MessagingTab from './admin/tabs/MessagingTab';
-import NotificationsTab from './admin/tabs/NotificationsTab';
+import DeliveryFeesTab from './admin/tabs/DeliveryFeesTab';
 import OrdersTab from './admin/tabs/OrdersTab';
 import RequestsTab from './admin/tabs/RequestsTab';
 import SalesTab from './admin/tabs/SalesTab';
@@ -126,8 +126,8 @@ const AdminDashboard = () => {
         return <StockTab />;
       case 'requests':
         return <RequestsTab setActiveTab={setActiveTab} handleSelectCustomerForMessage={handleSelectCustomerForMessage} />;
-      case 'notifications':
-        return <NotificationsTab />;
+      case 'fees':
+        return <DeliveryFeesTab />;
       case 'messaging':
         return <MessagingTab customerToMessage={customerToMessage} setCustomerToMessage={setCustomerToMessage} />;
       case 'sales':

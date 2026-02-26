@@ -5,6 +5,7 @@ import { supabase } from '../config/supabase';
 import '../styles/SpecialOrder.css';
 import '../styles/Shop.css';
 import { formatPhoneNumber } from '../utils/format';
+import InfoModal from '../components/InfoModal';
 
 const initialFormState = {
     recipientName: '',
@@ -33,6 +34,7 @@ const SpecialOrder = ({ user }) => {
     const [barangays, setBarangays] = useState([]);
     const [addressLoading, setAddressLoading] = useState(false);
     const [selectedBarangay, setSelectedBarangay] = useState(null);
+    const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
 
     useEffect(() => {
         if (user) {
@@ -76,7 +78,7 @@ const SpecialOrder = ({ user }) => {
 
                 const standardOccasions = ['Birthday', 'Anniversary', 'Valentines', 'MothersDay', 'JustBecause', 'Apology'];
                 const isOther = occasion && !standardOccasions.includes(occasion);
-                
+
                 setFormData(prev => ({
                     ...prev,
                     recipientName: recipient_name || '',
@@ -110,7 +112,7 @@ const SpecialOrder = ({ user }) => {
         const { value, checked } = event.target;
         setFormData(prev => {
             let newAddons = [...prev.addons];
-    
+
             if (checked) {
                 if (value === 'None') {
                     newAddons = ['None'];
@@ -121,7 +123,7 @@ const SpecialOrder = ({ user }) => {
             } else {
                 newAddons = newAddons.filter(item => item !== value);
             }
-    
+
             return { ...prev, addons: newAddons };
         });
     };
@@ -132,7 +134,7 @@ const SpecialOrder = ({ user }) => {
         if (files && files[0]) {
             const file = files[0];
             setFormData((prev) => ({ ...prev, [name]: file }));
-            
+
             const reader = new FileReader();
             reader.onloadend = () => {
                 setImagePreview(reader.result);
@@ -161,7 +163,7 @@ const SpecialOrder = ({ user }) => {
     const handleSaveAddress = () => {
         const { street, barangay } = addressForm;
         if (!street || !barangay) {
-            alert('Please fill in all address fields.');
+            setInfoModal({ show: true, title: 'Notice', message: 'Please fill in all address fields.' });
             return;
         }
         const fullAddress = `${street}, ${barangay}, Zamboanga City, Zamboanga Del Sur`;
@@ -209,7 +211,7 @@ const SpecialOrder = ({ user }) => {
                     .upload(fileName, file);
 
                 if (uploadError) throw uploadError;
-                
+
                 const { data: urlData } = supabase.storage.from('request-images').getPublicUrl(fileName);
                 imageUrl = urlData.publicUrl;
             }
@@ -233,7 +235,7 @@ const SpecialOrder = ({ user }) => {
                     message: formData.message,
                 }
             };
-            
+
             localStorage.setItem('bookingInquiry', JSON.stringify(inquiryData));
             navigate('/booking-cart');
 
@@ -244,7 +246,7 @@ const SpecialOrder = ({ user }) => {
             setIsSubmitting(false);
         }
     };
-    
+
     const selectStyles = {
         control: (provided) => ({
             ...provided,
@@ -407,9 +409,9 @@ const SpecialOrder = ({ user }) => {
                                                 <label className="form-label fw-semibold" htmlFor="inspirationFile">Inspiration Gallery</label>
                                                 {imagePreview ? (
                                                     <div className="position-relative">
-                                                        <img 
-                                                            src={imagePreview} 
-                                                            alt="Preview" 
+                                                        <img
+                                                            src={imagePreview}
+                                                            alt="Preview"
                                                             style={{
                                                                 width: '100%',
                                                                 maxHeight: '400px',
@@ -483,7 +485,7 @@ const SpecialOrder = ({ user }) => {
                                     placeholder="e.g., House No., Street Name, Subdivision"
                                 />
                             </div>
-                            
+
                             <button
                                 className="btn"
                                 style={{ background: 'var(--shop-pink)', color: 'white' }}
@@ -495,6 +497,13 @@ const SpecialOrder = ({ user }) => {
                     </div>
                 </div>
             )}
+
+            <InfoModal
+                show={infoModal.show}
+                onClose={() => setInfoModal({ show: false, title: '', message: '' })}
+                title={infoModal.title}
+                message={infoModal.message}
+            />
         </div>
     );
 };

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { supabase } from '../config/supabase';
 import TrackingPaymentDetails from '../components/TrackingPaymentDetails';
+import InfoModal from '../components/InfoModal';
 import '../styles/Shop.css';
 
 // Timeline steps for Delivery Requests
@@ -33,6 +34,7 @@ const OrderBookingTracking = () => {
     const [loading, setLoading] = useState(true);
     const [additionalFile, setAdditionalFile] = useState(null);
     const [uploadingReceipt, setUploadingReceipt] = useState(false);
+    const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
 
     useEffect(() => {
         const fetchRequest = async () => {
@@ -144,11 +146,13 @@ const OrderBookingTracking = () => {
                 {
                     event: 'UPDATE',
                     schema: 'public',
-                    table: 'requests',
-                    filter: `request_number=eq.${requestNumber}`,
+                    table: 'requests'
                 },
                 (payload) => {
-                    fetchRequest();
+                    // Check if the updated record matches our request
+                    if (payload.new && payload.new.request_number === requestNumber) {
+                        fetchRequest();
+                    }
                 }
             )
             .subscribe();
@@ -179,24 +183,33 @@ const OrderBookingTracking = () => {
 
             if (!urlData.publicUrl) throw new Error('Failed to get public URL');
 
-            const newReceipt = {
-                url: urlData.publicUrl,
-                uploaded_at: new Date().toISOString()
-            };
-
-            const currentReceipts = request.additional_receipts || [];
-            const updatedReceipts = [...currentReceipts, newReceipt];
+            let updatePayload = {};
+            if (!request.receipt_url) {
+                // If there's no main receipt yet, set this as the main receipt
+                updatePayload = {
+                    receipt_url: urlData.publicUrl,
+                    payment_status: 'waiting_for_confirmation' // Optional: indicate it's waiting
+                };
+            } else {
+                // Otherwise add to additional receipts
+                const newReceipt = {
+                    url: urlData.publicUrl,
+                    uploaded_at: new Date().toISOString()
+                };
+                const currentReceipts = request.additional_receipts || [];
+                updatePayload = {
+                    additional_receipts: [...currentReceipts, newReceipt]
+                };
+            }
 
             const { error: updateError } = await supabase
                 .from('requests')
-                .update({
-                    additional_receipts: updatedReceipts
-                })
+                .update(updatePayload)
                 .eq('id', request.id);
 
             if (updateError) throw updateError;
 
-            alert('Receipt uploaded successfully!');
+            setInfoModal({ show: true, title: 'Success', message: 'Receipt uploaded successfully!' });
             setAdditionalFile(null);
             // Refresh request data manually since realtime might have delay
             const { data: updatedRequest } = await supabase
@@ -206,14 +219,16 @@ const OrderBookingTracking = () => {
                 .single();
 
             if (updatedRequest) {
-                setRequest({
-                    ...request,
+                setRequest(prev => ({
+                    ...prev,
+                    receipt_url: updatedRequest.receipt_url,
+                    payment_status: updatedRequest.payment_status,
                     additional_receipts: updatedRequest.additional_receipts || []
-                });
+                }));
             }
         } catch (error) {
             console.error('Error uploading receipt:', error);
-            alert('Failed to upload receipt. Please try again.');
+            setInfoModal({ show: true, title: 'Upload Failed', message: error.message || 'Failed to upload receipt. Please try again.' });
         } finally {
             setUploadingReceipt(false);
         }
@@ -273,9 +288,9 @@ const OrderBookingTracking = () => {
 
         if (error) {
             console.error('Error updating request status:', error);
-            alert('There was an error confirming your request. Please try again.');
+            setInfoModal({ show: true, title: 'Error', message: 'There was an error confirming your request. Please try again.' });
         } else {
-            alert('Thank you for confirming! Your request is now marked as completed.');
+            setInfoModal({ show: true, title: 'Request Confirmed', message: 'Thank you for confirming! Your request is now marked as completed.' });
         }
     };
 
@@ -386,18 +401,22 @@ const OrderBookingTracking = () => {
 
                 <div className="row">
                     <div className="col-lg-8">
-                        <TrackingPaymentDetails
-                            paymentMethod={request.payment_method || request.requestData?.payment_method || 'gcash'}
-                            paymentStatus={request.payment_status}
-                            totalAmount={request.finalPrice}
-                            amountPaid={request.amount_received}
-                            receiptUrl={request.receipt_url}
-                            additionalReceipts={request.additional_receipts}
-                            onUploadReceipt={handleUploadReceipt}
-                            uploadingReceipt={uploadingReceipt}
-                            additionalFile={additionalFile}
-                            setAdditionalFile={setAdditionalFile}
-                        />
+                        {/* Only show payment section once the price has been accepted by the customer */}
+                        {!['pending', 'quoted'].includes(request.status) && (
+                            <TrackingPaymentDetails
+                                paymentMethod={request.payment_method || request.requestData?.payment_method || 'gcash'}
+                                paymentStatus={request.payment_status}
+                                totalAmount={request.finalPrice}
+                                amountPaid={request.amount_received}
+                                receiptUrl={request.receipt_url}
+                                additionalReceipts={request.additional_receipts}
+                                onUploadReceipt={handleUploadReceipt}
+                                uploadingReceipt={uploadingReceipt}
+                                additionalFile={additionalFile}
+                                setAdditionalFile={setAdditionalFile}
+                                shippingFee={request.shipping_fee}
+                            />
+                        )}
 
                         <div className="tracking-timeline">
 
@@ -406,64 +425,76 @@ const OrderBookingTracking = () => {
                                 Request Timeline
                             </h5>
 
-                            <div className="timeline">
-                                {trackingSteps.map((step) => (
-                                    <div
-                                        key={step.id}
-                                        className={`timeline-item ${step.id < currentStep ? 'completed' :
-                                            step.id === currentStep ? 'current' : ''
-                                            }`}
-                                    >
-                                        <div className="timeline-marker">
-                                            <i className={`fas ${step.icon}`}></i>
-                                        </div>
-                                        <div className="timeline-content">
-                                            <h5>{step.title}</h5>
-                                            <div className="timeline-info-container">
-                                                {step.description}
-                                                {step.status === 'accepted' && (request.payment_status === 'partial' || (request.payment_status !== 'paid' && request.amount_received > 0)) && request.finalPrice > 0 && (
-                                                    <div className="mt-2 p-2 rounded shadow-sm border-start border-4 border-warning" style={{ backgroundColor: '#fffbeb', fontSize: '0.85rem' }}>
-                                                        <div className="d-flex align-items-center text-warning-emphasis fw-bold mb-1">
-                                                            <i className="fas fa-info-circle me-2"></i>
-                                                            Partial Payment Received
-                                                        </div>
-                                                        <div className="d-flex justify-content-between">
-                                                            <span>Paid:</span>
-                                                            <span className="text-success">₱{(request.amount_received || 0).toLocaleString()}</span>
-                                                        </div>
-                                                        <div className="d-flex justify-content-between border-top mt-1 pt-1 fw-bold">
-                                                            <span>Remaining Balance:</span>
-                                                            <span className="text-danger">₱{((request.finalPrice || 0) - (request.amount_received || 0)).toLocaleString()}</span>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                                {step.status === 'out_for_delivery' && ['out_for_delivery', 'delivered', 'completed', 'claimed'].includes(request.status) && request.rider && (
-                                                    <>
-                                                        <br />
-                                                        <span className="fw-bold">Rider:</span> {request.rider.name}
-                                                        {request.rider.phone && ` (${request.rider.phone})`}
-                                                    </>
-                                                )}
+                            {request.status === 'pending' ? (
+                                /* ── Waiting for admin to provide a price ── */
+                                <div className="text-center py-4" style={{ background: '#fdf6ff', borderRadius: '12px', border: '2px dashed #e9b3f7', padding: '32px' }}>
+                                    <i className="fas fa-clock-rotate-left fa-2x mb-3" style={{ color: 'var(--shop-pink)' }}></i>
+                                    <h6 className="fw-bold mt-2">Awaiting Price Quote</h6>
+                                    <p className="text-muted mb-0" style={{ fontSize: '0.9rem' }}>
+                                        Our team is reviewing your request. We'll send you a price quote soon!<br />
+                                        Once you receive it, you can accept and proceed with payment.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="timeline">
+                                    {trackingSteps.map((step) => (
+                                        <div
+                                            key={step.id}
+                                            className={`timeline-item ${step.id < currentStep ? 'completed' :
+                                                step.id === currentStep ? 'current' : ''
+                                                }`}
+                                        >
+                                            <div className="timeline-marker">
+                                                <i className={`fas ${step.icon}`}></i>
                                             </div>
-                                            <div className="timeline-date">{getTimelineDate(step.id)}</div>
+                                            <div className="timeline-content">
+                                                <h5>{step.title}</h5>
+                                                <div className="timeline-info-container">
+                                                    {step.description}
+                                                    {step.status === 'accepted' && (request.payment_status === 'partial' || (request.payment_status !== 'paid' && request.amount_received > 0)) && request.finalPrice > 0 && (
+                                                        <div className="mt-2 p-2 rounded shadow-sm border-start border-4 border-warning" style={{ backgroundColor: '#fffbeb', fontSize: '0.85rem' }}>
+                                                            <div className="d-flex align-items-center text-warning-emphasis fw-bold mb-1">
+                                                                <i className="fas fa-info-circle me-2"></i>
+                                                                Partial Payment Received
+                                                            </div>
+                                                            <div className="d-flex justify-content-between">
+                                                                <span>Paid:</span>
+                                                                <span className="text-success">₱{(request.amount_received || 0).toLocaleString()}</span>
+                                                            </div>
+                                                            <div className="d-flex justify-content-between border-top mt-1 pt-1 fw-bold">
+                                                                <span>Remaining Balance:</span>
+                                                                <span className="text-danger">₱{((request.finalPrice || 0) - (request.amount_received || 0)).toLocaleString()}</span>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {step.status === 'out_for_delivery' && ['out_for_delivery', 'delivered', 'completed', 'claimed'].includes(request.status) && request.rider && (
+                                                        <>
+                                                            <br />
+                                                            <span className="fw-bold">Rider:</span> {request.rider.name}
+                                                            {request.rider.phone && ` (${request.rider.phone})`}
+                                                        </>
+                                                    )}
+                                                </div>
+                                                <div className="timeline-date">{getTimelineDate(step.id)}</div>
+                                            </div>
                                         </div>
-                                    </div>
-                                ))}
-                                {isDeclinedOrCancelled && (
-                                    <div
-                                        className="timeline-item current"
-                                    >
-                                        <div className="timeline-marker" style={{ backgroundColor: '#f44336', borderColor: '#f44336', color: '#fff' }}>
-                                            <i className="fas fa-times-circle"></i>
+                                    ))}
+                                    {isDeclinedOrCancelled && (
+                                        <div
+                                            className="timeline-item current"
+                                        >
+                                            <div className="timeline-marker" style={{ backgroundColor: '#f44336', borderColor: '#f44336', color: '#fff' }}>
+                                                <i className="fas fa-times-circle"></i>
+                                            </div>
+                                            <div className="timeline-content">
+                                                <h5>Request {request.status === 'declined' ? 'Declined' : 'Cancelled'}</h5>
+                                                <p>{request.status === 'declined' ? 'Your request could not be fulfilled.' : 'You have cancelled this request.'}</p>
+                                                <div className="timeline-date">{new Date(request.date).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                                            </div>
                                         </div>
-                                        <div className="timeline-content">
-                                            <h5>Request {request.status === 'declined' ? 'Declined' : 'Cancelled'}</h5>
-                                            <p>{request.status === 'declined' ? 'Your request could not be fulfilled.' : 'You have cancelled this request.'}</p>
-                                            <div className="timeline-date">{new Date(request.date).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
 
                         <div className="delivery-details">
@@ -588,6 +619,13 @@ const OrderBookingTracking = () => {
                     </div>
                 </div>
             </div>
+
+            <InfoModal
+                show={infoModal.show}
+                onClose={() => setInfoModal({ ...infoModal, show: false })}
+                title={infoModal.title}
+                message={infoModal.message}
+            />
         </div>
     );
 };

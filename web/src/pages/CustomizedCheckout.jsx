@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import '../styles/Shop.css';
 import { supabase } from '../config/supabase';
+import InfoModal from '../components/InfoModal';
+import CheckoutAddressSelection from '../components/CheckoutAddressSelection';
 import qrCodeImage from '../assets/qr-code-1.jpg';
 
 const paymentMethods = [
@@ -15,11 +17,13 @@ const CustomizedCheckout = ({ user }) => {
     const [checkoutItems, setCheckoutItems] = useState([]);
     const [selectedPayment, setSelectedPayment] = useState('gcash');
     const [deliveryMethod, setDeliveryMethod] = useState('delivery');
+    const [selectedPickupDate, setSelectedPickupDate] = useState('');
     const [selectedPickupTime, setSelectedPickupTime] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
     const [showQRModal, setShowQRModal] = useState(false);
     const [receiptFile, setReceiptFile] = useState(null);
     const [receiptPreview, setReceiptPreview] = useState(null);
+    const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
 
     const [address, setAddress] = useState({
         name: '',
@@ -29,67 +33,11 @@ const CustomizedCheckout = ({ user }) => {
         city: '',
         province: ''
     });
-    const [savedAddresses, setSavedAddresses] = useState([]);
     const [selectedAddressId, setSelectedAddressId] = useState(null);
     const [dynamicShippingFee, setDynamicShippingFee] = useState(100);
 
-    const handleAddressSelect = useCallback((addressId, addresses) => {
-        if (!addresses) return;
-        const selectedAddr = addresses.find(addr => String(addr.id) === String(addressId));
-        if (selectedAddr) {
-            setAddress({
-                name: selectedAddr.name || '',
-                phone: selectedAddr.phone || '',
-                street: selectedAddr.street || '',
-                barangay: selectedAddr.barangay || '',
-                city: selectedAddr.city || '',
-                province: selectedAddr.province || '',
-            });
-            setSelectedAddressId(selectedAddr.id);
-        }
-    }, []);
+    const showInfoModal = (title, message) => setInfoModal({ show: true, title, message });
 
-    useEffect(() => {
-        const fetchAddresses = async () => {
-            if (user) {
-                const { data, error } = await supabase
-                    .from('addresses')
-                    .select('*')
-                    .eq('user_id', user.id);
-
-                if (error) {
-                    console.error('Error fetching addresses:', error);
-                    return;
-                }
-                
-                setSavedAddresses(data);
-
-                if (data && data.length > 0) {
-                    const defaultAddress = data.find(addr => addr.is_default) || data[0];
-                    if (defaultAddress) {
-                        handleAddressSelect(defaultAddress.id, data);
-                    }
-                } else {
-                    setAddress({
-                        name: user?.user_metadata?.name || user?.email || '',
-                        phone: user?.user_metadata?.phone || '',
-                        street: '',
-                        barangay: '',
-                        city: '',
-                        province: '',
-                    });
-                    setSelectedAddressId(null);
-                }
-            } else {
-                setSavedAddresses([]);
-                setAddress({ name: '', phone: '', street: '', barangay: '', city: '', province: '' });
-                setSelectedAddressId(null);
-            }
-        };
-
-        fetchAddresses();
-    }, [user, handleAddressSelect]);
-    
     useEffect(() => {
         const fetchFee = async () => {
             if (deliveryMethod === 'delivery' && address.barangay) {
@@ -145,41 +93,40 @@ const CustomizedCheckout = ({ user }) => {
 
     const handlePlaceOrder = async () => {
         if (!user) {
-            alert('You must be logged in to place an order. Please log in or sign up.');
-            navigate('/login');
+            setInfoModal({ show: true, title: 'Notice', message: 'You must be logged in to place an order. Please log in or sign up.', linkTo: '/login', linkText: 'Go to Login' });
             return;
         }
-    
-        if (deliveryMethod === 'pickup' && !selectedPickupTime) {
-            alert('Please select a pickup time');
+
+        if (deliveryMethod === 'pickup' && (!selectedPickupDate || !selectedPickupTime)) {
+            setInfoModal({ show: true, title: 'Notice', message: 'Please select a pickup date and time' });
             return;
         }
-        
+
         if (deliveryMethod === 'delivery' && !selectedAddressId) {
-            alert('Please select a saved address for delivery.');
+            setInfoModal({ show: true, title: 'Notice', message: 'Please select a saved address for delivery.' });
             return;
         }
-    
+
         if (selectedPayment === 'gcash' && !receiptFile) {
-            alert('Please upload your GCash payment receipt');
+            setInfoModal({ show: true, title: 'Notice', message: 'Please upload your GCash payment receipt' });
             return;
         }
-    
+
         setIsProcessing(true);
-    
+
         // 1. Upload receipt if GCash
         let uploadedReceiptUrl = null;
         if (receiptFile && selectedPayment === 'gcash') {
             const fileExt = receiptFile.name.split('.').pop();
             const fileName = `receipts/${user.id}-${Date.now()}.${fileExt}`;
-    
+
             const { error: uploadError } = await supabase.storage
                 .from('receipts')
                 .upload(fileName, receiptFile);
-    
+
             if (uploadError) {
                 console.error('Error uploading receipt:', uploadError);
-                alert('There was an error uploading your receipt. Please try again.');
+                setInfoModal({ show: true, title: 'Error', message: 'There was an error uploading your receipt. Please try again.' });
                 setIsProcessing(false);
                 return;
             }
@@ -200,15 +147,15 @@ const CustomizedCheckout = ({ user }) => {
 
                 if (error) {
                     console.error('Error uploading bouquet image:', error);
-                    return { ...item, image_url: null, image: undefined }; 
+                    return { ...item, image_url: null, image: undefined };
                 }
-                
+
                 const { data: publicUrlData } = supabase.storage.from('request-images').getPublicUrl(imgFileName);
                 return { ...item, image_url: publicUrlData.publicUrl, image: undefined };
             }
             return item;
         }));
-    
+
         // 3. Prepare the request data
         const request_number = `CUS-${user.id.substring(0, 4)}-${Date.now()}`;
         const payment_status = selectedPayment === 'gcash' ? 'waiting_for_confirmation' : 'to_pay';
@@ -220,12 +167,13 @@ const CustomizedCheckout = ({ user }) => {
             status: 'pending',
             contact_number: address.phone,
             final_price: total,
+            shipping_fee: shippingFee,
             data: {
                 items: uploadedItems,
                 address: deliveryMethod === 'delivery' ? address : null,
                 address_id: deliveryMethod === 'delivery' ? selectedAddressId : null,
                 delivery_method: deliveryMethod,
-                pickup_time: deliveryMethod === 'pickup' ? selectedPickupTime : null,
+                pickup_time: deliveryMethod === 'pickup' ? `${selectedPickupDate} - ${selectedPickupTime}` : null,
                 payment_method: selectedPayment,
                 payment_status: payment_status,
                 subtotal: subtotal,
@@ -233,17 +181,17 @@ const CustomizedCheckout = ({ user }) => {
                 receipt_url: uploadedReceiptUrl,
             },
         };
-    
+
         // 4. Insert into `requests` table
         const { data, error } = await supabase
             .from('requests')
             .insert([newRequest])
             .select()
             .single();
-    
+
         if (error) {
             console.error('Error creating request:', error);
-            alert('There was an error placing your request. Please try again.');
+            setInfoModal({ show: true, title: 'Error', message: 'There was an error placing your request. Please try again.' });
             setIsProcessing(false);
             return;
         }
@@ -262,11 +210,11 @@ const CustomizedCheckout = ({ user }) => {
         if (notificationError) {
             console.error('Error creating notification:', notificationError);
         }
-    
+
         // 6. Clean up local storage
         localStorage.removeItem('customizedCart');
         localStorage.removeItem('checkoutItems');
-    
+
         // 7. Navigate to tracking page
         navigate(`/customized-request-tracking/${request_number}`);
     };
@@ -353,8 +301,15 @@ const CustomizedCheckout = ({ user }) => {
                                 <div className="mt-3 p-3 rounded" style={{ background: '#f8f9fa' }}>
                                     <label className="form-label fw-bold">
                                         <i className="fas fa-clock me-2" style={{ color: 'var(--shop-pink)' }}></i>
-                                        Select Pickup Time
+                                        Select Pickup Date & Time
                                     </label>
+                                    <input
+                                        type="date"
+                                        className="form-control mb-3"
+                                        value={selectedPickupDate}
+                                        min={new Date().toISOString().split('T')[0]}
+                                        onChange={(e) => setSelectedPickupDate(e.target.value)}
+                                    />
                                     <div className="d-flex flex-wrap gap-2">
                                         {pickupTimes.map(time => (
                                             <button
@@ -377,49 +332,14 @@ const CustomizedCheckout = ({ user }) => {
                         </div>
 
                         {deliveryMethod === 'delivery' && (
-                            <div className="checkout-section">
-                                <h5 className="section-title mb-3">
-                                    <i className="fas fa-map-marker-alt"></i>
-                                    Delivery Address
-                                </h5>
-
-                                {user ? (
-                                    savedAddresses.length > 0 ? (
-                                        <div className="mb-3">
-                                            <label className="form-label small text-muted fw-bold">Select from your saved addresses</label>
-                                            <select
-                                                className="form-select"
-                                                value={selectedAddressId || ''}
-                                                onChange={(e) => handleAddressSelect(e.target.value, savedAddresses)}
-                                            >
-                                                {savedAddresses.map(addr => (
-                                                    <option key={addr.id} value={addr.id}>
-                                                        {addr.label} {addr.is_default && '(Default)'} - {`${addr.street}, ${addr.barangay}, ${addr.city}`}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                    ) : (
-                                        <div className="alert alert-warning">
-                                            <i className="fas fa-info-circle me-2"></i>
-                                            You have no saved addresses. Please <Link to="/profile" state={{ activeMenu: 'addresses' }} style={{color: 'var(--shop-pink)'}}>add an address in your profile</Link> before proceeding.
-                                        </div>
-                                    )
-                                ) : (
-                                    <div className="alert alert-danger">
-                                        <i className="fas fa-exclamation-triangle me-2"></i>
-                                        Please <Link to="/login" style={{color: 'var(--shop-pink)'}}>log in</Link> to use the delivery option.
-                                    </div>
-                                )}
-                                
-                                {selectedAddressId && (
-                                     <div className="p-3 rounded" style={{ background: '#f8f9fa' }}>
-                                        <p className='mb-1'><strong>Recipient:</strong> {address.name}</p>
-                                        <p className='mb-1'><strong>Phone:</strong> {address.phone}</p>
-                                        <p className='mb-0'><strong>Address:</strong> {`${address.street}, ${address.barangay}, ${address.city}, ${address.province}`}</p>
-                                     </div>
-                                )}
-                            </div>
+                            <CheckoutAddressSelection
+                                user={user}
+                                address={address}
+                                setAddress={setAddress}
+                                selectedAddressId={selectedAddressId}
+                                setSelectedAddressId={setSelectedAddressId}
+                                showInfoModal={showInfoModal}
+                            />
                         )}
 
                         <div className="checkout-section">
@@ -539,10 +459,10 @@ const CustomizedCheckout = ({ user }) => {
                                 <span>{deliveryMethod === 'pickup' ? 'Pickup' : 'Shipping Fee'}</span>
                                 <span>{shippingFee === 0 ? 'FREE' : `₱${shippingFee}`}</span>
                             </div>
-                            {deliveryMethod === 'pickup' && selectedPickupTime && (
+                            {deliveryMethod === 'pickup' && selectedPickupDate && selectedPickupTime && (
                                 <div className="small mb-2" style={{ color: 'var(--shop-pink)' }}>
                                     <i className="fas fa-clock me-1"></i>
-                                    Pickup: {selectedPickupTime}
+                                    Pickup: {selectedPickupDate} - {selectedPickupTime}
                                 </div>
                             )}
                             {shippingFee === 0 && deliveryMethod === 'delivery' && (
@@ -608,10 +528,10 @@ const CustomizedCheckout = ({ user }) => {
                                         position: 'relative'
                                     }}
                                 >
-                                    <img 
-                                        src={qrCodeImage} 
-                                        alt="GCash QR Code" 
-                                        style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '10px' }} 
+                                    <img
+                                        src={qrCodeImage}
+                                        alt="GCash QR Code"
+                                        style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '10px' }}
                                     />
                                 </div>
                             </div>
@@ -679,6 +599,16 @@ const CustomizedCheckout = ({ user }) => {
                     </div>
                 </div>
             )}
+
+            <InfoModal
+                show={infoModal.show}
+                onClose={() => setInfoModal({ show: false, title: '', message: '' })}
+                title={infoModal.title}
+                message={infoModal.message}
+                linkTo={infoModal.linkTo}
+                linkText={infoModal.linkText}
+                linkState={infoModal.linkState}
+            />
         </div>
     );
 };

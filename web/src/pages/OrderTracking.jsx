@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { supabase } from '../config/supabase';
 import TrackingPaymentDetails from '../components/TrackingPaymentDetails';
+import InfoModal from '../components/InfoModal';
 import '../styles/Shop.css';
 
 const paymentStep = { status: 'payment', title: 'Payment', description: 'Payment confirmed', icon: 'fa-credit-card' };
@@ -30,6 +31,7 @@ const OrderTracking = () => {
     const [loading, setLoading] = useState(true);
     const [additionalFile, setAdditionalFile] = useState(null);
     const [uploadingReceipt, setUploadingReceipt] = useState(false);
+    const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
 
     const getTrackingSteps = (orderData) => {
         if (!orderData) return baseDeliverySteps;
@@ -130,9 +132,9 @@ const OrderTracking = () => {
 
         if (error) {
             console.error('Error updating order status:', error);
-            alert('There was an error confirming your order. Please try again.');
+            setInfoModal({ show: true, title: 'Error', message: 'There was an error confirming your order. Please try again.' });
         } else {
-            alert('Thank you for confirming! Your order is now marked as completed.');
+            setInfoModal({ show: true, title: 'Order Confirmed', message: 'Thank you for confirming! Your order is now marked as completed.' });
         }
     };
 
@@ -169,19 +171,18 @@ const OrderTracking = () => {
                 .from('orders')
                 .update({
                     additional_receipts: updatedReceipts,
-                    // If they upload a new receipt, maybe we set status to pending again? 
-                    // For now, let's just update the receipts list.
+                    payment_status: 'waiting_for_confirmation'
                 })
                 .eq('id', order.id);
 
             if (updateError) throw updateError;
 
-            alert('Receipt uploaded successfully!');
+            setInfoModal({ show: true, title: 'Success', message: 'Receipt uploaded successfully!' });
             setAdditionalFile(null);
             // The realtime subscription should pick up the change and reload
         } catch (error) {
             console.error('Error uploading receipt:', error);
-            alert('Failed to upload receipt. Please try again.');
+            setInfoModal({ show: true, title: 'Upload Failed', message: error.message || 'Failed to upload receipt. Please try again.' });
         } finally {
             setUploadingReceipt(false);
         }
@@ -590,6 +591,13 @@ const OrderTracking = () => {
                     </div>
                 </div>
             </div>
+
+            <InfoModal
+                show={infoModal.show}
+                onClose={() => setInfoModal({ ...infoModal, show: false })}
+                title={infoModal.title}
+                message={infoModal.message}
+            />
         </div>
     );
 };

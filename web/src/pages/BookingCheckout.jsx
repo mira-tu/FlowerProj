@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import InfoModal from '../components/InfoModal';
 import '../styles/Shop.css';
 import { supabase } from '../config/supabase';
 
@@ -9,9 +10,12 @@ const BookingCheckout = ({ user }) => {
     const navigate = useNavigate();
     const [inquiryItem, setInquiryItem] = useState(null);
     const [deliveryMethod, setDeliveryMethod] = useState('delivery');
+    const [selectedPickupDate, setSelectedPickupDate] = useState('');
     const [selectedPickupTime, setSelectedPickupTime] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
     const [isAddressReady, setIsAddressReady] = useState(false);
+    const [dynamicShippingFee, setDynamicShippingFee] = useState(100);
+    const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: '', linkText: '' });
 
     // Unified state for the inquiry's address
     const [inquiryAddress, setInquiryAddress] = useState({
@@ -59,9 +63,34 @@ const BookingCheckout = ({ user }) => {
         }
     }, [navigate, user, parseAddress]);
 
+    useEffect(() => {
+        const fetchFee = async () => {
+            if (deliveryMethod === 'delivery' && inquiryAddress.barangay) {
+                const { data, error } = await supabase
+                    .from('barangay_fee')
+                    .select('delivery_fee')
+                    .ilike('barangay_name', `%${inquiryAddress.barangay}%`);
+
+                if (error) {
+                    console.error('Error fetching fee for barangay:', inquiryAddress.barangay, error);
+                    setDynamicShippingFee(100); // Fallback on error
+                } else if (data && data.length > 0) {
+                    setDynamicShippingFee(data[0].delivery_fee); // Use the first match
+                } else {
+                    console.warn(`No fee found for barangay: ${inquiryAddress.barangay}. Using default fee.`);
+                    setDynamicShippingFee(100); // Fallback if no match found
+                }
+            } else if (deliveryMethod === 'pickup') {
+                setDynamicShippingFee(0);
+            }
+        };
+
+        fetchFee();
+    }, [inquiryAddress.barangay, deliveryMethod]);
+
     const handleSaveInquiryAddress = async () => {
         if (!inquiryAddress.street || !inquiryAddress.city || !inquiryAddress.province) {
-            alert('The address is incomplete and cannot be saved.');
+            setInfoModal({ show: true, title: 'Incomplete Address', message: 'The address is incomplete and cannot be saved.' });
             throw new Error("Incomplete address");
         }
 
@@ -72,16 +101,22 @@ const BookingCheckout = ({ user }) => {
 
         if (error) {
             console.error('Error saving inquiry address:', error);
-            alert('Failed to save address: ' + error.message);
+            setInfoModal({ show: true, title: 'Error', message: 'Failed to save address: ' + error.message });
             throw error;
         }
-        
+
         return data.id; // Return the ID of the newly created address
     };
 
     const handleSubmitInquiry = async () => {
-        if (!user) { alert('You must be logged in to submit an inquiry.'); navigate('/login'); return; }
-        if (deliveryMethod === 'pickup' && !selectedPickupTime) { alert('Please select a pickup time.'); return; }
+        if (!user) {
+            setInfoModal({ show: true, title: 'Login Required', message: 'You must be logged in to submit an inquiry.', linkTo: '/login', linkText: 'Log In' });
+            return;
+        }
+        if (deliveryMethod === 'pickup' && (!selectedPickupDate || !selectedPickupTime)) {
+            setInfoModal({ show: true, title: 'Missing Information', message: 'Please select a pickup date and time.' });
+            return;
+        }
 
         let finalAddressId = null;
         setIsProcessing(true);
@@ -89,14 +124,14 @@ const BookingCheckout = ({ user }) => {
         try {
             if (deliveryMethod === 'delivery') {
                 if (!isAddressReady) {
-                    alert('An address for delivery is not available for this inquiry.');
+                    setInfoModal({ show: true, title: 'Missing Address', message: 'An address for delivery is not available for this inquiry.' });
                     throw new Error('Address not ready');
                 }
                 finalAddressId = await handleSaveInquiryAddress();
             }
 
             const request_number = `REQ-${user.id.substring(0, 4)}-${Date.now()}`;
-            
+
             // Exclude contact_number from the JSONB data
             const { contact_number, ...restOfRequestData } = inquiryItem.requestData;
 
@@ -112,7 +147,8 @@ const BookingCheckout = ({ user }) => {
                 contact_number: contact_number, // Add as a top-level field
                 status: 'pending',
                 delivery_method: deliveryMethod,
-                pickup_time: deliveryMethod === 'pickup' ? selectedPickupTime : null,
+                pickup_time: deliveryMethod === 'pickup' ? `${selectedPickupDate} - ${selectedPickupTime}` : null,
+                shipping_fee: deliveryMethod === 'pickup' ? 0 : dynamicShippingFee,
                 data: inquiryDetails,
                 image_url: inquiryItem.requestData.image_url,
                 notes: inquiryItem.requestData.notes,
@@ -173,7 +209,14 @@ const BookingCheckout = ({ user }) => {
                             </div>
                             {deliveryMethod === 'pickup' && (
                                 <div className="mt-3 p-3 rounded" style={{ background: '#f8f9fa' }}>
-                                    <label className="form-label fw-bold"><i className="fas fa-clock me-2" style={{ color: 'var(--shop-pink)' }}></i> Select Pickup Time</label>
+                                    <label className="form-label fw-bold"><i className="fas fa-clock me-2" style={{ color: 'var(--shop-pink)' }}></i> Select Pickup Date & Time</label>
+                                    <input
+                                        type="date"
+                                        className="form-control mb-3"
+                                        value={selectedPickupDate}
+                                        min={new Date().toISOString().split('T')[0]}
+                                        onChange={(e) => setSelectedPickupDate(e.target.value)}
+                                    />
                                     <div className="d-flex flex-wrap gap-2">
                                         {pickupTimes.map(time => (<button key={time} type="button" className={`btn btn-sm rounded-pill px-3 ${selectedPickupTime === time ? 'btn-primary' : 'btn-outline-secondary'}`} style={selectedPickupTime === time ? { background: 'var(--shop-pink)', border: 'none' } : {}} onClick={() => setSelectedPickupTime(time)}>{time}</button>))}
                                     </div>
@@ -200,7 +243,7 @@ const BookingCheckout = ({ user }) => {
                                 ) : (
                                     <div className="alert alert-danger">
                                         <i className="fas fa-exclamation-triangle me-2"></i>
-                                        Please <Link to="/login" style={{color: 'var(--shop-pink)'}}>log in</Link> to use the delivery option.
+                                        Please <Link to="/login" style={{ color: 'var(--shop-pink)' }}>log in</Link> to use the delivery option.
                                     </div>
                                 )}
                             </div>
@@ -223,7 +266,7 @@ const BookingCheckout = ({ user }) => {
                                         </small>
                                     </div>
                                 </div>
-                                
+
                                 {inquiryItem.requestData.type === 'booking' ? (
                                     <>
                                         <p className="mb-1"><strong>Recipient:</strong> {inquiryItem.requestData.recipient_name}</p>
@@ -250,22 +293,22 @@ const BookingCheckout = ({ user }) => {
                     <div className="col-lg-4">
                         <div className="order-summary-card">
                             <h5 className="fw-bold mb-4">Summary</h5>
-                             <div className="summary-row">
+                            <div className="summary-row">
                                 <span>Inquiry Item</span>
                                 <span>1</span>
                             </div>
                             <div className="summary-row">
                                 <span>{deliveryMethod === 'pickup' ? 'Pickup' : 'Shipping Fee'}</span>
-                                <span>{deliveryMethod === 'pickup' ? 'FREE' : 'For Discussion'}</span>
+                                <span>{deliveryMethod === 'pickup' ? 'FREE' : `₱${dynamicShippingFee.toLocaleString()}`}</span>
                             </div>
-                            <hr/>
+                            <hr />
                             <div className="summary-row total">
                                 <span>Total</span>
                                 <span className="fw-bold fs-5">For Discussion</span>
                             </div>
-                            <button 
-                                className="btn-place-order" 
-                                onClick={handleSubmitInquiry} 
+                            <button
+                                className="btn-place-order"
+                                onClick={handleSubmitInquiry}
                                 disabled={isProcessing || (deliveryMethod === 'delivery' && !isAddressReady)}
                             >
                                 {isProcessing ? 'Submitting...' : 'Submit Inquiry'}
@@ -274,6 +317,15 @@ const BookingCheckout = ({ user }) => {
                     </div>
                 </div>
             </div>
+
+            <InfoModal
+                show={infoModal.show}
+                onClose={() => setInfoModal({ ...infoModal, show: false })}
+                title={infoModal.title}
+                message={infoModal.message}
+                linkTo={infoModal.linkTo}
+                linkText={infoModal.linkText}
+            />
         </div>
     );
 };

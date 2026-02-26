@@ -21,11 +21,14 @@ import { adminAPI, BASE_URL } from '../../../config/api';
 import { supabase } from '../../../config/supabase';
 import styles from '../../AdminDashboard.styles';
 import { formatTimestamp, getPaymentStatusDisplay, getStatusLabel } from '../adminHelpers';
+import PaymentDetailsSection from '../components/PaymentDetailsSection';
+import { generateAndShareReceipt } from '../../../utils/receiptGenerator';
 
 const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('All');
 
   // State for Modals
   const [statusModalVisible, setStatusModalVisible] = useState(false);
@@ -38,6 +41,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [orderToRecordPayment, setOrderToRecordPayment] = useState(null);
+  const [isEditPaymentMode, setIsEditPaymentMode] = useState(false);
 
   // New state for rider assignment
   const [riders, setRiders] = useState([]);
@@ -86,7 +90,29 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     });
   }, [orders, riders]);
 
-  const statusOptions = ['pending', 'processing', 'out_for_delivery', 'ready_for_pick_up', 'claimed', 'completed', 'cancelled'];
+  // Filter wrapper
+  const filteredOrders = React.useMemo(() => {
+    let result = ordersWithRiderDetails;
+    if (statusFilter !== 'All') {
+      result = result.filter(order => {
+        const status = order.status;
+        switch (statusFilter) {
+          case 'Pending': return status === 'pending';
+          case 'Processing': return status === 'processing' || status === 'accepted' || status === 'partial';
+          case 'To Deliver': return status === 'out_for_delivery';
+          case 'To Pick Up': return status === 'ready_for_pickup';
+          case 'Completed': return status === 'completed' || status === 'claimed';
+          case 'Cancelled': return status === 'cancelled';
+          default: return true;
+        }
+      });
+    }
+    return result;
+  }, [ordersWithRiderDetails, statusFilter]);
+
+  const orderStatusFilters = ['All', 'Pending', 'Processing', 'To Deliver', 'To Pick Up', 'Completed', 'Cancelled'];
+
+  const statusOptions = ['pending', 'processing', 'out_for_delivery', 'ready_for_pickup', 'claimed', 'completed', 'cancelled'];
 
   const deliveryStepperStatuses = [
     { id: 'pending', label: 'Pending', description: 'Order received' },
@@ -99,7 +125,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     { id: 'pending', label: 'Pending', description: 'Order received' },
     { id: 'processing', label: 'Processing', description: 'Being prepared' },
     { id: 'ready_for_pickup', label: 'Ready for Pick Up', description: 'Ready for customer' },
-    { id: 'completed', label: 'Completed', description: 'Picked up by customer' }
+    { id: 'claimed', label: 'Claimed', description: 'Customer picked up the order' }
   ];
 
   const openReceiptModal = (url) => {
@@ -180,14 +206,19 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   };
 
   const handleAccept = async (orderId) => {
-    try {
-      // Find the order in the current state
-      const orderToAccept = orders.find(order => order.id === orderId);
-      if (!orderToAccept) {
-        Alert.alert('Error', 'Order not found.');
-        return;
-      }
+    // Find the order in the current state
+    const orderToAccept = orders.find(order => order.id === orderId);
+    if (!orderToAccept) {
+      Alert.alert('Error', 'Order not found.');
+      return;
+    }
 
+    processAccept(orderToAccept);
+  };
+
+  const processAccept = async (orderToAccept) => {
+    try {
+      const orderId = orderToAccept.id;
       await adminAPI.acceptOrder(orderId, 'processing');
 
       // Update payment status appropriately
@@ -206,7 +237,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       Toast.show({
         type: 'success',
         text1: 'Order Accepted',
-        text2: `Status changed to processing and payment is ${paymentStatus.replace(/_/g, ' ')}`
+        text2: 'Use "Change Status → Proceed" to start processing.',
       });
 
       // Send email notification
@@ -241,14 +272,21 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
   const openStatusModal = (order) => {
     setOrderToUpdate(order);
-    setSelectedStatus(order.status);
+    const nextStatus = getNextStatus(order.status, order.delivery_method);
+    if (nextStatus) {
+      setSelectedStatus(nextStatus);
+    } else {
+      setSelectedStatus(order.status);
+    }
     setStatusModalVisible(true);
   };
 
   const getNextStatus = (currentStatus, deliveryMethod) => {
     switch (currentStatus) {
+      case 'accepted':
+        return 'processing';
       case 'processing':
-        return deliveryMethod === 'delivery' ? 'out_for_delivery' : 'ready_for_pick_up';
+        return deliveryMethod === 'delivery' ? 'out_for_delivery' : 'ready_for_pickup';
       case 'out_for_delivery':
         return 'completed';
       case 'ready_for_pick_up':
@@ -309,26 +347,31 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
       await adminAPI.updateOrderStatus(orderId, selectedStatus);
 
-      // New logic: If order is completed and payment method is COD and payment is 'to_pay', mark as 'paid'
+      // COD: Auto-mark payment as paid on completion
       if (selectedStatus === 'completed' && orderToUpdate.payment_method === 'cod' && orderToUpdate.payment_status === 'to_pay') {
         await adminAPI.updateOrderPaymentStatus(orderId, 'paid');
         Toast.show({ type: 'success', text1: 'Order Completed and Payment Marked as Paid' });
+      } else if (selectedStatus === 'claimed' && orderToUpdate.payment_method === 'cod' && orderToUpdate.payment_status === 'to_pay') {
+        await adminAPI.updateOrderPaymentStatus(orderId, 'paid');
+        Toast.show({ type: 'success', text1: 'Order Claimed & Paid' });
+      } else if (selectedStatus === 'processing') {
+        Toast.show({ type: 'success', text1: 'Now Processing', text2: 'You can now assign a rider for delivery.' });
       } else {
-        Toast.show({ type: 'success', text1: 'Status Updated' });
+        Toast.show({ type: 'success', text1: `Status Updated to ${getStatusLabel(selectedStatus)}` });
       }
 
-      // Send email if status is completed or claimed
-      if (selectedStatus === 'completed' || selectedStatus === 'claimed') {
+      // Send email on key milestones
+      if (['processing', 'completed', 'claimed', 'out_for_delivery'].includes(selectedStatus)) {
         await sendStatusEmail(orderToUpdate, selectedStatus);
       }
-
-      await loadOrders();
     } catch (error) {
       Toast.show({ type: 'error', text1: 'Update Failed' });
     } finally {
+      // Close modal FIRST, then refresh — prevents the loading flash reopening the modal
       setStatusModalVisible(false);
       setOrderToUpdate(null);
       setSelectedStatus(null);
+      loadOrders();
     }
   };
 
@@ -336,13 +379,13 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     switch (status) {
       case 'completed': return { backgroundColor: '#22C55E' };
       case 'claimed': return { backgroundColor: '#22C55E' };
-      case 'ready_for_pick_up': return { backgroundColor: '#6366F1' };
+      case 'ready_for_pickup': return { backgroundColor: '#6366F1' };
       case 'out_for_delivery': return { backgroundColor: '#8B5CF6' };
       case 'processing': return { backgroundColor: '#3B82F6' };
-      case 'cancelled': return { backgroundColor: '#EF4444' };
+      case 'accepted': return { backgroundColor: '#0891B2' };
       case 'cancelled': return { backgroundColor: '#EF4444' };
       case 'pending': return { backgroundColor: '#F97316' };
-      case 'partial': return { backgroundColor: '#F59E0B' }; // Orange for partial
+      case 'partial': return { backgroundColor: '#F59E0B' };
       default: return { backgroundColor: '#6B7280' };
     }
   };
@@ -350,10 +393,12 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const getProgressWidth = (status) => {
     const progress = {
       completed: '100%',
+      claimed: '100%',
       ready_for_pickup: '75%',
       out_for_delivery: '75%',
       processing: '50%',
-      pending: '25%',
+      accepted: '30%',
+      pending: '15%',
       cancelled: '0%'
     };
     return progress[status] || '10%';
@@ -368,7 +413,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     return name.substring(0, 2).toUpperCase();
   };
 
-  const EnhancedOrderCard = ({ item, onMessageCustomer, onPhoneCall, onAssignRider, onUpdateStatus, openReceiptModal }) => {
+  const EnhancedOrderCard = ({ item, onMessageCustomer, onPhoneCall, onAssignRider, onUpdateStatus, openReceiptModal, onPrintReceipt }) => {
     return (
       <View style={styles.eoCard}>
         {/* Header */}
@@ -388,7 +433,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
               <Text style={styles.eoDateText}>{formatTimestamp(item.created_at)}</Text>
             </View>
             <View style={[styles.eoStatusBadge, getStatusStyle(item.status)]}>
-              <Ionicons name="time-outline" size={12} color="#fff" />
+              <Ionicons name="time-outline" size={14} color="#fff" />
               <Text style={styles.eoStatusText}>{getStatusLabel(item.status)}</Text>
             </View>
           </View>
@@ -418,34 +463,50 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
               </View>
             </View>
             <View style={styles.eoActionButtons}>
+              <TouchableOpacity
+                style={{ backgroundColor: '#6B7280', width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' }}
+                onPress={() => onPrintReceipt(item)}
+              >
+                <Ionicons name="print" size={20} color="#fff" />
+              </TouchableOpacity>
               <TouchableOpacity style={styles.eoIconBtnGreen} onPress={() => onPhoneCall(item.customer_phone)}>
-                <Ionicons name="call" size={16} color="#fff" />
+                <Ionicons name="call" size={20} color="#fff" />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.eoIconBtnBlue}
                 onPress={() => onMessageCustomer(item.users.id, item.users.name, item.users.email)}
               >
-                <Ionicons name="chatbubble" size={16} color="#fff" />
+                <Ionicons name="chatbubble" size={20} color="#fff" />
               </TouchableOpacity>
             </View>
           </View>
           <View style={styles.eoContactInfo}>
             {item.customer_email && (
               <View style={styles.eoInfoRow}>
-                <Ionicons name="mail" size={14} color="#9CA3AF" />
-                <Text style={styles.eoInfoText}>{item.customer_email}</Text>
+                <Ionicons name="mail" size={16} color="#9CA3AF" />
+                <Text style={styles.eoInfoLabel}>Email:</Text>
+                <Text style={styles.eoInfoTextBold}>{item.customer_email}</Text>
+              </View>
+            )}
+            {item.customer_phone && item.customer_phone !== 'N/A' && (
+              <View style={styles.eoInfoRow}>
+                <Ionicons name="call" size={16} color="#9CA3AF" />
+                <Text style={styles.eoInfoLabel}>Phone:</Text>
+                <Text style={styles.eoInfoTextBold}>{item.customer_phone}</Text>
               </View>
             )}
             {item.delivery_method === 'pickup' && item.pickup_time && (
               <View style={styles.eoInfoRow}>
-                <Ionicons name="time" size={14} color="#9CA3AF" />
-                <Text style={styles.eoInfoText}>Pickup Time: {item.pickup_time}</Text>
+                <Ionicons name="time" size={16} color="#9CA3AF" />
+                <Text style={styles.eoInfoLabel}>Pickup Time:</Text>
+                <Text style={styles.eoInfoTextBold}>{item.pickup_time}</Text>
               </View>
             )}
             {item.shipping_address?.description && (
               <View style={styles.eoInfoRow}>
-                <Ionicons name="location" size={14} color="#9CA3AF" />
-                <Text style={styles.eoInfoText}>{item.shipping_address.description}</Text>
+                <Ionicons name="location" size={16} color="#9CA3AF" />
+                <Text style={styles.eoInfoLabel}>Address:</Text>
+                <Text style={styles.eoInfoTextBold}>{item.shipping_address.description}</Text>
               </View>
             )}
           </View>
@@ -493,9 +554,10 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
               <Ionicons name="bicycle-outline" size={16} color="#6B7280" />
               <Text style={styles.eoSectionTitle}>Assigned Rider</Text>
             </View>
-            <View style={styles.eoFlexBetween}>
-              <Text style={styles.eoDetailText}>Name:</Text>
-              <Text style={styles.eoInfoTextBold}>{item.rider.name}</Text>
+            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <View style={[styles.eoPaymentStatus, { backgroundColor: '#3B82F6' }]}>
+                <Text style={styles.eoPaymentStatusText}>{item.rider.name}</Text>
+              </View>
             </View>
           </View>
         ) : item.third_party_rider_name ? (
@@ -504,95 +566,37 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
               <Ionicons name="bicycle-outline" size={16} color="#6B7280" />
               <Text style={styles.eoSectionTitle}>Assigned Rider (Third Party)</Text>
             </View>
-            <View style={styles.eoFlexBetween}>
-              <Text style={styles.eoDetailText}>Name:</Text>
-              <Text style={styles.eoInfoTextBold}>{item.third_party_rider_name}</Text>
-            </View>
-            {item.third_party_rider_info ? (
-              <View style={styles.eoFlexBetween}>
-                <Text style={styles.eoDetailText}>Info:</Text>
-                <Text style={styles.eoInfoTextBold}>{item.third_party_rider_info}</Text>
+            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <View style={[styles.eoPaymentStatus, { backgroundColor: '#3B82F6' }]}>
+                <Text style={styles.eoPaymentStatusText}>{item.third_party_rider_name}</Text>
               </View>
-            ) : null}
+              {item.third_party_rider_info ? (
+                <View style={[styles.eoPaymentStatus, { backgroundColor: '#6B7280' }]}>
+                  <Text style={styles.eoPaymentStatusText}>{item.third_party_rider_info}</Text>
+                </View>
+              ) : null}
+            </View>
           </View>
         ) : null}
 
-        {/* Payment Details */}
-        <View style={styles.eoSection}>
-          <View style={styles.eoSectionHeader}>
-            <Ionicons name="card" size={16} color="#6B7280" />
-            <Text style={styles.eoSectionTitle}>Payment Details</Text>
-          </View>
-          <View style={{ gap: 8 }}>
-            <View style={styles.eoFlexBetween}>
-              <Text style={styles.eoDetailText}>Method</Text>
-              <Text style={styles.eoInfoTextBold}>
-                {item.payment_method?.toLowerCase() === 'cod' ? 'Cash On Delivery' : getStatusLabel(item.payment_method) || 'Not specified'}
-              </Text>
-            </View>
-            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-              <View style={[styles.eoPaymentStatus, { backgroundColor: item.payment_status === 'paid' ? '#22C55E' : '#FFA726' }]}>
-                <Text style={styles.eoPaymentStatusText}>{getPaymentStatusDisplay(item.payment_status, item.payment_method)}</Text>
-              </View>
-              {item.payment_method?.toLowerCase() === 'gcash' && (
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  {item.receipt_url && (
-                    <TouchableOpacity onPress={() => openReceiptModal(item.receipt_url)}>
-                      <Text style={styles.eoViewReceipt}>Receipt 1</Text>
-                    </TouchableOpacity>
-                  )}
-                  {item.additional_receipts && item.additional_receipts.map((receipt, idx) => (
-                    <TouchableOpacity key={idx} onPress={() => openReceiptModal(receipt.url)}>
-                      <Text style={styles.eoViewReceipt}>Receipt {idx + 2}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-              {item.payment_method?.toLowerCase() === 'gcash' && item.payment_status !== 'paid' && (
-                <TouchableOpacity
-                  onPress={() => {
-                    setOrderToRecordPayment(item);
-                    setPaymentAmount('');
-                    setPaymentModalVisible(true);
-                  }}
-                  style={{ marginLeft: 8, backgroundColor: '#3B82F6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 }}
-                >
-                  <Text style={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>Record Pay</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-            <View style={styles.eoDivider}>
-              <View style={styles.eoPriceRow}>
-                <Text style={styles.eoDetailText}>Subtotal:</Text>
-                <Text style={styles.eoDetailText}>₱{item.subtotal?.toFixed(2) || '0.00'}</Text>
-              </View>
-              {(item.amount_received > 0 || item.payment_method?.toLowerCase() === 'gcash') && (
-                <>
-                  <View style={styles.eoPriceRow}>
-                    <Text style={styles.eoDetailText}>Amount Received:</Text>
-                    <Text style={[styles.eoDetailText, { color: '#22C55E' }]}>₱{(item.amount_received || 0).toLocaleString()}</Text>
-                  </View>
-                  <View style={styles.eoPriceRow}>
-                    <Text style={styles.eoDetailText}>Balance:</Text>
-                    <Text style={[styles.eoDetailText, { color: (item.total - (item.amount_received || 0)) > 0 ? '#EF4444' : '#6B7280' }]}>
-                      ₱{(item.total - (item.amount_received || 0)).toLocaleString()}
-                    </Text>
-                  </View>
-                </>
-              )}
-              {item.shipping_fee > 0 && (
-                <View style={styles.eoPriceRow}>
-                  <Text style={styles.eoDetailText}>Delivery Fee:</Text>
-                  <Text style={styles.eoDetailText}>₱{item.shipping_fee.toFixed(2)}</Text>
-                </View>
-              )}
-              <View style={[styles.eoPriceRow, { marginTop: 8 }]}>
-                <Text style={styles.eoTotalLabel}>Total:</Text>
-                <Text style={styles.eoTotalValue}>₱{item.total}</Text>
-              </View>
-            </View>
-          </View>
-        </View>
+        <PaymentDetailsSection
+          item={item}
+          styles={styles}
+          onRecordPay={() => {
+            setOrderToRecordPayment(item);
+            setPaymentAmount('');
+            setIsEditPaymentMode(false);
+            setPaymentModalVisible(true);
+          }}
+          onEditAmount={() => {
+            setOrderToRecordPayment(item);
+            setPaymentAmount(String(item.amount_received || ''));
+            setIsEditPaymentMode(true);
+            setPaymentModalVisible(true);
+          }}
+          onViewReceipt={(url) => openReceiptModal(url)}
+          requireReceipt={false}
+        />
 
         {/* Actions */}
         <View style={styles.eoFooter}>
@@ -608,7 +612,11 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
           ) : !['completed', 'cancelled'].includes(item.status) ? (
             <View>
               <TouchableOpacity
-                style={[styles.eoMainBtn, { backgroundColor: '#3B82F6' }]}
+                style={[
+                  styles.eoMainBtn,
+                  { backgroundColor: item.payment_method?.toLowerCase() === 'gcash' && item.payment_status !== 'paid' ? '#9CA3AF' : '#3B82F6' }
+                ]}
+                disabled={item.payment_method?.toLowerCase() === 'gcash' && item.payment_status !== 'paid'}
                 onPress={() => onUpdateStatus(item)}
               >
                 <Ionicons name="git-network-outline" size={18} color="#fff" />
@@ -680,7 +688,10 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     }
 
     try {
-      const newTotalReceived = (orderToRecordPayment.amount_received || 0) + amount;
+      // In edit mode: replace the existing amount. In add mode: accumulate.
+      const newTotalReceived = isEditPaymentMode
+        ? amount
+        : (orderToRecordPayment.amount_received || 0) + amount;
       const newStatus = newTotalReceived >= orderToRecordPayment.total ? 'paid' : 'partial';
 
       const { error } = await supabase
@@ -693,13 +704,35 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
       if (error) throw error;
 
-      Toast.show({ type: 'success', text1: 'Payment Recorded' });
+      Toast.show({ type: 'success', text1: isEditPaymentMode ? 'Amount Updated' : 'Payment Recorded' });
       setPaymentModalVisible(false);
       setOrderToRecordPayment(null);
+      setIsEditPaymentMode(false);
       loadOrders();
     } catch (error) {
       console.error(error);
       Toast.show({ type: 'error', text1: 'Failed to record payment' });
+    }
+  };
+
+  const handleRejectBalanceReceipt = async (order) => {
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ additional_receipts: [] })
+        .eq('id', order.id);
+
+      if (error) throw error;
+
+      Toast.show({
+        type: 'info',
+        text1: 'Receipt Rejected',
+        text2: 'Customer will be prompted to re-upload.',
+      });
+      loadOrders();
+    } catch (error) {
+      console.error(error);
+      Toast.show({ type: 'error', text1: 'Failed to reject receipt' });
     }
   };
 
@@ -714,8 +747,37 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   return (
     <View style={styles.eoContainer}>
       <Text style={styles.eoTitle}>Orders Management</Text>
+
+      {/* Scrollable Status Filters */}
+      <View style={{ marginBottom: 15 }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingHorizontal: 16 }}>
+          {orderStatusFilters.map((filter) => (
+            <TouchableOpacity
+              key={filter}
+              onPress={() => setStatusFilter(filter)}
+              style={{
+                paddingVertical: 8,
+                paddingHorizontal: 16,
+                borderRadius: 20,
+                backgroundColor: statusFilter === filter ? '#ec4899' : '#f9a8d4',
+                borderWidth: statusFilter === filter ? 0 : 1,
+                borderColor: '#ec4899',
+              }}
+            >
+              <Text style={{
+                color: statusFilter === filter ? '#fff' : '#be185d',
+                fontWeight: '600',
+                fontSize: 14,
+              }}>
+                {filter}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+
       <FlatList
-        data={ordersWithRiderDetails}
+        data={filteredOrders}
         renderItem={({ item }) => <EnhancedOrderCard
           item={item}
           onMessageCustomer={handleSelectCustomerForMessage}
@@ -723,6 +785,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
           onAssignRider={handleAssignRider}
           onUpdateStatus={openStatusModal}
           openReceiptModal={(url) => { setSelectedReceiptUrl(url); setReceiptModalVisible(true); }}
+          onPrintReceipt={(item) => generateAndShareReceipt(item, false)}
         />}
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={{ paddingBottom: 20, paddingHorizontal: 16 }}
@@ -880,9 +943,8 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                           )}
                           {/* Content */}
                           <TouchableOpacity
-                            onPress={() => setSelectedStatus(status.id)}
                             style={styles.timelineStep}
-                            disabled={isPast}
+                            disabled={true}
                           >
                             <View style={styles.timelineIconContainer}>
                               <View style={[
@@ -941,7 +1003,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
             <View style={styles.statusModalFooter}>
               <TouchableOpacity onPress={confirmStatusChange} style={styles.statusConfirmButton}>
-                <Text style={styles.statusConfirmButtonText}>Confirm</Text>
+                <Text style={styles.statusConfirmButtonText}>Proceed</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => setStatusModalVisible(false)} style={styles.statusCloseButton}>
                 <Text style={styles.statusCloseButtonText}>Cancel</Text>
@@ -955,7 +1017,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       <Modal visible={paymentModalVisible} animationType="fade" transparent>
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Record GCash Payment</Text>
+            <Text style={styles.modalTitle}>{isEditPaymentMode ? 'Edit Amount Received' : 'Record GCash Payment'}</Text>
             <View style={{ marginBottom: 15 }}>
               <Text style={{ marginBottom: 5 }}>Currently Received: ₱{orderToRecordPayment?.amount_received || 0}</Text>
               <Text style={{ marginBottom: 5 }}>Total Amount: ₱{orderToRecordPayment?.total || 0}</Text>
@@ -963,7 +1025,9 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                 Balance: ₱{(orderToRecordPayment?.total || 0) - (orderToRecordPayment?.amount_received || 0)}
               </Text>
             </View>
-            <Text style={{ marginBottom: 5, fontWeight: '500' }}>Enter Amount Received (New)</Text>
+            <Text style={{ marginBottom: 5, fontWeight: '500' }}>
+              {isEditPaymentMode ? 'Correct Amount Received' : 'Enter Amount Received (New)'}
+            </Text>
             <TextInput
               style={styles.input}
               placeholder="0.00"

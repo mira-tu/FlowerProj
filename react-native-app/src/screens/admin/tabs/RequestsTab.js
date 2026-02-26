@@ -21,6 +21,8 @@ import { adminAPI, BASE_URL } from '../../../config/api';
 import { supabase } from '../../../config/supabase';
 import styles from '../../AdminDashboard.styles';
 import { formatTimestamp, getPaymentStatusDisplay, getStatusColor, getStatusLabel } from '../adminHelpers';
+import PaymentDetailsSection from '../components/PaymentDetailsSection';
+import { generateAndShareReceipt } from '../../../utils/receiptGenerator';
 
 const DetailSection = ({ label, value }) => {
   if (!value) return null;
@@ -60,6 +62,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('All');
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [requestStatusModalVisible, setRequestStatusModalVisible] = useState(false);
@@ -69,6 +72,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const [quoteModalVisible, setQuoteModalVisible] = useState(false);
   const [requestToQuote, setRequestToQuote] = useState(null);
   const [quoteAmount, setQuoteAmount] = useState('');
+  const [quoteShippingFee, setQuoteShippingFee] = useState('');
   const [receiptModalVisible, setReceiptModalVisible] = useState(false);
   const [selectedReceiptUrl, setSelectedReceiptUrl] = useState(null);
 
@@ -76,6 +80,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [requestToRecordPayment, setRequestToRecordPayment] = useState(null);
+  const [isEditPaymentMode, setIsEditPaymentMode] = useState(false);
 
   // New state for rider assignment
   const [riders, setRiders] = useState([]);
@@ -121,6 +126,28 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       return request;
     });
   }, [requests, riders]);
+
+  // Filter wrapper
+  const filteredRequests = React.useMemo(() => {
+    let result = requestsWithRiderDetails;
+    if (statusFilter !== 'All') {
+      result = result.filter(req => {
+        const status = req.status;
+        switch (statusFilter) {
+          case 'Pending': return status === 'pending';
+          case 'Quoted / Acc': return status === 'quoted' || status === 'accepted';
+          case 'Processing': return status === 'processing' || status === 'partial';
+          case 'Delivery/Pickup': return status === 'out_for_delivery' || status === 'ready_for_pickup';
+          case 'Completed': return status === 'completed' || status === 'claimed';
+          case 'Cancelled': return status === 'cancelled' || status === 'declined';
+          default: return true;
+        }
+      });
+    }
+    return result;
+  }, [requestsWithRiderDetails, statusFilter]);
+
+  const requestStatusFilters = ['All', 'Pending', 'Quoted / Acc', 'Processing', 'Delivery/Pickup', 'Completed', 'Cancelled'];
 
   const requestDeliveryStepperStatuses = [
     { id: 'pending', label: 'Pending', description: 'Request received' },
@@ -176,6 +203,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       <DetailSection label="Customer Name:" value={request.user_name} />
       <DetailSection label="Customer Email:" value={request.user_email} />
       <DetailSection label="Contact Number:" value={request.contact_number} />
+      <DetailSection label="Recipient Name:" value={request.data?.recipient_name} />
       <DetailSection label="Occasion:" value={request.data?.occasion} />
       <DetailSection label="Event Date:" value={request.data?.event_date} />
       <DetailSection label="Venue:" value={request.data?.venue} />
@@ -376,8 +404,13 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
   const openRequestStatusModal = (request) => {
     setRequestToUpdate(request);
-    setSelectedRequestStatus(request.status); // Pre-select current status
-    setDeliveryOrPickup(request.delivery_method || 'delivery'); // Initialize deliveryOrPickup
+    const nextStatus = getNextRequestStatus(request.status, request.delivery_method, request.type);
+    if (nextStatus) {
+      setSelectedRequestStatus(nextStatus);
+    } else {
+      setSelectedRequestStatus(request.status);
+    }
+    setDeliveryOrPickup(request.delivery_method || 'delivery');
     setRequestStatusModalVisible(true);
   };
 
@@ -430,18 +463,34 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
   const openQuoteModal = (request) => {
     setRequestToQuote(request);
-    setQuoteAmount(request.final_price ? String(request.final_price) : '');
+
+    // If we already have a final price but no explicit shipping fee recorded yet
+    const initialShipping = request.shipping_fee ? String(request.shipping_fee) : '';
+    const initialPrice = request.final_price && request.shipping_fee
+      ? String(request.final_price - request.shipping_fee)
+      : (request.final_price ? String(request.final_price) : '');
+
+    setQuoteAmount(initialPrice);
+    setQuoteShippingFee(initialShipping);
     setQuoteModalVisible(true);
   };
 
   const handleProvideQuote = async () => {
     if (!requestToQuote || !quoteAmount || isNaN(parseFloat(quoteAmount))) {
-      Alert.alert('Invalid Input', 'Please enter a valid price.');
+      Alert.alert('Invalid Input', 'Please enter a valid item price.');
+      return;
+    }
+
+    const parsedItemPrice = parseFloat(quoteAmount);
+    const parsedShippingFee = quoteShippingFee ? parseFloat(quoteShippingFee) : 0;
+
+    if (isNaN(parsedShippingFee)) {
+      Alert.alert('Invalid Input', 'Please enter a valid shipping fee.');
       return;
     }
 
     try {
-      const { data: { request: updatedRequest } } = await adminAPI.provideQuote(requestToQuote.id, parseFloat(quoteAmount));
+      const { data: { request: updatedRequest } } = await adminAPI.provideQuote(requestToQuote.id, parsedItemPrice, parsedShippingFee);
 
       // Create notification for the user
       if (updatedRequest) {
@@ -488,9 +537,11 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     }
 
     try {
-      const currentReceived = requestToRecordPayment.amount_received || 0;
-      const newTotalReceived = currentReceived + amount;
       const total = requestToRecordPayment.final_price || 0;
+      // In edit mode: replace the existing amount. In add mode: accumulate.
+      const newTotalReceived = isEditPaymentMode
+        ? amount
+        : (requestToRecordPayment.amount_received || 0) + amount;
       const newStatus = newTotalReceived >= total ? 'paid' : 'partial';
 
       const { error } = await supabase
@@ -503,10 +554,9 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
       if (error) throw error;
 
-      Toast.show({ type: 'success', text1: 'Payment Recorded' });
+      Toast.show({ type: 'success', text1: isEditPaymentMode ? 'Amount Updated' : 'Payment Recorded' });
       setPaymentModalVisible(false);
 
-      // Update selectedRequest if it matches the updated request to reflect changes in the UI immediately
       if (selectedRequest && selectedRequest.id === requestToRecordPayment.id) {
         setSelectedRequest({
           ...selectedRequest,
@@ -516,6 +566,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       }
 
       setRequestToRecordPayment(null);
+      setIsEditPaymentMode(false);
       loadRequests();
     } catch (error) {
       console.error(error);
@@ -565,7 +616,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     }
   };
 
-  const EnhancedRequestCard = ({ item, onMessageCustomer, onPhoneCall, openDetailsModal, openReceiptModal, handleUpdatePaymentStatus, onAssignRider, onUpdateStatus, onDecline }) => {
+  const EnhancedRequestCard = ({ item, onMessageCustomer, onPhoneCall, openDetailsModal, openReceiptModal, handleUpdatePaymentStatus, onAssignRider, onUpdateStatus, onProvidePrice, onDecline, onPrintReceipt }) => {
     return (
       <View style={styles.eoCard}>
         {/* Header */}
@@ -585,7 +636,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
               <Text style={styles.eoDateText}>{formatTimestamp(item.created_at)}</Text>
             </View>
             <View style={[styles.eoStatusBadge, { backgroundColor: getStatusColor(item.status) }]}>
-              <Ionicons name="time-outline" size={12} color="#fff" />
+              <Ionicons name="time-outline" size={14} color="#fff" />
               <Text style={styles.eoStatusText}>{getStatusLabel(item.status)}</Text>
             </View>
           </View>
@@ -604,26 +655,34 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
               </View>
             </View>
             <View style={styles.eoActionButtons}>
+              <TouchableOpacity
+                style={{ backgroundColor: '#6B7280', width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' }}
+                onPress={(e) => { e.stopPropagation(); onPrintReceipt(item); }}
+              >
+                <Ionicons name="print" size={20} color="#fff" />
+              </TouchableOpacity>
               <TouchableOpacity style={styles.eoIconBtnGreen} onPress={(e) => { e.stopPropagation(); onPhoneCall(item.contact_number || item.user_phone); }}>
-                <Ionicons name="call" size={16} color="#fff" />
+                <Ionicons name="call" size={20} color="#fff" />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.eoIconBtnBlue}
                 onPress={(e) => { e.stopPropagation(); onMessageCustomer(item.users, item.user_name, item.user_email); }}
               >
-                <Ionicons name="chatbubble" size={16} color="#fff" />
+                <Ionicons name="chatbubble" size={20} color="#fff" />
               </TouchableOpacity>
             </View>
           </View>
           <View style={styles.eoContactInfo}>
             {item.user_email && (<View style={styles.eoInfoRow}>
-              <Ionicons name="mail" size={14} color="#9CA3AF" />
-              <Text style={styles.eoInfoText}>{item.user_email}</Text>
+              <Ionicons name="mail" size={16} color="#9CA3AF" />
+              <Text style={styles.eoInfoLabel}>Email:</Text>
+              <Text style={styles.eoInfoTextBold}>{item.user_email}</Text>
             </View>)}
             {item.contact_number && (
               <View style={styles.eoInfoRow}>
-                <Ionicons name="call" size={14} color="#9CA3AF" />
-                <Text style={styles.eoInfoText} numberOfLines={1}>{item.contact_number}</Text>
+                <Ionicons name="call" size={16} color="#9CA3AF" />
+                <Text style={styles.eoInfoLabel}>Phone:</Text>
+                <Text style={styles.eoInfoTextBold} numberOfLines={1}>{item.contact_number}</Text>
               </View>
             )}
           </View>
@@ -686,86 +745,28 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
           </View>
         ) : null}
 
-        {/* Payment Details */}
-        {(item.payment_status || item.final_price) && (
-          <View style={styles.eoSection}>
-            <View style={styles.eoSectionHeader}>
-              <Ionicons name="card" size={16} color="#6B7280" />
-              <Text style={styles.eoSectionTitle}>Payment Details</Text>
-            </View>
-            <View style={{ gap: 8 }}>
-              <View style={styles.eoFlexBetween}>
-                <Text style={styles.eoDetailText}>Method:</Text>
-                <Text style={styles.eoInfoTextBold}>{getStatusLabel(item.payment_method || 'gcash')}</Text>
-              </View>
-              <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-                <View style={[styles.eoPaymentStatus, { backgroundColor: item.payment_status === 'paid' ? '#22C55E' : '#FFA726' }]}>
-                  <Text style={styles.eoPaymentStatusText}>{getPaymentStatusDisplay(item.payment_status, item.payment_method)}</Text>
-                </View>
-                {(item.payment_method?.toLowerCase() === 'gcash' || !item.payment_method) && (
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    {item.receipt_url && (
-                      <TouchableOpacity onPress={() => openReceiptModal(item.receipt_url)}>
-                        <Text style={styles.eoViewReceipt}>Receipt 1</Text>
-                      </TouchableOpacity>
-                    )}
-                    {item.additional_receipts && item.additional_receipts.map((receipt, idx) => (
-                      <TouchableOpacity key={idx} onPress={() => openReceiptModal(receipt.url)}>
-                        <Text style={styles.eoViewReceipt}>Receipt {idx + 2}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
-                {(item.payment_method?.toLowerCase() === 'gcash' || !item.payment_method) && item.payment_status !== 'paid' && (
-                  <TouchableOpacity
-                    onPress={() => {
-                      setRequestToRecordPayment(item);
-                      setPaymentAmount('');
-                      setPaymentModalVisible(true);
-                    }}
-                    style={{ marginLeft: 8, backgroundColor: '#3B82F6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 }}
-                  >
-                    <Text style={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>Record Pay</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-          </View>
+        {/* Payment Details — Only shown after customer accepted (i.e. status != pending) */}
+        {item.status !== 'pending' && (item.payment_status || item.final_price) && (
+          <PaymentDetailsSection
+            item={item}
+            styles={styles}
+            onRecordPay={() => {
+              setRequestToRecordPayment(item);
+              setPaymentAmount('');
+              setIsEditPaymentMode(false);
+              setPaymentModalVisible(true);
+            }}
+            onEditAmount={() => {
+              setRequestToRecordPayment(item);
+              setPaymentAmount(String(item.amount_received || ''));
+              setIsEditPaymentMode(true);
+              setPaymentModalVisible(true);
+            }}
+            onViewReceipt={(url) => openReceiptModal(url)}
+            requireReceipt={true}
+          />
         )}
 
-        {/* Pricing Summary */}
-        {item.final_price && (
-          <View style={styles.eoSection}>
-            <View style={{ gap: 8 }}>
-              <View style={styles.eoPriceRow}>
-                <Text style={styles.eoDetailText}>Sub Total:</Text>
-                <Text style={styles.eoDetailText}>₱{(item.data?.subtotal || (item.final_price - (item.shipping_fee || 0))).toFixed(2)}</Text>
-              </View>
-              {(item.amount_received > 0 || item.payment_method?.toLowerCase() === 'gcash' || !item.payment_method) && (
-                <>
-                  <View style={styles.eoPriceRow}>
-                    <Text style={styles.eoDetailText}>Amount Received:</Text>
-                    <Text style={[styles.eoDetailText, { color: '#22C55E' }]}>₱{(item.amount_received || 0).toLocaleString()}</Text>
-                  </View>
-                  <View style={styles.eoPriceRow}>
-                    <Text style={styles.eoDetailText}>Balance:</Text>
-                    <Text style={[styles.eoDetailText, { color: (item.final_price - (item.amount_received || 0)) > 0 ? '#EF4444' : '#6B7280' }]}>
-                      ₱{(item.final_price - (item.amount_received || 0)).toLocaleString()}
-                    </Text>
-                  </View>
-                </>
-              )}
-              <View style={styles.eoPriceRow}>
-                <Text style={styles.eoDetailText}>Delivery Fee:</Text>
-                <Text style={styles.eoDetailText}>₱{(item.shipping_fee || 0).toFixed(2)}</Text>
-              </View>
-              <View style={[styles.eoPriceRow, { marginTop: 8 }]}>
-                <Text style={styles.eoTotalLabel}>Total:</Text>
-                <Text style={styles.eoTotalValue}>₱{item.final_price.toFixed(2)}</Text>
-              </View>
-            </View>
-          </View>
-        )}
 
         {/* Action to open full details */}
         <View style={styles.eoFooter}>
@@ -774,32 +775,34 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
             <Text style={styles.eoMainBtnText}>View Details</Text>
           </TouchableOpacity>
 
-          {item.status === 'pending' && item.type === 'customized' ? (
-            <View style={{ flexDirection: 'row', gap: 12, marginTop: 10 }}>
-              <TouchableOpacity
-                style={[styles.eoMainBtn, { backgroundColor: '#22C55E', flex: 1 }]}
-                onPress={() => onUpdateStatus(item)}
-              >
-                <Text style={styles.eoMainBtnText}>Accept</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.eoMainBtn, { backgroundColor: '#EF4444', flex: 1 }]}
-                onPress={() => onDecline(item)}
-              >
-                <Text style={styles.eoMainBtnText}>Decline</Text>
-              </TouchableOpacity>
-            </View>
-          ) : !['completed', 'cancelled', 'declined'].includes(item.status) ? (
+          {/* Phase 1: Pending — admin is yet to provide price */}
+          {item.status === 'pending' && (item.type === 'booking' || item.type === 'special_order') && (
             <TouchableOpacity
-              style={[styles.eoMainBtn, { backgroundColor: '#3B82F6', marginTop: 10 }]}
+              style={[styles.eoMainBtn, { backgroundColor: '#F59E0B', marginTop: 10 }]}
+              onPress={() => onProvidePrice(item)}
+            >
+              <Ionicons name="pricetag-outline" size={18} color="#fff" />
+              <Text style={styles.eoMainBtnText}>Provide Price</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Phase 2+: Accepted or beyond — customer has agreed to price */}
+          {!['pending', 'completed', 'cancelled', 'declined'].includes(item.status) && (
+            <TouchableOpacity
+              style={[
+                styles.eoMainBtn,
+                { marginTop: 10, backgroundColor: (item.payment_method?.toLowerCase() === 'gcash' || !item.payment_method) && item.payment_status !== 'paid' ? '#9CA3AF' : '#3B82F6' }
+              ]}
+              disabled={(item.payment_method?.toLowerCase() === 'gcash' || !item.payment_method) && item.payment_status !== 'paid'}
               onPress={() => onUpdateStatus(item)}
             >
               <Ionicons name="git-network-outline" size={18} color="#fff" />
               <Text style={styles.eoMainBtnText}>Change Status</Text>
             </TouchableOpacity>
-          ) : null}
+          )}
 
-          {item.delivery_method === 'delivery' && !['completed', 'cancelled', 'declined'].includes(item.status) && (
+          {/* Assign Rider: only when processing + delivery */}
+          {item.delivery_method === 'delivery' && item.status === 'processing' && (
             <TouchableOpacity style={[styles.eoMainBtn, { backgroundColor: '#10B981', marginTop: 10 }]} onPress={() => onAssignRider(item)}>
               <Ionicons name="person-add-outline" size={18} color="#fff" />
               <Text style={styles.eoMainBtnText}>Assign Rider</Text>
@@ -814,8 +817,36 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     <View style={styles.tabContent}>
       <Text style={styles.tabTitle}>Booking & Custom Requests</Text>
 
+      {/* Scrollable Status Filters */}
+      <View style={{ marginBottom: 15 }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingHorizontal: 16 }}>
+          {requestStatusFilters.map((filter) => (
+            <TouchableOpacity
+              key={filter}
+              onPress={() => setStatusFilter(filter)}
+              style={{
+                paddingVertical: 8,
+                paddingHorizontal: 16,
+                borderRadius: 20,
+                backgroundColor: statusFilter === filter ? '#ec4899' : '#f9a8d4',
+                borderWidth: statusFilter === filter ? 0 : 1,
+                borderColor: '#ec4899',
+              }}
+            >
+              <Text style={{
+                color: statusFilter === filter ? '#fff' : '#be185d',
+                fontWeight: '600',
+                fontSize: 14,
+              }}>
+                {filter}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+
       <FlatList
-        data={requestsWithRiderDetails}
+        data={filteredRequests}
         renderItem={({ item }) => <EnhancedRequestCard
           item={item}
           onMessageCustomer={handleMessageCustomer}
@@ -825,7 +856,9 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
           handleUpdatePaymentStatus={handleUpdatePaymentStatus}
           onAssignRider={handleAssignRider}
           onUpdateStatus={openRequestStatusModal}
+          onProvidePrice={(req) => { setModalVisible(false); openQuoteModal(req); }}
           onDecline={handleDeclineRequest}
+          onPrintReceipt={(item) => generateAndShareReceipt(item, true)}
         />}
         keyExtractor={item => item.id.toString()}
         contentContainerStyle={{ paddingBottom: 20, paddingHorizontal: 16 }}
@@ -870,74 +903,10 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                   </View >
                 )}
 
-                {
-                  (selectedRequest.payment_status || selectedRequest.amount_received > 0) && (
-                    <View style={[styles.detailSection, { borderLeftWidth: 4, borderLeftColor: '#3B82F6', backgroundColor: '#F3F4F6' }]}>
-                      <Text style={styles.detailLabel}>Payment Information:</Text>
-                      <View style={{ marginTop: 5 }}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                          <Text style={{ fontSize: 13, color: '#4B5563' }}>Status:</Text>
-                          <Text style={{ fontSize: 13, fontWeight: 'bold', color: selectedRequest.payment_status === 'paid' ? '#22C55E' : '#D97706' }}>
-                            {selectedRequest.payment_status === 'partial' ? 'Partial Payment' : (selectedRequest.payment_status?.toUpperCase() || 'WAITING')}
-                          </Text>
-                        </View>
 
-                        {selectedRequest.final_price > 0 && (
-                          <>
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                              <Text style={{ fontSize: 13, color: '#4B5563' }}>Total Price:</Text>
-                              <Text style={{ fontSize: 13, fontWeight: '500' }}>₱{selectedRequest.final_price.toLocaleString()}</Text>
-                            </View>
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                              <Text style={{ fontSize: 13, color: '#4B5563' }}>Amount Received:</Text>
-                              <Text style={{ fontSize: 13, fontWeight: '500', color: '#22C55E' }}>₱{(selectedRequest.amount_received || 0).toLocaleString()}</Text>
-                            </View>
-                            {selectedRequest.final_price - (selectedRequest.amount_received || 0) > 0 && (
-                              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                                <Text style={{ fontSize: 13, color: '#4B5563' }}>Remaining Balance:</Text>
-                                <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#EF4444' }}>₱{(selectedRequest.final_price - (selectedRequest.amount_received || 0)).toLocaleString()}</Text>
-                              </View>
-                            )}
-                          </>
-                        )}
-                      </View>
-
-                      {selectedRequest.payment_status !== 'paid' && (selectedRequest.payment_method?.toLowerCase() === 'gcash' || !selectedRequest.payment_method) && (
-                        <TouchableOpacity
-                          style={{
-                            marginTop: 10,
-                            backgroundColor: '#3B82F6',
-                            paddingVertical: 8,
-                            borderRadius: 6,
-                            alignItems: 'center'
-                          }}
-                          onPress={() => {
-                            setRequestToRecordPayment(selectedRequest);
-                            setPaymentAmount('');
-                            setPaymentModalVisible(true);
-                          }}
-                        >
-                          <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 12 }}>Record New Payment</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  )
-                }
 
                 <View style={styles.actionButtons}>
-                  {/* For Special Order and Booking: Provide Quote */}
-                  {(selectedRequest.status === 'pending' || selectedRequest.status === 'quoted') && (selectedRequest.type === 'special_order' || selectedRequest.type === 'booking') && (
-                    <TouchableOpacity
-                      style={[styles.actionButton, { backgroundColor: '#2196F3', flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }]} // Blue color, added flex direction
-                      onPress={() => {
-                        setModalVisible(false);
-                        openQuoteModal(selectedRequest);
-                      }}
-                    >
-                      <Ionicons name="pricetag-outline" size={16} color="#fff" />
-                      <Text style={styles.buttonText}> Provide Price</Text> {/* Changed text */}
-                    </TouchableOpacity>
-                  )}
+
 
                   {/* Accept and Decline for Pending Customized Requests */}
                   {selectedRequest.status === 'pending' && selectedRequest.type === 'customized' && (
@@ -957,8 +926,8 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                     </>
                   )}
 
-                  {/* Assign Rider in Modal */}
-                  {selectedRequest.delivery_method === 'delivery' && !['completed', 'cancelled', 'declined'].includes(selectedRequest.status) && (
+                  {/* Assign Rider in Modal: only when processing + delivery */}
+                  {selectedRequest.delivery_method === 'delivery' && selectedRequest.status === 'processing' && (
                     <TouchableOpacity
                       style={[styles.actionButton, { backgroundColor: '#10B981', flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }]}
                       onPress={() => {
@@ -1038,9 +1007,8 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                             ]} />
                           )}
                           <TouchableOpacity
-                            onPress={() => setSelectedRequestStatus(status.id)}
                             style={styles.timelineStep}
-                            disabled={isPast}
+                            disabled={true}
                           >
                             <View style={styles.timelineIconContainer}>
                               <View style={[
@@ -1098,7 +1066,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
             <View style={styles.statusModalFooter}>
               <TouchableOpacity onPress={confirmRequestStatusChange} style={styles.statusConfirmButton}>
-                <Text style={styles.statusConfirmButtonText}>Confirm</Text>
+                <Text style={styles.statusConfirmButtonText}>Proceed</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => setRequestStatusModalVisible(false)} style={styles.statusCloseButton}>
                 <Text style={styles.statusCloseButtonText}>Cancel</Text>
@@ -1120,14 +1088,30 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
             </View>
             <Text style={[styles.modalSubtitle, { textAlign: 'left', paddingHorizontal: 20 }]}>Request #{requestToQuote?.request_number}</Text>
 
-            <Text style={styles.inputLabel}>Price Amount (₱)</Text>
+            <Text style={styles.inputLabel}>Item Price (₱)</Text>
             <TextInput
               style={styles.input}
-              placeholder="Enter total price for the request"
+              placeholder="Enter price for the items"
               keyboardType="numeric"
               value={quoteAmount}
               onChangeText={setQuoteAmount}
             />
+
+
+            <View style={{ marginTop: 10, padding: 15, backgroundColor: '#fdf2f8', borderRadius: 8, borderWidth: 1, borderColor: '#fbcfe8' }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                <Text style={{ color: '#831843' }}>Item Price:</Text>
+                <Text style={{ color: '#831843', fontWeight: 'bold' }}>₱{parseFloat(quoteAmount || 0).toLocaleString()}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                <Text style={{ color: '#831843' }}>Shipping Fee:</Text>
+                <Text style={{ color: '#831843', fontWeight: 'bold' }}>₱{parseFloat(quoteShippingFee || 0).toLocaleString()}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f9a8d4' }}>
+                <Text style={{ color: '#be185d', fontWeight: 'bold', fontSize: 16 }}>Total Price to Pay:</Text>
+                <Text style={{ color: '#be185d', fontWeight: 'bold', fontSize: 16 }}>₱{(parseFloat(quoteAmount || 0) + parseFloat(quoteShippingFee || 0)).toLocaleString()}</Text>
+              </View>
+            </View>
 
             <View style={styles.modalButtons}>
               <TouchableOpacity
@@ -1257,7 +1241,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       <Modal visible={paymentModalVisible} animationType="fade" transparent>
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Record GCash Payment</Text>
+            <Text style={styles.modalTitle}>{isEditPaymentMode ? 'Edit Amount Received' : 'Record GCash Payment'}</Text>
             <View style={{ marginBottom: 15 }}>
               <Text style={{ marginBottom: 5 }}>Currently Received: ₱{requestToRecordPayment?.amount_received || 0}</Text>
               <Text style={{ marginBottom: 5 }}>Total Amount: ₱{requestToRecordPayment?.final_price || 0}</Text>
@@ -1265,7 +1249,9 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                 Balance: ₱{(requestToRecordPayment?.final_price || 0) - (requestToRecordPayment?.amount_received || 0)}
               </Text>
             </View>
-            <Text style={{ marginBottom: 5, fontWeight: '500' }}>Enter Amount Received (New)</Text>
+            <Text style={{ marginBottom: 5, fontWeight: '500' }}>
+              {isEditPaymentMode ? 'Correct Amount Received' : 'Enter Amount Received (New)'}
+            </Text>
             <TextInput
               style={styles.input}
               placeholder="0.00"

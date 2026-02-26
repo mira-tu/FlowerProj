@@ -5,9 +5,7 @@ import { supabase } from '../config/supabase';
 import '../styles/BookEvent.css';
 import '../styles/Shop.css';
 import { formatPhoneNumber } from '../utils/format'; // Import the shared utility
-
-
-const initialFormState = {
+import InfoModal from '../components/InfoModal'; const initialFormState = {
     recipientName: '',
     contactNumber: '',
     eventType: '',
@@ -36,6 +34,7 @@ const BookEvent = ({ user }) => {
     const [addressLoading, setAddressLoading] = useState(false);
     const [selectedBarangay, setSelectedBarangay] = useState(null);
     const [showReviewModal, setShowReviewModal] = useState(false);
+    const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
 
     useEffect(() => {
         if (user) {
@@ -74,7 +73,7 @@ const BookEvent = ({ user }) => {
                     notes,
                     contact_number,
                 } = parsedInquiry.requestData;
-                
+
                 setFormData({
                     recipientName: recipient_name || '',
                     contactNumber: formatPhoneNumber(contact_number || user?.user_metadata?.phone || ''),
@@ -91,7 +90,7 @@ const BookEvent = ({ user }) => {
             }
         }
     }, [user]);
-    
+
     const minEventDate = useMemo(() => {
         const now = new Date();
         const year = now.getFullYear();
@@ -132,7 +131,7 @@ const BookEvent = ({ user }) => {
     const handleSaveAddress = () => {
         const { street, barangay } = addressForm;
         if (!street || !barangay) {
-            alert('Please fill in all address fields.');
+            setInfoModal({ show: true, title: 'Notice', message: 'Please fill in all address fields.' });
             return;
         }
         const fullAddress = `${street}, ${barangay}, Zamboanga City, Zamboanga Del Sur`;
@@ -299,16 +298,16 @@ const BookEvent = ({ user }) => {
                                             </div>
                                             <div className="col-12">
                                                 <label className="form-label fw-semibold" htmlFor="venue">Venue Address</label>
-                                                <input 
-                                                    type="text" 
-                                                    id="venue" 
-                                                    name="venue" 
-                                                    className="form-control bg-light border-0 py-3" 
-                                                    placeholder="Click to select address" 
-                                                    value={formData.venue} 
+                                                <input
+                                                    type="text"
+                                                    id="venue"
+                                                    name="venue"
+                                                    className="form-control bg-light border-0 py-3"
+                                                    placeholder="Click to select address"
+                                                    value={formData.venue}
                                                     onFocus={() => setShowAddressModal(true)}
-                                                    readOnly 
-                                                    required 
+                                                    readOnly
+                                                    required
                                                 />
                                             </div>
                                             <div className="col-12">
@@ -379,7 +378,7 @@ const BookEvent = ({ user }) => {
                                     placeholder="e.g., House No., Street Name, Subdivision"
                                 />
                             </div>
-                            
+
                             <button
                                 className="btn"
                                 style={{ background: 'var(--shop-pink)', color: 'white' }}
@@ -421,6 +420,13 @@ const BookEvent = ({ user }) => {
                     </div>
                 </div>
             )}
+
+            <InfoModal
+                show={infoModal.show}
+                onClose={() => setInfoModal({ show: false, title: '', message: '' })}
+                title={infoModal.title}
+                message={infoModal.message}
+            />
         </div>
     );
 };

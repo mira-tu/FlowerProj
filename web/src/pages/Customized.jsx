@@ -109,7 +109,7 @@ const Customized = ({ addToCart }) => {
 
       } catch (error) {
         console.error('Error fetching customization data:', error.message || error);
-        alert('Failed to load customization options. Please try again.');
+        setInfoModal({ show: true, title: 'Error', message: 'Failed to load customization options. Please try again.' });
       } finally {
         setLoadingCustomizationData(false);
       }
@@ -266,7 +266,7 @@ const Customized = ({ addToCart }) => {
 
     } catch (error) {
       console.error('Error adding to cart:', error);
-      alert('Error adding to cart. Please try again.');
+      setInfoModal({ show: true, title: 'Error', message: 'Error adding to cart. Please try again.' });
     }
   };
 

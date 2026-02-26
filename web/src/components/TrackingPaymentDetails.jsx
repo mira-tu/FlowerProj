@@ -11,7 +11,8 @@ const TrackingPaymentDetails = ({
     onUploadReceipt,
     uploadingReceipt,
     additionalFile,
-    setAdditionalFile
+    setAdditionalFile,
+    shippingFee
 }) => {
     const [showQR, setShowQR] = useState(false);
 
@@ -37,10 +38,20 @@ const TrackingPaymentDetails = ({
                 {(amountPaid > 0 || totalAmount > 0) && (
                     <div className="mb-3 p-2 bg-light rounded shadow-sm border">
                         <div className="d-flex justify-content-between mb-1">
-                            <span className="small text-muted">Total Amount:</span>
+                            <span className="small text-muted">Item Price:</span>
+                            <span className="fw-bold">₱{((totalAmount || 0) - (shippingFee || 0)).toLocaleString()}</span>
+                        </div>
+                        {shippingFee > 0 && (
+                            <div className="d-flex justify-content-between mb-1">
+                                <span className="small text-muted">Shipping Fee:</span>
+                                <span className="fw-bold">₱{shippingFee.toLocaleString()}</span>
+                            </div>
+                        )}
+                        <div className="d-flex justify-content-between mb-1 pt-1 border-top mt-1">
+                            <span className="fw-bold">Total Amount:</span>
                             <span className="fw-bold">₱{totalAmount?.toLocaleString()}</span>
                         </div>
-                        <div className="d-flex justify-content-between mb-1">
+                        <div className="d-flex justify-content-between mb-1 pt-1 border-top mt-1">
                             <span className="small text-muted">Amount Paid:</span>
                             <span className="fw-bold text-success">₱{(amountPaid || 0).toLocaleString()}</span>
                         </div>
@@ -57,12 +68,12 @@ const TrackingPaymentDetails = ({
                     </div>
                 )}
 
-                {paymentStatus === 'partial' && (
-                    <div className="alert alert-warning py-2 mb-3 border-0 shadow-sm" style={{ backgroundColor: '#fff3cd' }}>
+                {paymentStatus === 'partial' && balance > 0 && (
+                    <div className="alert alert-danger py-2 mb-3 border-0 shadow-sm" style={{ backgroundColor: '#FEF2F2', borderLeft: '4px solid #EF4444' }}>
                         <div className="d-flex align-items-center">
-                            <i className="fas fa-info-circle me-2"></i>
-                            <div className="small">
-                                <strong>Balance detected.</strong> Please upload an additional receipt for ₱{balance.toLocaleString()} to complete your order.
+                            <i className="fas fa-exclamation-circle text-danger me-2"></i>
+                            <div className="small text-danger">
+                                <strong>Partial Payment Detected.</strong> Your payment is lacking ₱{balance.toLocaleString()}. Please upload an additional receipt to cover the remaining balance.
                             </div>
                         </div>
                     </div>
@@ -96,9 +107,9 @@ const TrackingPaymentDetails = ({
                     </div>
                 </div>
 
-                {(paymentStatus === 'partial' || paymentStatus === 'waiting_for_confirmation' || !receiptUrl) && (
+                {(!receiptUrl) && (
                     <div className="mt-3 p-2 rounded" style={{ backgroundColor: '#fdf2f8', border: '1px dashed var(--shop-pink)' }}>
-                        <label className="form-label small fw-bold mb-1">Upload Additional Receipt</label>
+                        <label className="form-label small fw-bold mb-1">Upload GCash Receipt</label>
                         <div className="input-group">
                             <input
                                 type="file"
@@ -116,6 +127,44 @@ const TrackingPaymentDetails = ({
                                     <span className="spinner-border spinner-border-sm"></span>
                                 ) : (
                                     'Upload'
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Show waiting message whenever payment_status is waiting_for_confirmation */}
+                {paymentStatus === 'waiting_for_confirmation' && (
+                    <div className="alert alert-secondary py-2 mb-3 border-0 shadow-sm mt-3" style={{ backgroundColor: '#F3F4F6' }}>
+                        <div className="d-flex align-items-center">
+                            <i className="fas fa-clock text-secondary me-2"></i>
+                            <div className="small text-secondary">
+                                <strong>Verifying Receipt.</strong> We are currently reviewing your uploaded receipt. You will be notified once confirmed.
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Upload block — shows only when admin has confirmed previous payment but balance remains */}
+                {receiptUrl && paymentStatus === 'partial' && balance > 0 && (
+                    <div className="mt-3 p-2 rounded" style={{ backgroundColor: '#fef2f2', border: '1px dashed #ef4444' }}>
+                        <label className="form-label small fw-bold text-danger mb-1">Upload Additional Receipt for Balance</label>
+                        <div className="input-group">
+                            <input
+                                type="file"
+                                className="form-control form-control-sm border-danger"
+                                accept="image/*"
+                                onChange={(e) => setAdditionalFile(e.target.files[0])}
+                            />
+                            <button
+                                className="btn btn-sm btn-danger"
+                                onClick={onUploadReceipt}
+                                disabled={!additionalFile || uploadingReceipt}
+                            >
+                                {uploadingReceipt ? (
+                                    <span className="spinner-border spinner-border-sm"></span>
+                                ) : (
+                                    'Upload Balance Receipt'
                                 )}
                             </button>
                         </div>

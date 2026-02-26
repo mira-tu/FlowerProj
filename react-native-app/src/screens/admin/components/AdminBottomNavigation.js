@@ -49,20 +49,6 @@ const AdminBottomNavigation = ({ activeTab, setActiveTab, unreadMessageCount, se
 
     <TouchableOpacity
       style={styles.navItem}
-      onPress={() => setActiveTab('notifications')}
-    >
-      <Ionicons
-        name="notifications"
-        size={24}
-        color={activeTab === 'notifications' ? '#ec4899' : '#999'}
-      />
-      <Text style={[styles.navText, activeTab === 'notifications' && styles.navTextActive]}>
-        Notific..
-      </Text>
-    </TouchableOpacity>
-
-    <TouchableOpacity
-      style={styles.navItem}
       onPress={() => {
         setActiveTab('messaging');
         setUnreadMessageCount(0);
@@ -80,6 +66,20 @@ const AdminBottomNavigation = ({ activeTab, setActiveTab, unreadMessageCount, se
       )}
       <Text style={[styles.navText, activeTab === 'messaging' && styles.navTextActive]}>
         Messagi..
+      </Text>
+    </TouchableOpacity>
+
+    <TouchableOpacity
+      style={styles.navItem}
+      onPress={() => setActiveTab('fees')}
+    >
+      <Ionicons
+        name="cash"
+        size={24}
+        color={activeTab === 'fees' ? '#ec4899' : '#999'}
+      />
+      <Text style={[styles.navText, activeTab === 'fees' && styles.navTextActive]}>
+        Fees
       </Text>
     </TouchableOpacity>
   </View>

@@ -4,6 +4,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import '../styles/Shop.css';
 import { supabase } from '../config/supabase';
 import { formatPhoneNumber } from '../utils/format';
+import InfoModal from '../components/InfoModal';
 import qrCodeImage from '../assets/qr-code-1.jpg';
 
 const Profile = ({ user, logout }) => {
@@ -30,6 +31,7 @@ const Profile = ({ user, logout }) => {
     const [selectedBarangay, setSelectedBarangay] = useState(null);
     const [addressLoading, setAddressLoading] = useState(false);
     const [formErrors, setFormErrors] = useState({});
+    const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
 
     useEffect(() => {
         const params = new URLSearchParams(location.search);
@@ -179,6 +181,7 @@ const Profile = ({ user, logout }) => {
     const [receiptFile, setReceiptFile] = useState(null);
     const [receiptPreview, setReceiptPreview] = useState(null);
     const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+    const [selectedRequestDetails, setSelectedRequestDetails] = useState(null);
 
     const handleReceiptUpload = (e) => {
         const file = e.target.files[0];
@@ -194,7 +197,7 @@ const Profile = ({ user, logout }) => {
 
     const handleConfirmPayment = async () => {
         if (!receiptFile) {
-            alert('Please upload your payment receipt before confirming.');
+            setInfoModal({ show: true, title: 'Notice', message: 'Please upload your payment receipt before confirming.' });
             return;
         }
         if (!orderForPayment) return;
@@ -252,7 +255,7 @@ const Profile = ({ user, logout }) => {
 
         } catch (error) {
             console.error('Error confirming payment:', error);
-            alert('There was an error submitting your payment. Please try again. ' + error.message);
+            setInfoModal({ show: true, title: 'Error', message: 'There was an error submitting your payment. Please try again. ' + error.message });
         } finally {
             setIsProcessingPayment(false);
         }
@@ -406,10 +409,10 @@ const Profile = ({ user, logout }) => {
                     recipientName: requestData?.recipientName || requestData?.recipient_name,
                     occasion: requestData?.occasion,
                     preferences: requestData?.preferences || requestData?.notes,
-                    flower: requestData?.flower,
-                    bundleSize: requestData?.bundleSize,
-                    wrapper: requestData?.wrapper,
-                    ribbon: requestData?.ribbon,
+                    flower: requestData?.items?.[0]?.flower?.name || requestData?.items?.[0]?.flower || requestData?.flower,
+                    bundleSize: requestData?.items?.[0]?.bundleSize || requestData?.bundleSize,
+                    wrapper: requestData?.items?.[0]?.wrapper?.name || requestData?.items?.[0]?.wrapper || requestData?.wrapper,
+                    ribbon: requestData?.items?.[0]?.ribbon?.name || requestData?.items?.[0]?.ribbon || requestData?.ribbon,
                     addon: requestData?.addon,
                     // Inquiry fields
                     subject: requestData?.subject,
@@ -498,7 +501,7 @@ const Profile = ({ user, logout }) => {
 
     const handleSaveAddress = async () => {
         if (!addressForm.label || !addressForm.name || !addressForm.phone || !addressForm.street || !addressForm.barangay) {
-            alert('Please fill in all required fields (Label, Name, Phone, Street, Barangay)');
+            setInfoModal({ show: true, title: 'Notice', message: 'Please fill in all required fields (Label, Name, Phone, Street, Barangay)' });
             return;
         }
 
@@ -514,7 +517,7 @@ const Profile = ({ user, logout }) => {
         const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
 
         if (userError || !currentUser) {
-            alert('You must be logged in to save an address.');
+            setInfoModal({ show: true, title: 'Error', message: 'You must be logged in to save an address.' });
             console.error('Error fetching user for saving address:', userError);
             return;
         }
@@ -541,7 +544,7 @@ const Profile = ({ user, logout }) => {
 
             if (error) {
                 console.error('Error updating address:', error);
-                alert('Failed to update address: ' + error.message);
+                setInfoModal({ show: true, title: 'Error', message: 'Failed to update address: ' + error.message });
                 return;
             }
             setAddresses(addresses.map(addr => (addr.id === editingAddress.id ? data : addr)));
@@ -554,7 +557,7 @@ const Profile = ({ user, logout }) => {
 
             if (error) {
                 console.error('Error adding address:', error);
-                alert('Failed to add address: ' + error.message);
+                setInfoModal({ show: true, title: 'Error', message: 'Failed to add address: ' + error.message });
                 return;
             }
             setAddresses([...addresses, data]);
@@ -593,7 +596,7 @@ const Profile = ({ user, logout }) => {
 
                         if (updateError) {
                             console.error('Error soft-deleting address:', updateError);
-                            alert('Failed to delete address. It may be in use.');
+                            setInfoModal({ show: true, title: 'Error', message: 'Failed to delete address. It may be in use.' });
                             return;
                         }
                     }
@@ -616,7 +619,7 @@ const Profile = ({ user, logout }) => {
 
         if (updateError) {
             console.error('Error updating other addresses default status:', updateError);
-            alert('Failed to set default address: ' + updateError.message);
+            setInfoModal({ show: true, title: 'Error', message: 'Failed to set default address: ' + updateError.message });
             return;
         }
 
@@ -630,7 +633,7 @@ const Profile = ({ user, logout }) => {
 
         if (error) {
             console.error('Error setting default address:', error);
-            alert('Failed to set default address: ' + error.message);
+            setInfoModal({ show: true, title: 'Error', message: 'Failed to set default address: ' + error.message });
             return;
         }
 
@@ -711,7 +714,7 @@ const Profile = ({ user, logout }) => {
 
                 if (error) {
                     console.error('Error cancelling request:', error);
-                    alert('Failed to cancel request: ' + error.message);
+                    setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel request: ' + error.message });
                     return;
                 }
             } else { // It's a regular order
@@ -722,7 +725,7 @@ const Profile = ({ user, logout }) => {
 
                 if (error) {
                     console.error('Error cancelling order:', error);
-                    alert('Failed to cancel order: ' + error.message);
+                    setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel order: ' + error.message });
                     return;
                 }
             }
@@ -755,7 +758,7 @@ const Profile = ({ user, logout }) => {
             setOrderToCancel(null);
         } catch (error) {
             console.error('Error during cancellation:', error);
-            alert('Failed to cancel. Please try again.');
+            setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel. Please try again.' });
         }
     };
 
@@ -937,10 +940,15 @@ const Profile = ({ user, logout }) => {
                                     </>
                                 ) : (
                                     // Display request details for bookings, special orders, and customized
-                                    <div className="order-item">
-                                        {order.image_url && (
+                                    <div
+                                        className="order-item"
+                                        style={order.type ? { cursor: 'pointer' } : {}}
+                                        onClick={order.type ? () => setSelectedRequestDetails(order) : undefined}
+                                        title={order.type ? 'Click to view details' : undefined}
+                                    >
+                                        {(order.image_url || order.data?.items?.[0]?.image_url || order.data?.items?.[0]?.image) && (
                                             <img
-                                                src={order.image_url}
+                                                src={order.image_url || order.data?.items?.[0]?.image_url || order.data?.items?.[0]?.image}
                                                 alt="Request preview"
                                                 className="order-item-img customized-bouquet-img"
                                                 onError={(e) => e.target.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'}
@@ -968,7 +976,7 @@ const Profile = ({ user, logout }) => {
                                             )}
                                             {order.type === 'customized' && (
                                                 <>
-                                                    <div className="order-item-name">Customized Bouquet</div>
+                                                    <div className="order-item-name">Customized Bouquet {order.data?.items?.length > 1 ? `(${order.data.items.length} items)` : ''}</div>
                                                     {order.flower && <div className="order-item-variant"><strong>Flower:</strong> {typeof order.flower === 'object' ? order.flower.name : order.flower}</div>}
                                                     {order.bundleSize && <div className="order-item-variant"><strong>Bundle Size:</strong> {order.bundleSize}</div>}
                                                     {order.wrapper && <div className="order-item-variant"><strong>Wrapper:</strong> {typeof order.wrapper === 'object' ? order.wrapper.name : order.wrapper}</div>}
@@ -1073,26 +1081,25 @@ const Profile = ({ user, logout }) => {
                                             )}
 
                                             {/* TRACK BUTTONS */}
-                                            {['pending', 'processing', 'out_for_delivery', 'ready_for_pickup'].includes(order.status) && (
-                                                order.type ? ( // It's a Request
-                                                    <button
-                                                        className="btn-order-action primary"
-                                                        onClick={() => navigate(
-                                                            order.type === 'customized'
-                                                                ? `/customized-request-tracking/${order.request_number}`
-                                                                : `/request-tracking/${order.request_number}`
-                                                        )}
-                                                    >
-                                                        Track Request
-                                                    </button>
-                                                ) : ( // It's a regular Order
-                                                    <button
-                                                        className="btn-order-action primary"
-                                                        onClick={() => navigate(`/order-tracking/${order.order_number}`)}
-                                                    >
-                                                        Track Order
-                                                    </button>
-                                                )
+                                            {['accepted', 'processing', 'out_for_delivery', 'ready_for_pickup', 'completed'].includes(order.status) && order.type && (
+                                                <button
+                                                    className="btn-order-action primary"
+                                                    onClick={() => navigate(
+                                                        order.type === 'customized'
+                                                            ? `/customized-request-tracking/${order.request_number}`
+                                                            : `/request-tracking/${order.request_number}`
+                                                    )}
+                                                >
+                                                    Track Request
+                                                </button>
+                                            )}
+                                            {['processing', 'out_for_delivery', 'ready_for_pickup'].includes(order.status) && !order.type && (
+                                                <button
+                                                    className="btn-order-action primary"
+                                                    onClick={() => navigate(`/order-tracking/${order.order_number}`)}
+                                                >
+                                                    Track Order
+                                                </button>
                                             )}
 
                                             {/* CANCEL BUTTON */}
@@ -1793,6 +1800,179 @@ const Profile = ({ user, logout }) => {
                     </div>
                 </div>
             )}
+
+            <InfoModal
+                show={infoModal.show}
+                onClose={() => setInfoModal({ show: false, title: '', message: '' })}
+                title={infoModal.title}
+                message={infoModal.message}
+            />
+
+            {/* Request Details Popup Modal */}
+            {selectedRequestDetails && (() => {
+                const req = selectedRequestDetails;
+                const typeConfig = {
+                    booking: { label: 'Event Booking', icon: 'fa-calendar-alt', color: '#8B5CF6', bg: 'linear-gradient(135deg, #7C3AED, #A855F7)' },
+                    special_order: { label: 'Special Order', icon: 'fa-star', color: '#EC4899', bg: 'linear-gradient(135deg, #DB2777, #F472B6)' },
+                    customized: { label: 'Customized Bouquet', icon: 'fa-palette', color: '#F59E0B', bg: 'linear-gradient(135deg, #D97706, #FBBF24)' },
+                };
+                const cfg = typeConfig[req.type] || typeConfig.booking;
+
+                const DetailRow = ({ icon, label, value }) => value ? (
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', padding: '5px 0', borderBottom: '1px solid #f3f4f6' }}>
+                        <i className={`fas ${icon}`} style={{ color: cfg.color, marginTop: '2px', width: '14px', textAlign: 'center', fontSize: '0.8rem' }}></i>
+                        <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '0.7rem', color: '#9CA3AF', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</div>
+                            <div style={{ fontSize: '0.85rem', color: '#374151', fontWeight: '500', marginTop: '1px' }}>{value}</div>
+                        </div>
+                    </div>
+                ) : null;
+
+                return (
+                    <div
+                        className="modal-overlay"
+                        onClick={() => setSelectedRequestDetails(null)}
+                        style={{ zIndex: 2000 }}
+                    >
+                        <div
+                            onClick={e => e.stopPropagation()}
+                            style={{
+                                background: '#fff', borderRadius: '20px', maxWidth: '440px', width: '92%',
+                                boxShadow: '0 25px 50px rgba(0,0,0,0.15)', overflow: 'hidden', animation: 'fadeIn 0.2s ease'
+                            }}
+                        >
+                            {/* Header */}
+                            <div style={{
+                                background: cfg.bg, padding: '14px 20px', position: 'relative',
+                                display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                    <div style={{
+                                        width: '34px', height: '34px', borderRadius: '10px', background: 'rgba(255,255,255,0.2)',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                    }}>
+                                        <i className={`fas ${cfg.icon}`} style={{ color: '#fff', fontSize: '1.1rem' }}></i>
+                                    </div>
+                                    <div>
+                                        <div style={{ color: '#fff', fontWeight: '700', fontSize: '0.9rem' }}>{cfg.label}</div>
+                                        <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: '0.75rem' }}>#{req.request_number}</div>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setSelectedRequestDetails(null)}
+                                    style={{
+                                        border: 'none', background: 'rgba(255,255,255,0.2)', color: '#fff',
+                                        width: '32px', height: '32px', borderRadius: '50%', cursor: 'pointer',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem'
+                                    }}
+                                >
+                                    <i className="fas fa-times"></i>
+                                </button>
+                            </div>
+
+                            {/* Status Badge */}
+                            <div style={{ padding: '8px 20px', background: '#FAFAFA', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f0f0f0' }}>
+                                <span style={{ fontSize: '0.8rem', color: '#6B7280' }}>
+                                    <i className="fas fa-clock me-1"></i>
+                                    {new Date(req.date || req.requestDate).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </span>
+                                <span className={`order-status ${getStatusBadgeClass(req.status)}`}>
+                                    {getStatusLabel(req.status)}
+                                </span>
+                            </div>
+
+                            {/* Image */}
+                            {(req.image_url || req.data?.items?.[0]?.image_url || req.data?.items?.[0]?.image) && (
+                                <div style={{ padding: '10px 20px 0' }}>
+                                    <img
+                                        src={req.image_url || req.data?.items?.[0]?.image_url || req.data?.items?.[0]?.image}
+                                        alt="Request"
+                                        style={{
+                                            width: '100%', height: '120px', objectFit: 'cover',
+                                            borderRadius: '10px', border: '1px solid #e5e7eb'
+                                        }}
+                                    />
+                                </div>
+                            )}
+
+                            {/* Details */}
+                            <div style={{ padding: '8px 20px 4px' }}>
+                                {/* Booking */}
+                                {req.type === 'booking' && (
+                                    <>
+                                        <DetailRow icon="fa-glass-cheers" label="Event Type" value={req.eventType} />
+                                        <DetailRow icon="fa-user" label="Recipient" value={req.recipientName} />
+                                        <DetailRow icon="fa-calendar-day" label="Event Date" value={req.eventDate ? new Date(req.eventDate).toLocaleDateString('en-PH', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' }) : null} />
+                                        <DetailRow icon="fa-map-marker-alt" label="Venue" value={req.venue} />
+                                        <DetailRow icon="fa-sticky-note" label="Notes" value={req.notes} />
+                                    </>
+                                )}
+                                {/* Special Order */}
+                                {req.type === 'special_order' && (
+                                    <>
+                                        <DetailRow icon="fa-user" label="Recipient" value={req.recipientName} />
+                                        <DetailRow icon="fa-gift" label="Occasion" value={req.occasion} />
+                                        <DetailRow icon="fa-heart" label="Preferences" value={req.preferences} />
+                                        {req.addon && req.addon !== 'None' && <DetailRow icon="fa-plus-circle" label="Add-on" value={req.addon} />}
+                                        <DetailRow icon="fa-envelope" label="Message" value={req.message} />
+                                        <DetailRow icon="fa-sticky-note" label="Notes" value={req.notes} />
+                                    </>
+                                )}
+                                {/* Customized */}
+                                {req.type === 'customized' && (
+                                    <>
+                                        <DetailRow icon="fa-seedling" label="Flower" value={typeof req.flower === 'object' ? req.flower.name : req.flower} />
+                                        <DetailRow icon="fa-layer-group" label="Bundle Size" value={req.bundleSize} />
+                                        <DetailRow icon="fa-scroll" label="Wrapper" value={typeof req.wrapper === 'object' ? req.wrapper.name : req.wrapper} />
+                                        <DetailRow icon="fa-ribbon" label="Ribbon" value={typeof req.ribbon === 'object' ? req.ribbon.name : req.ribbon} />
+                                        <DetailRow icon="fa-sticky-note" label="Notes" value={req.notes} />
+                                    </>
+                                )}
+
+                                {/* Delivery Info */}
+                                {req.deliveryMethod && (
+                                    <DetailRow
+                                        icon={req.deliveryMethod === 'pickup' ? 'fa-store' : 'fa-truck'}
+                                        label="Delivery Method"
+                                        value={req.deliveryMethod === 'pickup' ? 'Pickup' : 'Delivery'}
+                                    />
+                                )}
+                                {req.phone && <DetailRow icon="fa-phone" label="Contact" value={req.phone} />}
+                            </div>
+
+                            {/* Price Footer */}
+                            <div style={{
+                                margin: '0 20px', padding: '10px 14px', borderRadius: '10px',
+                                background: req.total > 0 ? '#FDF2F8' : '#F9FAFB',
+                                display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                            }}>
+                                <span style={{ fontWeight: '600', color: '#6B7280', fontSize: '0.9rem' }}>
+                                    <i className="fas fa-tag me-2" style={{ color: cfg.color }}></i>Price
+                                </span>
+                                <span style={{ fontWeight: '700', fontSize: '1.1rem', color: req.total > 0 ? cfg.color : '#9CA3AF' }}>
+                                    {req.total > 0 ? `₱${req.total.toLocaleString()}` : 'To be discussed'}
+                                </span>
+                            </div>
+
+                            {/* Close Button */}
+                            <div style={{ padding: '10px 20px 14px' }}>
+                                <button
+                                    onClick={() => setSelectedRequestDetails(null)}
+                                    style={{
+                                        width: '100%', padding: '10px', border: 'none', borderRadius: '10px',
+                                        background: '#F3F4F6', color: '#6B7280', fontWeight: '600',
+                                        cursor: 'pointer', fontSize: '0.9rem', transition: 'all 0.2s'
+                                    }}
+                                    onMouseEnter={e => { e.target.style.background = '#E5E7EB'; }}
+                                    onMouseLeave={e => { e.target.style.background = '#F3F4F6'; }}
+                                >
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
         </div>
     );
 };
