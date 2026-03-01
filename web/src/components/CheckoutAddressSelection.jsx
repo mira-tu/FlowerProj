@@ -135,23 +135,34 @@ const CheckoutAddressSelection = ({
     useEffect(() => {
         if (showAddressModal) {
             setAddressLoading(true);
-            fetch(`https://psgc.gitlab.io/api/cities-municipalities/097332000/barangays/`)
-                .then(response => response.json())
-                .then(data => {
-                    const barangayOptions = data
-                        .map(b => ({ value: b.code, label: b.name }))
-                        .sort((a, b) => a.label.localeCompare(b.label));
-                    setBarangays(barangayOptions);
+            const fetchAdminBarangays = async () => {
+                try {
+                    const { data, error } = await supabase
+                        .from('barangay_fee')
+                        .select('barangay_name')
+                        .order('barangay_name', { ascending: true });
 
-                    if (isEditingAddress && addressForm.barangay) {
-                        const existingOption = barangayOptions.find(b => b.label === addressForm.barangay);
-                        if (existingOption) {
-                            setSelectedBarangay(existingOption);
+                    if (error) throw error;
+
+                    if (data) {
+                        const barangayOptions = data.map(b => ({ value: b.barangay_name, label: b.barangay_name }));
+                        setBarangays(barangayOptions);
+
+                        if (isEditingAddress && addressForm.barangay) {
+                            const existingOption = barangayOptions.find(b => b.label === addressForm.barangay);
+                            if (existingOption) {
+                                setSelectedBarangay(existingOption);
+                            }
                         }
                     }
-                })
-                .catch(error => console.error('Error fetching barangays:', error))
-                .finally(() => setAddressLoading(false));
+                } catch (error) {
+                    console.error('Error fetching admin barangay fees:', error);
+                } finally {
+                    setAddressLoading(false);
+                }
+            };
+
+            fetchAdminBarangays();
         }
     }, [showAddressModal, isEditingAddress, addressForm.barangay]);
 
