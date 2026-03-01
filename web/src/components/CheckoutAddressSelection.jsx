@@ -138,7 +138,9 @@ const CheckoutAddressSelection = ({
             fetch(`https://psgc.gitlab.io/api/cities-municipalities/097332000/barangays/`)
                 .then(response => response.json())
                 .then(data => {
-                    const barangayOptions = data.map(b => ({ value: b.code, label: b.name }));
+                    const barangayOptions = data
+                        .map(b => ({ value: b.code, label: b.name }))
+                        .sort((a, b) => a.label.localeCompare(b.label));
                     setBarangays(barangayOptions);
 
                     if (isEditingAddress && addressForm.barangay) {
