@@ -28,8 +28,8 @@ const BookingCheckout = ({ user }) => {
         const parts = addressString.split(',').map(p => p.trim());
         let street = '', barangay = '', city = '', province = '';
 
-        if (parts.length >= 4) {
-            province = parts[3];
+        if (parts.length >= 3) {
+            province = parts[3] || '';
             city = parts[2];
             barangay = parts[1];
             street = parts[0];
@@ -68,14 +68,24 @@ const BookingCheckout = ({ user }) => {
             if (deliveryMethod === 'delivery' && inquiryAddress.barangay) {
                 const { data, error } = await supabase
                     .from('barangay_fee')
-                    .select('delivery_fee')
+                    .select('barangay_name, delivery_fee')
                     .ilike('barangay_name', `%${inquiryAddress.barangay}%`);
 
                 if (error) {
                     console.error('Error fetching fee for barangay:', inquiryAddress.barangay, error);
                     setDynamicShippingFee(100); // Fallback on error
                 } else if (data && data.length > 0) {
-                    setDynamicShippingFee(data[0].delivery_fee); // Use the first match
+                    // Try to find an exact match first (case-insensitive)
+                    const exactMatch = data.find(
+                        item => item.barangay_name.toLowerCase() === inquiryAddress.barangay.toLowerCase()
+                    );
+
+                    if (exactMatch) {
+                        setDynamicShippingFee(exactMatch.delivery_fee);
+                    } else {
+                        // Fallback to the first partial match
+                        setDynamicShippingFee(data[0].delivery_fee);
+                    }
                 } else {
                     console.warn(`No fee found for barangay: ${inquiryAddress.barangay}. Using default fee.`);
                     setDynamicShippingFee(100); // Fallback if no match found
@@ -87,27 +97,6 @@ const BookingCheckout = ({ user }) => {
 
         fetchFee();
     }, [inquiryAddress.barangay, deliveryMethod]);
-
-    const handleSaveInquiryAddress = async () => {
-        if (!inquiryAddress.street || !inquiryAddress.city || !inquiryAddress.province) {
-            setInfoModal({ show: true, title: 'Incomplete Address', message: 'The address is incomplete and cannot be saved.' });
-            throw new Error("Incomplete address");
-        }
-
-        const { data, error } = await supabase.from('addresses').insert([{
-            user_id: user.id,
-            ...inquiryAddress
-        }]).select().single();
-
-        if (error) {
-            console.error('Error saving inquiry address:', error);
-            setInfoModal({ show: true, title: 'Error', message: 'Failed to save address: ' + error.message });
-            throw error;
-        }
-
-        return data.id; // Return the ID of the newly created address
-    };
-
     const handleSubmitInquiry = async () => {
         if (!user) {
             setInfoModal({ show: true, title: 'Login Required', message: 'You must be logged in to submit an inquiry.', linkTo: '/login', linkText: 'Log In' });
@@ -118,7 +107,6 @@ const BookingCheckout = ({ user }) => {
             return;
         }
 
-        let finalAddressId = null;
         setIsProcessing(true);
 
         try {
@@ -127,7 +115,6 @@ const BookingCheckout = ({ user }) => {
                     setInfoModal({ show: true, title: 'Missing Address', message: 'An address for delivery is not available for this inquiry.' });
                     throw new Error('Address not ready');
                 }
-                finalAddressId = await handleSaveInquiryAddress();
             }
 
             const request_number = `REQ-${user.id.substring(0, 4)}-${Date.now()}`;
@@ -137,7 +124,7 @@ const BookingCheckout = ({ user }) => {
 
             const inquiryDetails = {
                 ...restOfRequestData,
-                address_id: finalAddressId,
+                address_id: null,
             };
 
             const submissionData = {
@@ -169,11 +156,11 @@ const BookingCheckout = ({ user }) => {
                 icon: 'fa-file-alt',
                 timestamp: new Date().toISOString(),
                 read: false,
-                link: `/request-tracking/${request_number}`
+                link: `/profile?menu=orders`
             };
             localStorage.setItem('notifications', JSON.stringify([newNotification, ...notifications]));
 
-            navigate(`/request-tracking/${request_number}`);
+            navigate(`/profile?menu=orders`);
         } catch (error) {
             console.error('Error submitting inquiry:', error);
         } finally {
@@ -233,7 +220,7 @@ const BookingCheckout = ({ user }) => {
                                         <div className="p-3 rounded" style={{ background: '#f8f9fa' }}>
                                             <p className='mb-1'><strong>Customer Name:</strong> {inquiryAddress.name}</p>
                                             <p className='mb-1'><strong>Phone:</strong> {inquiryAddress.phone}</p>
-                                            <p className='mb-0'><strong>Address:</strong> {`${inquiryAddress.street}, ${inquiryAddress.barangay}, ${inquiryAddress.city}, ${inquiryAddress.province}`}</p>
+                                            <p className='mb-0'><strong>Address:</strong> {`${inquiryAddress.street}, ${inquiryAddress.barangay}, ${inquiryAddress.city}`}</p>
                                         </div>
                                     ) : (
                                         <div className="alert alert-warning">
@@ -274,7 +261,9 @@ const BookingCheckout = ({ user }) => {
                                         <p className="mb-1"><strong>Event Date:</strong> {inquiryItem.requestData.event_date}</p>
                                         {inquiryItem.requestData.addon && <p className="mb-1"><strong>Add-on:</strong> {inquiryItem.requestData.addon}</p>}
                                         {inquiryItem.requestData.message && <p className="mb-1"><strong>Message:</strong> {inquiryItem.requestData.message}</p>}
-                                        <p className="mb-1"><strong>Venue:</strong> {inquiryItem.requestData.venue}</p>
+                                        {inquiryItem.requestData.venue && (deliveryMethod !== 'delivery' || inquiryItem.requestData.venue !== `${inquiryAddress?.street || ''}, ${inquiryAddress?.barangay || ''}, ${inquiryAddress?.city || ''}`) && (
+                                            <p className="mb-1"><strong>Venue:</strong> {inquiryItem.requestData.venue}</p>
+                                        )}
                                         {inquiryItem.requestData.notes && <p className="mb-1"><strong>Details:</strong> {inquiryItem.requestData.notes}</p>}
                                     </>
                                 ) : ( // Special Order

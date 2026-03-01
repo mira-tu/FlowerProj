@@ -474,8 +474,8 @@ export const adminAPI = {
             // Construct full address description if shipping_address exists
             let shippingAddressDescription = null;
             if (order.shipping_address) {
-                const { street, city, province, zip } = order.shipping_address;
-                shippingAddressDescription = [street, city, province, zip].filter(Boolean).join(', ');
+                const { street, barangay, city, zip } = order.shipping_address;
+                shippingAddressDescription = [street, barangay, city, zip].filter(Boolean).join(', ');
             }
 
             return {
@@ -887,6 +887,7 @@ export const adminAPI = {
         const formattedRequests = requests.map(req => {
             const userData = req.users || {};
 
+            // Always prefer the top-level DB column for payment fields (they are updated by admin actions).
             let requestData = req.data;
             if (typeof requestData === 'string') {
                 try {
@@ -895,6 +896,14 @@ export const adminAPI = {
                     console.error("Failed to parse request.data in adminAPI.getAllRequests:", e);
                     requestData = {};
                 }
+            }
+
+            // Strip out 'Zamboanga Del Sur' if present in custom request address fields
+            if (requestData?.deliveryAddress) {
+                requestData.deliveryAddress = requestData.deliveryAddress.replace(/, Zamboanga [Dd]el Sur/gi, '');
+            }
+            if (requestData?.venue) {
+                requestData.venue = requestData.venue.replace(/, Zamboanga [Dd]el Sur/gi, '');
             }
 
             // Always prefer the top-level DB column for payment fields (they are updated by admin actions).

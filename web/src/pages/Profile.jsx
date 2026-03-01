@@ -32,6 +32,7 @@ const Profile = ({ user, logout }) => {
     const [addressLoading, setAddressLoading] = useState(false);
     const [formErrors, setFormErrors] = useState({});
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
+    const [zoomedImage, setZoomedImage] = useState(null);
 
     useEffect(() => {
         const params = new URLSearchParams(location.search);
@@ -181,7 +182,6 @@ const Profile = ({ user, logout }) => {
     const [receiptFile, setReceiptFile] = useState(null);
     const [receiptPreview, setReceiptPreview] = useState(null);
     const [isProcessingPayment, setIsProcessingPayment] = useState(false);
-    const [selectedRequestDetails, setSelectedRequestDetails] = useState(null);
 
     const handleReceiptUpload = (e) => {
         const file = e.target.files[0];
@@ -530,7 +530,7 @@ const Profile = ({ user, logout }) => {
             street: addressForm.street,
             barangay: addressForm.barangay,
             city: 'Zamboanga City',
-            province: 'Zamboanga Del Sur',
+            province: '',
             is_default: addresses.length === 0 && !editingAddress // If no existing addresses and not editing, set as default
         };
 
@@ -942,15 +942,17 @@ const Profile = ({ user, logout }) => {
                                     // Display request details for bookings, special orders, and customized
                                     <div
                                         className="order-item"
-                                        style={order.type ? { cursor: 'pointer' } : {}}
-                                        onClick={order.type ? () => setSelectedRequestDetails(order) : undefined}
-                                        title={order.type ? 'Click to view details' : undefined}
                                     >
                                         {(order.image_url || order.data?.items?.[0]?.image_url || order.data?.items?.[0]?.image) && (
                                             <img
                                                 src={order.image_url || order.data?.items?.[0]?.image_url || order.data?.items?.[0]?.image}
                                                 alt="Request preview"
                                                 className="order-item-img customized-bouquet-img"
+                                                style={{ cursor: 'pointer' }}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setZoomedImage(order.image_url || order.data?.items?.[0]?.image_url || order.data?.items?.[0]?.image);
+                                                }}
                                                 onError={(e) => e.target.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'}
                                             />
                                         )}
@@ -1808,171 +1810,37 @@ const Profile = ({ user, logout }) => {
                 message={infoModal.message}
             />
 
-            {/* Request Details Popup Modal */}
-            {selectedRequestDetails && (() => {
-                const req = selectedRequestDetails;
-                const typeConfig = {
-                    booking: { label: 'Event Booking', icon: 'fa-calendar-alt', color: '#8B5CF6', bg: 'linear-gradient(135deg, #7C3AED, #A855F7)' },
-                    special_order: { label: 'Special Order', icon: 'fa-star', color: '#EC4899', bg: 'linear-gradient(135deg, #DB2777, #F472B6)' },
-                    customized: { label: 'Customized Bouquet', icon: 'fa-palette', color: '#F59E0B', bg: 'linear-gradient(135deg, #D97706, #FBBF24)' },
-                };
-                const cfg = typeConfig[req.type] || typeConfig.booking;
 
-                const DetailRow = ({ icon, label, value }) => value ? (
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', padding: '5px 0', borderBottom: '1px solid #f3f4f6' }}>
-                        <i className={`fas ${icon}`} style={{ color: cfg.color, marginTop: '2px', width: '14px', textAlign: 'center', fontSize: '0.8rem' }}></i>
-                        <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: '0.7rem', color: '#9CA3AF', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</div>
-                            <div style={{ fontSize: '0.85rem', color: '#374151', fontWeight: '500', marginTop: '1px' }}>{value}</div>
-                        </div>
-                    </div>
-                ) : null;
 
-                return (
-                    <div
-                        className="modal-overlay"
-                        onClick={() => setSelectedRequestDetails(null)}
-                        style={{ zIndex: 2000 }}
-                    >
-                        <div
-                            onClick={e => e.stopPropagation()}
+            {/* Image Zoom Modal */}
+            {zoomedImage && (
+                <div
+                    className="modal-overlay d-flex justify-content-center align-items-center"
+                    onClick={() => setZoomedImage(null)}
+                    style={{ zIndex: 3000, background: 'rgba(0,0,0,0.85)', position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, padding: '20px' }}
+                >
+                    <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }}>
+                        <button
+                            onClick={() => setZoomedImage(null)}
                             style={{
-                                background: '#fff', borderRadius: '20px', maxWidth: '440px', width: '92%',
-                                boxShadow: '0 25px 50px rgba(0,0,0,0.15)', overflow: 'hidden', animation: 'fadeIn 0.2s ease'
+                                position: 'absolute', top: '-15px', right: '-15px',
+                                background: '#fff', color: '#333', border: 'none',
+                                width: '30px', height: '30px', borderRadius: '50%',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                cursor: 'pointer', boxShadow: '0 2px 10px rgba(0,0,0,0.2)', zIndex: 3001
                             }}
                         >
-                            {/* Header */}
-                            <div style={{
-                                background: cfg.bg, padding: '14px 20px', position: 'relative',
-                                display: 'flex', alignItems: 'center', justifyContent: 'space-between'
-                            }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                    <div style={{
-                                        width: '34px', height: '34px', borderRadius: '10px', background: 'rgba(255,255,255,0.2)',
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center'
-                                    }}>
-                                        <i className={`fas ${cfg.icon}`} style={{ color: '#fff', fontSize: '1.1rem' }}></i>
-                                    </div>
-                                    <div>
-                                        <div style={{ color: '#fff', fontWeight: '700', fontSize: '0.9rem' }}>{cfg.label}</div>
-                                        <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: '0.75rem' }}>#{req.request_number}</div>
-                                    </div>
-                                </div>
-                                <button
-                                    onClick={() => setSelectedRequestDetails(null)}
-                                    style={{
-                                        border: 'none', background: 'rgba(255,255,255,0.2)', color: '#fff',
-                                        width: '32px', height: '32px', borderRadius: '50%', cursor: 'pointer',
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem'
-                                    }}
-                                >
-                                    <i className="fas fa-times"></i>
-                                </button>
-                            </div>
-
-                            {/* Status Badge */}
-                            <div style={{ padding: '8px 20px', background: '#FAFAFA', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f0f0f0' }}>
-                                <span style={{ fontSize: '0.8rem', color: '#6B7280' }}>
-                                    <i className="fas fa-clock me-1"></i>
-                                    {new Date(req.date || req.requestDate).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
-                                </span>
-                                <span className={`order-status ${getStatusBadgeClass(req.status)}`}>
-                                    {getStatusLabel(req.status)}
-                                </span>
-                            </div>
-
-                            {/* Image */}
-                            {(req.image_url || req.data?.items?.[0]?.image_url || req.data?.items?.[0]?.image) && (
-                                <div style={{ padding: '10px 20px 0' }}>
-                                    <img
-                                        src={req.image_url || req.data?.items?.[0]?.image_url || req.data?.items?.[0]?.image}
-                                        alt="Request"
-                                        style={{
-                                            width: '100%', height: '120px', objectFit: 'cover',
-                                            borderRadius: '10px', border: '1px solid #e5e7eb'
-                                        }}
-                                    />
-                                </div>
-                            )}
-
-                            {/* Details */}
-                            <div style={{ padding: '8px 20px 4px' }}>
-                                {/* Booking */}
-                                {req.type === 'booking' && (
-                                    <>
-                                        <DetailRow icon="fa-glass-cheers" label="Event Type" value={req.eventType} />
-                                        <DetailRow icon="fa-user" label="Recipient" value={req.recipientName} />
-                                        <DetailRow icon="fa-calendar-day" label="Event Date" value={req.eventDate ? new Date(req.eventDate).toLocaleDateString('en-PH', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' }) : null} />
-                                        <DetailRow icon="fa-map-marker-alt" label="Venue" value={req.venue} />
-                                        <DetailRow icon="fa-sticky-note" label="Notes" value={req.notes} />
-                                    </>
-                                )}
-                                {/* Special Order */}
-                                {req.type === 'special_order' && (
-                                    <>
-                                        <DetailRow icon="fa-user" label="Recipient" value={req.recipientName} />
-                                        <DetailRow icon="fa-gift" label="Occasion" value={req.occasion} />
-                                        <DetailRow icon="fa-heart" label="Preferences" value={req.preferences} />
-                                        {req.addon && req.addon !== 'None' && <DetailRow icon="fa-plus-circle" label="Add-on" value={req.addon} />}
-                                        <DetailRow icon="fa-envelope" label="Message" value={req.message} />
-                                        <DetailRow icon="fa-sticky-note" label="Notes" value={req.notes} />
-                                    </>
-                                )}
-                                {/* Customized */}
-                                {req.type === 'customized' && (
-                                    <>
-                                        <DetailRow icon="fa-seedling" label="Flower" value={typeof req.flower === 'object' ? req.flower.name : req.flower} />
-                                        <DetailRow icon="fa-layer-group" label="Bundle Size" value={req.bundleSize} />
-                                        <DetailRow icon="fa-scroll" label="Wrapper" value={typeof req.wrapper === 'object' ? req.wrapper.name : req.wrapper} />
-                                        <DetailRow icon="fa-ribbon" label="Ribbon" value={typeof req.ribbon === 'object' ? req.ribbon.name : req.ribbon} />
-                                        <DetailRow icon="fa-sticky-note" label="Notes" value={req.notes} />
-                                    </>
-                                )}
-
-                                {/* Delivery Info */}
-                                {req.deliveryMethod && (
-                                    <DetailRow
-                                        icon={req.deliveryMethod === 'pickup' ? 'fa-store' : 'fa-truck'}
-                                        label="Delivery Method"
-                                        value={req.deliveryMethod === 'pickup' ? 'Pickup' : 'Delivery'}
-                                    />
-                                )}
-                                {req.phone && <DetailRow icon="fa-phone" label="Contact" value={req.phone} />}
-                            </div>
-
-                            {/* Price Footer */}
-                            <div style={{
-                                margin: '0 20px', padding: '10px 14px', borderRadius: '10px',
-                                background: req.total > 0 ? '#FDF2F8' : '#F9FAFB',
-                                display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-                            }}>
-                                <span style={{ fontWeight: '600', color: '#6B7280', fontSize: '0.9rem' }}>
-                                    <i className="fas fa-tag me-2" style={{ color: cfg.color }}></i>Price
-                                </span>
-                                <span style={{ fontWeight: '700', fontSize: '1.1rem', color: req.total > 0 ? cfg.color : '#9CA3AF' }}>
-                                    {req.total > 0 ? `₱${req.total.toLocaleString()}` : 'To be discussed'}
-                                </span>
-                            </div>
-
-                            {/* Close Button */}
-                            <div style={{ padding: '10px 20px 14px' }}>
-                                <button
-                                    onClick={() => setSelectedRequestDetails(null)}
-                                    style={{
-                                        width: '100%', padding: '10px', border: 'none', borderRadius: '10px',
-                                        background: '#F3F4F6', color: '#6B7280', fontWeight: '600',
-                                        cursor: 'pointer', fontSize: '0.9rem', transition: 'all 0.2s'
-                                    }}
-                                    onMouseEnter={e => { e.target.style.background = '#E5E7EB'; }}
-                                    onMouseLeave={e => { e.target.style.background = '#F3F4F6'; }}
-                                >
-                                    Close
-                                </button>
-                            </div>
-                        </div>
+                            <i className="fas fa-times"></i>
+                        </button>
+                        <img
+                            src={zoomedImage}
+                            alt="Zoomed Request"
+                            style={{ maxWidth: '100%', maxHeight: '90vh', objectFit: 'contain', borderRadius: '8px' }}
+                            onClick={(e) => e.stopPropagation()}
+                        />
                     </div>
-                );
-            })()}
+                </div>
+            )}
         </div>
     );
 };

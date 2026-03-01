@@ -237,7 +237,6 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       Toast.show({
         type: 'success',
         text1: 'Order Accepted',
-        text2: 'Use "Change Status → Proceed" to start processing.',
       });
 
       // Send email notification

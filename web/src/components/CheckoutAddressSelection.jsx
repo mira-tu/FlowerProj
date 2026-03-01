@@ -23,7 +23,7 @@ const CheckoutAddressSelection = ({
         street: '',
         barangay: '',
         city: 'Zamboanga City',
-        province: 'Zamboanga del Sur',
+        province: '',
         zip: '7000',
         is_default: false
     });
@@ -122,7 +122,7 @@ const CheckoutAddressSelection = ({
                 street: '',
                 barangay: '',
                 city: 'Zamboanga City',
-                province: 'Zamboanga del Sur',
+                province: '',
                 zip: '7000',
                 is_default: false
             });
@@ -177,7 +177,7 @@ const CheckoutAddressSelection = ({
     const handleSaveAddress = async (e) => {
         e.preventDefault();
 
-        if (!addressForm.street || !addressForm.barangay || !addressForm.city || !addressForm.province || !addressForm.phone || !addressForm.name) {
+        if (!addressForm.street || !addressForm.barangay || !addressForm.city || !addressForm.phone || !addressForm.name) {
             showInfoModal('Required Fields', 'Please fill in all required fields.');
             return;
         }

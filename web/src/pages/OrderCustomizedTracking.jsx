@@ -506,54 +506,56 @@ const OrderCustomizedTracking = () => {
 
 
                     <div className="col-lg-4">
-                        <div className="tracking-items">
-                            <h5 className="fw-bold mb-4">
-                                <i className="fas fa-info-circle me-2" style={{ color: 'var(--shop-pink)' }}></i>
+                        <div className="tracking-items p-4 rounded-4 shadow-sm bg-white">
+                            <h5 className="fw-bold mb-4 pb-3 border-bottom d-flex align-items-center">
+                                <i className="fas fa-info-circle fs-5 me-2" style={{ color: 'var(--shop-pink)' }}></i>
                                 Request Details
                             </h5>
 
                             {request.requestData && request.requestData.items && request.requestData.items.map((item, index) => (
-                                <div key={item.id || index} className="mb-4">
-                                    <div className="d-flex align-items-center mb-3">
+                                <div key={item.id || index} className="mb-4 d-flex flex-column gap-3">
+                                    <div className="d-flex align-items-center mb-1">
                                         {item.image_url && (
                                             <img
                                                 src={item.image_url}
                                                 alt={item.name}
-                                                className="rounded me-3"
-                                                style={{ width: '60px', height: '60px', objectFit: 'cover' }}
+                                                className="rounded-3 shadow-sm me-3"
+                                                style={{ width: '56px', height: '56px', objectFit: 'cover' }}
                                             />
                                         )}
                                         <div>
-                                            <h6 className="mb-0 fw-bold">{item.name} #{index + 1}</h6>
+                                            <div className="text-muted small text-uppercase fw-bold letter-spacing-1 mb-1">Item #{index + 1}</div>
+                                            <h6 className="mb-0 fw-bold fs-5">{item.name}</h6>
                                         </div>
                                     </div>
-                                    <p className="mb-1 small"><strong>Flowers:</strong> {item.flowers.map(f => f.name).join(', ')}</p>
-                                    <p className="mb-1 small"><strong>Bundle Size:</strong> {item.bundleSize} stems</p>
-                                    {item.wrapper && <p className="mb-1 small"><strong>Wrapper:</strong> {item.wrapper.name}</p>}
-                                    {item.ribbon && <p className="mb-1 small"><strong>Ribbon:</strong> {item.ribbon.name}</p>}
+
+                                    <div className="d-flex flex-column gap-2 ms-1">
+                                        <div className="d-flex flex-column"><span className="text-muted small fw-medium">Flowers</span><span className="fw-bold text-dark">{item.flowers.map(f => f.name).join(', ')}</span></div>
+                                        <div className="d-flex flex-column"><span className="text-muted small fw-medium">Bundle Size</span><span className="fw-bold text-dark">{item.bundleSize} stems</span></div>
+                                        {item.wrapper && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Wrapper</span><span className="fw-bold text-dark">{item.wrapper.name}</span></div>}
+                                        {item.ribbon && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Ribbon</span><span className="fw-bold text-dark">{item.ribbon.name}</span></div>}
+                                    </div>
                                 </div>
                             ))}
 
-                            <hr />
+                            <div className="mt-4 pt-3 border-top">
+                                <div className="d-flex justify-content-between mb-2 small text-muted">
+                                    <span>Subtotal</span>
+                                    <span>{request.requestData.subtotal ? `₱${request.requestData.subtotal.toLocaleString()}` : 'N/A'}</span>
+                                </div>
+                                <div className="d-flex justify-content-between mb-3 small text-muted">
+                                    <span>Shipping Fee</span>
+                                    <span>
+                                        {request.deliveryMethod === 'pickup'
+                                            ? 'FREE'
+                                            : (request.requestData.shipping_fee ? `₱${request.requestData.shipping_fee.toLocaleString()}` : 'N/A')}
+                                    </span>
+                                </div>
 
-                            <div className="d-flex justify-content-between">
-                                <span>Subtotal</span>
-                                <span>{request.requestData.subtotal ? `₱${request.requestData.subtotal.toLocaleString()}` : 'N/A'}</span>
-                            </div>
-                            <div className="d-flex justify-content-between">
-                                <span>Shipping Fee</span>
-                                <span>
-                                    {request.deliveryMethod === 'pickup'
-                                        ? 'FREE'
-                                        : (request.requestData.shipping_fee ? `₱${request.requestData.shipping_fee.toLocaleString()}` : 'N/A')}
-                                </span>
-                            </div>
-
-                            <hr />
-
-                            <div className="d-flex justify-content-between fw-bold fs-5 mt-3" style={{ color: 'var(--shop-pink)' }}>
-                                <span>Final Price</span>
-                                <span>{request.finalPrice ? `₱${request.finalPrice.toLocaleString()}` : 'For Discussion'}</span>
+                                <div className="d-flex justify-content-between align-items-center pt-3 border-top">
+                                    <span className="text-muted fw-bold">Final Price</span>
+                                    <span className="fs-5 fw-bold" style={{ color: 'var(--shop-pink)' }}>{request.finalPrice ? `₱${request.finalPrice.toLocaleString()}` : 'For Discussion'}</span>
+                                </div>
                             </div>
                         </div>
 

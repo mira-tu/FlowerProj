@@ -18,6 +18,7 @@ const DeliveryFeesTab = () => {
     const [currentId, setCurrentId] = useState(null);
     const [barangayName, setBarangayName] = useState('');
     const [deliveryFee, setDeliveryFee] = useState('');
+    const [confirmDelete, setConfirmDelete] = useState(false);
 
     useEffect(() => {
         fetchBarangays();
@@ -58,6 +59,7 @@ const DeliveryFeesTab = () => {
         setCurrentId(item.id);
         setBarangayName(item.barangay_name);
         setDeliveryFee(String(item.delivery_fee));
+        setConfirmDelete(false);
         setModalVisible(true);
     };
 
@@ -99,35 +101,28 @@ const DeliveryFeesTab = () => {
         }
     };
 
-    const handleDelete = () => {
-        Alert.alert(
-            'Delete Barangay',
-            `Are you sure you want to delete ${barangayName}?`,
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: async () => {
-                        try {
-                            const { error } = await supabase
-                                .from('barangay_fee')
-                                .delete()
-                                .eq('id', currentId);
+    const handleDelete = async () => {
+        if (!confirmDelete) {
+            setConfirmDelete(true);
+            return;
+        }
 
-                            if (error) throw error;
+        try {
+            const { error } = await supabase
+                .from('barangay_fee')
+                .delete()
+                .eq('id', currentId);
 
-                            Toast.show({ type: 'success', text1: 'Barangay deleted.' });
-                            setModalVisible(false);
-                            fetchBarangays();
-                        } catch (error) {
-                            console.error('Error deleting barangay:', error);
-                            Toast.show({ type: 'error', text1: 'Failed to delete.' });
-                        }
-                    }
-                }
-            ]
-        );
+            if (error) throw error;
+
+            Toast.show({ type: 'success', text1: 'Barangay deleted.' });
+            setModalVisible(false);
+            setConfirmDelete(false);
+            fetchBarangays();
+        } catch (error) {
+            console.error('Error deleting barangay:', error);
+            Toast.show({ type: 'error', text1: 'Failed to delete.' });
+        }
     };
 
     const renderItem = ({ item }) => (
@@ -223,10 +218,14 @@ const DeliveryFeesTab = () => {
                             {isEditing ? (
                                 <>
                                     <TouchableOpacity
-                                        style={[styles.btn, styles.deleteBtn]}
+                                        style={[styles.btn, styles.deleteBtn, confirmDelete && { backgroundColor: '#991B1B' }]}
                                         onPress={handleDelete}
                                     >
-                                        <Ionicons name="trash-outline" size={20} color="#fff" />
+                                        {confirmDelete ? (
+                                            <Text style={styles.btnText}>Confirm?</Text>
+                                        ) : (
+                                            <Ionicons name="trash-outline" size={20} color="#fff" />
+                                        )}
                                     </TouchableOpacity>
                                     <TouchableOpacity style={[styles.btn, styles.saveBtn, { flex: 1 }]} onPress={handleSave}>
                                         <Text style={styles.btnText}>Save Updates</Text>

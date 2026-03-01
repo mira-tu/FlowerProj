@@ -543,61 +543,63 @@ const OrderBookingTracking = () => {
 
 
                     <div className="col-lg-4">
-                        <div className="tracking-items">
-                            <h5 className="fw-bold mb-4">
-                                <i className="fas fa-info-circle me-2" style={{ color: 'var(--shop-pink)' }}></i>
+                        <div className="tracking-items p-4 rounded-4 shadow-sm bg-white">
+                            <h5 className="fw-bold mb-4 pb-3 border-bottom d-flex align-items-center">
+                                <i className="fas fa-info-circle fs-5 me-2" style={{ color: 'var(--shop-pink)' }}></i>
                                 Request Details
                             </h5>
 
-                            <div className="d-flex align-items-center mb-3">
+                            <div className="d-flex align-items-center mb-4">
                                 {request.imageUrl && (
                                     <img
                                         src={request.imageUrl}
                                         alt={getRequestTypeLabel()}
-                                        className="rounded me-3"
-                                        style={{ width: '60px', height: '60px', objectFit: 'cover' }}
+                                        className="rounded-3 shadow-sm me-3"
+                                        style={{ width: '56px', height: '56px', objectFit: 'cover' }}
                                     />
                                 )}
                                 <div>
-                                    <h6 className="mb-0 fw-bold">{getRequestTypeLabel()}</h6>
+                                    <div className="text-muted small text-uppercase fw-bold letter-spacing-1 mb-1">Type</div>
+                                    <h6 className="mb-0 fw-bold fs-5">{getRequestTypeLabel()}</h6>
                                 </div>
                             </div>
 
-                            {request.type === 'booking' && (
-                                <>
-                                    <p className="mb-1"><strong>Recipient:</strong> {request.requestData?.recipient_name}</p>
-                                    <p className="mb-1"><strong>Occasion:</strong> {request.requestData?.occasion}</p>
-                                    <p className="mb-1"><strong>Event Date:</strong> {request.requestData?.event_date}</p>
-                                    <p className="mb-1"><strong>Venue:</strong> {request.requestData?.venue}</p>
-                                    {request.notes && <p className="mb-1"><strong>Notes:</strong> {request.notes}</p>}
-                                </>
-                            )}
-                            {request.type === 'special_order' && (
-                                <>
-                                    <p className="mb-1"><strong>Recipient:</strong> {request.requestData?.recipient_name}</p>
-                                    <p className="mb-1"><strong>Occasion:</strong> {request.requestData?.occasion}</p>
-                                    {request.requestData?.contact_number && <p className="mb-1"><strong>Contact Number:</strong> {request.requestData?.contact_number}</p>}
-                                    {request.requestData?.deliveryAddress && <p className="mb-1"><strong>Delivery Address:</strong> {request.requestData?.deliveryAddress}</p>}
-                                    {request.requestData?.notes && <p className="mb-1"><strong>Preferences:</strong> {request.requestData.notes}</p>}
-                                    {request.requestData?.addon && request.requestData.addon !== 'None' && <p className="mb-1"><strong>Add-on:</strong> {request.requestData.addon}</p>}
-                                    {request.requestData?.message && <p className="mb-1"><strong>Message:</strong> {request.requestData.message}</p>}
-                                    {request.notes && <p className="mb-1"><strong>Additional Notes:</strong> {request.notes}</p>}
-                                </>
-                            )}
-                            {request.type === 'customized' && (
-                                <>
-                                    <p className="mb-1"><strong>Flower:</strong> {request.requestData?.flower}</p>
-                                    <p className="mb-1"><strong>Bundle Size:</strong> {request.requestData?.bundleSize}</p>
-                                    {request.notes && <p className="mb-1"><strong>Notes:</strong> {request.notes}</p>}
-                                </>
-                            )}
+                            <div className="d-flex flex-column gap-3 mb-4">
+                                {request.type === 'booking' && (
+                                    <>
+                                        <div className="d-flex flex-column"><span className="text-muted small fw-medium">Recipient</span><span className="fw-bold text-dark">{request.requestData?.recipient_name}</span></div>
+                                        <div className="d-flex flex-column"><span className="text-muted small fw-medium">Occasion</span><span className="fw-bold text-dark">{request.requestData?.occasion}</span></div>
+                                        <div className="d-flex flex-column"><span className="text-muted small fw-medium">Event Date</span><span className="fw-bold text-dark">{request.requestData?.event_date}</span></div>
+                                        <div className="d-flex flex-column"><span className="text-muted small fw-medium">Venue</span><span className="fw-bold text-dark">{request.requestData?.venue}</span></div>
+                                        {request.notes && <div className="d-flex flex-column mt-2"><span className="text-muted small fw-medium">Notes</span><span className="text-dark bg-light p-3 rounded-3 mt-1 fs-6">{request.notes}</span></div>}
+                                    </>
+                                )}
+                                {request.type === 'special_order' && (
+                                    <>
+                                        <div className="d-flex flex-column"><span className="text-muted small fw-medium">Recipient</span><span className="fw-bold text-dark">{request.requestData?.recipient_name}</span></div>
+                                        <div className="d-flex flex-column"><span className="text-muted small fw-medium">Occasion</span><span className="fw-bold text-dark">{request.requestData?.occasion}</span></div>
+                                        {request.requestData?.contact_number && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Contact Number</span><span className="fw-bold text-dark">{request.requestData?.contact_number}</span></div>}
+                                        {request.requestData?.deliveryAddress && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Delivery Address</span><span className="fw-bold text-dark">{request.requestData?.deliveryAddress}</span></div>}
+                                        {request.requestData?.notes && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Preferences</span><span className="fw-bold text-dark">{request.requestData.notes}</span></div>}
+                                        {request.requestData?.addon && request.requestData.addon !== 'None' && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Add-on</span><span className="fw-bold text-dark">{request.requestData.addon}</span></div>}
+                                        {request.requestData?.message && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Message</span><span className="fw-bold text-dark">{request.requestData.message}</span></div>}
+                                        {request.notes && <div className="d-flex flex-column mt-2"><span className="text-muted small fw-medium">Additional Notes</span><span className="text-dark bg-light p-3 rounded-3 mt-1 fs-6">{request.notes}</span></div>}
+                                    </>
+                                )}
+                                {request.type === 'customized' && (
+                                    <>
+                                        <div className="d-flex flex-column"><span className="text-muted small fw-medium">Flower</span><span className="fw-bold text-dark">{request.requestData?.flower}</span></div>
+                                        <div className="d-flex flex-column"><span className="text-muted small fw-medium">Bundle Size</span><span className="fw-bold text-dark">{request.requestData?.bundleSize}</span></div>
+                                        {request.notes && <div className="d-flex flex-column mt-2"><span className="text-muted small fw-medium">Notes</span><span className="text-dark bg-light p-3 rounded-3 mt-1 fs-6">{request.notes}</span></div>}
+                                    </>
+                                )}
+                            </div>
 
-                            <hr />
-
-
-                            <div className="d-flex justify-content-between fw-bold fs-5 mt-3" style={{ color: 'var(--shop-pink)' }}>
-                                <span>Final Price</span>
-                                <span>{request.finalPrice ? `₱${request.finalPrice.toLocaleString()}` : 'For Discussion'}</span>
+                            <div className="mt-4 pt-4 border-top">
+                                <div className="d-flex justify-content-between align-items-center">
+                                    <span className="text-muted fw-bold">Final Price</span>
+                                    <span className="fs-5 fw-bold" style={{ color: 'var(--shop-pink)' }}>{request.finalPrice ? `₱${request.finalPrice.toLocaleString()}` : 'For Discussion'}</span>
+                                </div>
                             </div>
                         </div>
 

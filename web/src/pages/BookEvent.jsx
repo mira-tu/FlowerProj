@@ -35,6 +35,8 @@ const BookEvent = ({ user }) => {
     const [selectedBarangay, setSelectedBarangay] = useState(null);
     const [showReviewModal, setShowReviewModal] = useState(false);
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
+    const [savedAddresses, setSavedAddresses] = useState([]);
+    const [selectedSavedAddressId, setSelectedSavedAddressId] = useState("");
 
     useEffect(() => {
         if (user) {
@@ -42,6 +44,12 @@ const BookEvent = ({ user }) => {
                 ...prev,
                 contactNumber: formatPhoneNumber(user.user_metadata?.phone || '')
             }));
+
+            const fetchSavedAddresses = async () => {
+                const { data } = await supabase.from('addresses').select('*').eq('user_id', user.id);
+                if (data) setSavedAddresses(data.filter(addr => !addr.label.startsWith('[DEL]')));
+            };
+            fetchSavedAddresses();
         }
     }, [user]);
 
@@ -134,7 +142,7 @@ const BookEvent = ({ user }) => {
             setInfoModal({ show: true, title: 'Notice', message: 'Please fill in all address fields.' });
             return;
         }
-        const fullAddress = `${street}, ${barangay}, Zamboanga City, Zamboanga Del Sur`;
+        const fullAddress = `${street}, ${barangay}, Zamboanga City`;
         setFormData(prev => ({ ...prev, venue: fullAddress }));
         setShowAddressModal(false);
     };
@@ -353,6 +361,42 @@ const BookEvent = ({ user }) => {
                             </button>
                         </div>
                         <div className="modal-body-custom">
+                            {user && savedAddresses.length > 0 && (
+                                <div className="form-group mb-4">
+                                    <label className="form-label text-muted small fw-bold">Select a saved address to auto-fill:</label>
+                                    <select
+                                        className="form-select"
+                                        value={selectedSavedAddressId}
+                                        onChange={(e) => {
+                                            const id = e.target.value;
+                                            setSelectedSavedAddressId(id);
+                                            if (!id) return;
+                                            const addr = savedAddresses.find(a => String(a.id) === String(id));
+                                            if (addr) {
+                                                setAddressForm({
+                                                    street: addr.street,
+                                                    barangay: addr.barangay
+                                                });
+                                                const option = barangays.find(b => b.label.toLowerCase() === addr.barangay.toLowerCase());
+                                                if (option) {
+                                                    setSelectedBarangay(option);
+                                                } else {
+                                                    setSelectedBarangay({ label: addr.barangay, value: addr.barangay });
+                                                }
+                                            }
+                                        }}
+                                    >
+                                        <option value="" disabled>-- Choose an Address --</option>
+                                        {savedAddresses.map(addr => (
+                                            <option key={addr.id} value={addr.id}>
+                                                {addr.label} - {addr.street}, {addr.barangay}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <hr className="mt-4 mb-2" />
+                                </div>
+                            )}
+
                             <div className="form-group">
                                 <label className="form-label">Barangay</label>
                                 <Select
@@ -363,6 +407,7 @@ const BookEvent = ({ user }) => {
                                     onChange={option => {
                                         setSelectedBarangay(option);
                                         setAddressForm({ ...addressForm, barangay: option ? option.label : '' });
+                                        setSelectedSavedAddressId("");
                                     }}
                                     value={selectedBarangay}
                                     isClearable
@@ -374,7 +419,10 @@ const BookEvent = ({ user }) => {
                                     type="text"
                                     className="form-control-custom"
                                     value={addressForm.street}
-                                    onChange={e => setAddressForm({ ...addressForm, street: e.target.value })}
+                                    onChange={e => {
+                                        setAddressForm({ ...addressForm, street: e.target.value });
+                                        setSelectedSavedAddressId("");
+                                    }}
                                     placeholder="e.g., House No., Street Name, Subdivision"
                                 />
                             </div>

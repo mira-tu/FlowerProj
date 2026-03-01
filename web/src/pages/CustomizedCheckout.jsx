@@ -43,14 +43,24 @@ const CustomizedCheckout = ({ user }) => {
             if (deliveryMethod === 'delivery' && address.barangay) {
                 const { data, error } = await supabase
                     .from('barangay_fee')
-                    .select('delivery_fee')
+                    .select('barangay_name, delivery_fee')
                     .ilike('barangay_name', `%${address.barangay}%`);
 
                 if (error) {
                     console.error('Error fetching fee for barangay:', address.barangay, error);
                     setDynamicShippingFee(100); // Fallback on error
                 } else if (data && data.length > 0) {
-                    setDynamicShippingFee(data[0].delivery_fee); // Use the first match
+                    // Try to find an exact match first (case-insensitive)
+                    const exactMatch = data.find(
+                        item => item.barangay_name.toLowerCase() === address.barangay.toLowerCase()
+                    );
+
+                    if (exactMatch) {
+                        setDynamicShippingFee(exactMatch.delivery_fee);
+                    } else {
+                        // Fallback to the first partial match
+                        setDynamicShippingFee(data[0].delivery_fee);
+                    }
                 } else {
                     console.warn(`No fee found for barangay: ${address.barangay}. Using default fee.`);
                     setDynamicShippingFee(100); // Fallback if no match found
