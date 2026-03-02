@@ -678,6 +678,27 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     }
   };
 
+  const sendReceiptEmail = async (order, amount_received) => {
+    try {
+      const { error } = await supabase.functions.invoke('send-receipt-email', {
+        body: {
+          order_number: order.order_number,
+          user_email: order.customer_email || order.users?.email,
+          customer_name: order.customer_name || order.users?.name,
+          total: order.total || order.final_price,
+          amount_received: amount_received,
+          items: order.items || [],
+          delivery_method: order.delivery_method,
+          payment_method: order.payment_method,
+          date: new Date().toISOString()
+        },
+      });
+      if (error) console.error('Error sending receipt email:', error);
+    } catch (e) {
+      console.error('Failed to invoke receipt email function:', e);
+    }
+  };
+
   const handleConfirmPayment = async () => {
     if (!orderToRecordPayment || !paymentAmount) return;
     const amount = parseFloat(paymentAmount);
@@ -702,6 +723,10 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
         .eq('id', orderToRecordPayment.id);
 
       if (error) throw error;
+
+      if (newStatus === 'paid' && orderToRecordPayment.payment_method?.toLowerCase() === 'gcash') {
+        await sendReceiptEmail(orderToRecordPayment, newTotalReceived);
+      }
 
       Toast.show({ type: 'success', text1: isEditPaymentMode ? 'Amount Updated' : 'Payment Recorded' });
       setPaymentModalVisible(false);
