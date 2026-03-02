@@ -366,8 +366,6 @@ const Customized = ({ addToCart }) => {
                   top: '0%',
                   left: '50%',
                   transform: 'translateX(-50%)',
-                  width: '320px',
-                  height: '250px',
                   zIndex: 2,
                   touchAction: 'none'
                 }}
@@ -392,8 +390,6 @@ const Customized = ({ addToCart }) => {
                           position: 'absolute',
                           zIndex: slot.zIndex,
                           cursor: 'grab',
-                          width: '100px',
-                          height: '100px',
                           touchAction: 'none'
                         }}
                       >

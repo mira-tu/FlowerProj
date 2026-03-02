@@ -749,18 +749,25 @@
 }
 
 .order-item-img {
-    width: 100px; /* Increased size for better visibility */
-    height: 100px; /* Increased size for better visibility */
+    width: 100px;
+    /* Increased size for better visibility */
+    height: 100px;
+    /* Increased size for better visibility */
     border-radius: 8px;
     object-fit: cover;
 }
 
 .customized-bouquet-img {
-    width: 120px; /* Larger size for customized bouquets */
-    height: 120px; /* Larger size for customized bouquets */
-    object-fit: contain; /* Ensure the whole image is visible */
-    background-color: #f0f0f0; /* Add a background for better contrast if image has transparent parts */
-    padding: 5px; /* Optional: add some padding */
+    width: 120px;
+    /* Larger size for customized bouquets */
+    height: 120px;
+    /* Larger size for customized bouquets */
+    object-fit: contain;
+    /* Ensure the whole image is visible */
+    background-color: #f0f0f0;
+    /* Add a background for better contrast if image has transparent parts */
+    padding: 5px;
+    /* Optional: add some padding */
 }
 
 .order-item-name {
@@ -952,9 +959,17 @@
 }
 
 @keyframes pulse {
-    0% { box-shadow: 0 0 0 0 rgba(240, 123, 150, 0.4); }
-    70% { box-shadow: 0 0 0 10px rgba(240, 123, 150, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(240, 123, 150, 0); }
+    0% {
+        box-shadow: 0 0 0 0 rgba(240, 123, 150, 0.4);
+    }
+
+    70% {
+        box-shadow: 0 0 0 10px rgba(240, 123, 150, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(240, 123, 150, 0);
+    }
 }
 
 .timeline-content h5 {
@@ -1145,6 +1160,7 @@
    Responsive
    ============================================ */
 @media (max-width: 768px) {
+
     /* Product Detail */
     .product-detail-container {
         padding: 20px 0;
@@ -1153,7 +1169,7 @@
     .product-detail-card {
         flex-direction: column;
     }
-    
+
     .product-gallery {
         padding: 15px;
     }
@@ -1346,8 +1362,9 @@
 
     .order-tabs {
         overflow-x: auto;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
         gap: 5px;
+        -webkit-overflow-scrolling: touch;
     }
 
     .order-tab {
@@ -1388,6 +1405,7 @@
 }
 
 @media (max-width: 576px) {
+
     /* Product Detail */
     .product-gallery {
         padding: 10px;
@@ -1602,7 +1620,8 @@
    ============================================ */
 
 .messages-container {
-    background-color: #f8f9fa; /* A light grey background for the chat window */
+    background-color: #f8f9fa;
+    /* A light grey background for the chat window */
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -1643,7 +1662,7 @@
     max-width: 75%;
     padding: 12px;
     border-radius: 18px;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .message-bubble.sent {
@@ -1661,8 +1680,10 @@
 .message-text {
     margin: 0 0 5px 0;
     font-size: 0.95rem;
-    white-space: pre-wrap; /* To respect newlines */
-    word-wrap: break-word; /* To break long words */
+    white-space: pre-wrap;
+    /* To respect newlines */
+    word-wrap: break-word;
+    /* To break long words */
 }
 
 .message-time {
@@ -1779,29 +1800,30 @@
         width: 40px !important;
         height: 40px !important;
     }
-        font-size: 0.9rem;
-    }
 
-    /* Cart Page Mobile Enhancements */
-    .container.py-5.mt-5.bg-light {
-        padding-left: 10px !important;
-        padding-right: 10px !important;
-    }
+    font-size: 0.9rem;
+}
 
-    .card.border-0.shadow-sm {
-        margin-bottom: 15px;
-    }
+/* Cart Page Mobile Enhancements */
+.container.py-5.mt-5.bg-light {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+}
 
-    .card-body {
-        padding: 15px;
-    }
+.card.border-0.shadow-sm {
+    margin-bottom: 15px;
+}
 
-    .input-group.input-group-sm {
-        width: 100% !important;
-        max-width: 120px;
-    }
+.card-body {
+    padding: 15px;
+}
 
-    .order-summary-card {
-        margin-top: 20px;
-    }
+.input-group.input-group-sm {
+    width: 100% !important;
+    max-width: 120px;
+}
+
+.order-summary-card {
+    margin-top: 20px;
+}
 }

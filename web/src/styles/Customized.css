@@ -197,6 +197,11 @@
     transition: transform 0.1s;
 }
 
+.customize-page .flower-zone {
+    width: 320px;
+    height: 250px;
+}
+
 .customize-page .stem-slot {
     width: 100%;
     height: 100%;
@@ -207,6 +212,8 @@
 }
 
 .customize-page .drag-handle {
+    width: 100px;
+    height: 100px;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
 }
@@ -473,6 +480,7 @@
     .customize-page .tools-interface {
         width: 100%;
         height: auto;
+        flex-direction: column;
         box-shadow: 0 -5px 25px rgba(0, 0, 0, 0.05);
     }
 
