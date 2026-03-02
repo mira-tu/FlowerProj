@@ -53,7 +53,6 @@ import BookingCart from './pages/BookingCart'
 import BookingCheckout from './pages/BookingCheckout'
 import Customized from './pages/Customized'
 import BookEvent from './pages/BookEvent'
-import SpecialOrder from './pages/SpecialOrder'
 import ProductDetail from './pages/ProductDetail'
 import Checkout from './pages/Checkout'
 import OrderSuccess from './pages/OrderSuccess'
@@ -284,7 +283,6 @@ function AppContent() {
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/book-event" element={<BookEvent user={user} />} />
         <Route path="/customized" element={<Customized addToCart={addToCart} />} />
-        <Route path="/special-order" element={<SpecialOrder user={user} />} />
         <Route path="/product/:productId" element={<ProductDetail addToCart={addToCart} />} />
         <Route path="/checkout" element={<Checkout setCart={setCart} user={user} />} />
         <Route path="/order-success/:orderNumber" element={<OrderSuccess />} />

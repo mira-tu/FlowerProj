@@ -192,7 +192,7 @@ const About = () => {
                         <div className="col-md-4">
                             <div className="card h-100 border-0 rounded-4 overflow-hidden shadow hover-lift">
                                 <div className="img-wrapper" style={{ height: '250px' }}>
-                                    <Link to="/special-order" className="d-block w-100 h-100">
+                                    <Link to="/book-event" className="d-block w-100 h-100">
                                         <img
                                             src={aboutData.specialOrdersImage || "https://via.placeholder.com/400x250"}
                                             className="w-100 h-100 object-fit-cover"
@@ -203,7 +203,7 @@ const About = () => {
                                 <div className="card-body p-4 text-center">
                                     <h3 className="h4 fw-bold mb-3">Special Orders</h3>
                                     <p className="text-muted mb-4">{aboutData.specialOrdersDescription}</p>
-                                    <Link to="/special-order" className="btn btn-pink rounded-pill px-4 fw-semibold">Learn More</Link>
+                                    <Link to="/book-event" className="btn btn-pink rounded-pill px-4 fw-semibold">Learn More</Link>
                                 </div>
                             </div>
                         </div>

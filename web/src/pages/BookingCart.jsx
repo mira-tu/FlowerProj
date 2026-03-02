@@ -4,24 +4,31 @@ import '../styles/Shop.css';
 
 const BookingCart = ({ user }) => {
     const navigate = useNavigate();
-    const [inquiryItem, setInquiryItem] = useState(null);
+    const [inquiryItems, setInquiryItems] = useState([]);
 
     useEffect(() => {
-        const savedInquiry = localStorage.getItem('bookingInquiry');
+        const savedInquiry = localStorage.getItem('bookingCart');
         if (savedInquiry) {
-            setInquiryItem(JSON.parse(savedInquiry));
+            setInquiryItems(JSON.parse(savedInquiry));
         } else {
             navigate('/');
         }
     }, [navigate]);
 
     const getOriginPage = () => {
-        return inquiryItem?.requestData?.type === 'booking' ? '/book-event' : '/special-order';
+        return '/book-event';
     };
 
-    const handleCancel = () => {
-        localStorage.removeItem('bookingInquiry');
-        navigate(getOriginPage());
+    const handleRemoveItem = (id) => {
+        const updatedItems = inquiryItems.filter(item => item.id !== id);
+
+        if (updatedItems.length === 0) {
+            localStorage.removeItem('bookingCart');
+            navigate(getOriginPage());
+        } else {
+            setInquiryItems(updatedItems);
+            localStorage.setItem('bookingCart', JSON.stringify(updatedItems));
+        }
     };
 
     const handleEdit = () => {
@@ -32,16 +39,15 @@ const BookingCart = ({ user }) => {
         navigate('/booking-checkout');
     };
 
-    if (!inquiryItem) {
+    if (!inquiryItems || inquiryItems.length === 0) {
         return (
             <div className="container py-5 mt-5 text-center">
-                <div className="spinner-border text-primary" role="status">
-                    <span className="visually-hidden">Loading...</span>
-                </div>
+                <h5>Your Custom Order cart is empty.</h5>
+                <button className="btn btn-pink mt-3" onClick={() => navigate(getOriginPage())}>Return to Booking</button>
             </div>
         );
     }
-    
+
     return (
         <div className="container py-5 mt-5 bg-light" style={{ minHeight: '80vh', overflowX: 'hidden' }}>
             <h2 className="fw-bold mb-4"><i className="fas fa-file-invoice me-2"></i> Confirm Your Inquiry</h2>
@@ -60,49 +66,51 @@ const BookingCart = ({ user }) => {
                             </div>
                         </div>
                     </div>
-                    <div className="card border-0 shadow-sm mb-3">
-                        <div className="card-body">
-                            <div className="row align-items-center g-0">
-                                <div className="col-md-5 d-flex align-items-center mb-3 mb-md-0">
-                                    <img
-                                        src={inquiryItem.image || 'https://via.placeholder.com/80'}
-                                        alt={inquiryItem.name}
-                                        className="rounded"
-                                        style={{ width: '80px', height: '80px', objectFit: 'cover' }}
-                                        onError={(e) => e.target.src = 'https://via.placeholder.com/80'}
-                                    />
-                                    <div className="ms-3">
-                                        <h6 className="mb-0 fw-bold">{inquiryItem.name}</h6>
-                                        <small className="text-muted">
-                                            {inquiryItem.requestData.type === 'booking' ? 'Event Booking' : 'Special Order'}
-                                        </small>
+
+                    {inquiryItems.map((item) => (
+                        <div key={item.id} className="card border-0 shadow-sm mb-3">
+                            <div className="card-body">
+                                <div className="row align-items-center g-0">
+                                    <div className="col-md-5 d-flex align-items-center mb-3 mb-md-0">
+                                        <img
+                                            src={item.inspirationImageBase64 || 'https://via.placeholder.com/80?text=No+Ref'}
+                                            alt={item.serviceType}
+                                            className="rounded"
+                                            style={{ width: '80px', height: '80px', objectFit: 'cover' }}
+                                        />
+                                        <div className="ms-3">
+                                            <h6 className="mb-0 fw-bold">{item.occasion} - {item.arrangementType}</h6>
+                                            <small className="text-muted">
+                                                {item.serviceType}
+                                            </small>
+                                        </div>
                                     </div>
-                                </div>
-                                <div className="col-md-2 text-center mb-2 mb-md-0">
-                                    <span className="d-md-none text-muted small me-2">Price:</span>
-                                    <span className="fw-bold">For Discussion</span>
-                                </div>
-                                <div className="col-md-2 text-center mb-2 mb-md-0">
-                                    <span className="d-md-none text-muted small me-2">Quantity:</span>
-                                    1
-                                </div>
-                                <div className="col-md-2 text-center fw-bold mb-2 mb-md-0" style={{ color: '#d63384' }}>
-                                    <span className="d-md-none text-muted small me-2">Total:</span>
-                                    For Discussion
-                                </div>
-                                <div className="col-md-1 text-center">
-                                    <button
-                                        className="btn btn-outline-danger btn-sm rounded-circle d-inline-flex align-items-center justify-content-center"
-                                        style={{ width: '36px', height: '36px' }}
-                                        onClick={handleCancel}
-                                        title="Cancel and start over"
-                                    >
-                                        <i className="fas fa-trash-alt"></i>
-                                    </button>
+                                    <div className="col-md-2 text-center mb-2 mb-md-0">
+                                        <span className="d-md-none text-muted small me-2">Price:</span>
+                                        <span className="fw-bold">For Discussion</span>
+                                    </div>
+                                    <div className="col-md-2 text-center mb-2 mb-md-0">
+                                        <span className="d-md-none text-muted small me-2">Quantity:</span>
+                                        1
+                                    </div>
+                                    <div className="col-md-2 text-center fw-bold mb-2 mb-md-0" style={{ color: '#d63384' }}>
+                                        <span className="d-md-none text-muted small me-2">Total:</span>
+                                        For Discussion
+                                    </div>
+                                    <div className="col-md-1 text-center">
+                                        <button
+                                            className="btn btn-outline-danger btn-sm rounded-circle d-inline-flex align-items-center justify-content-center"
+                                            style={{ width: '36px', height: '36px' }}
+                                            onClick={() => handleRemoveItem(item.id)}
+                                            title="Remove item"
+                                        >
+                                            <i className="fas fa-trash-alt"></i>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
+                    ))}
                 </div>
 
                 <div className="col-lg-4">
@@ -111,7 +119,7 @@ const BookingCart = ({ user }) => {
                             <h5 className="fw-bold mb-3">Inquiry Summary</h5>
                             <div className="d-flex justify-content-between mb-2">
                                 <span className="text-muted">Total Items</span>
-                                <span>1</span>
+                                <span>{inquiryItems.length}</span>
                             </div>
                             <hr />
                             <div className="d-flex justify-content-between mb-4">
@@ -126,7 +134,7 @@ const BookingCart = ({ user }) => {
                                 Proceed to Checkout
                             </button>
                             <button onClick={handleEdit} className="btn btn-outline-secondary w-100 py-2 mt-2 rounded-pill">
-                                Edit Inquiry
+                                Add Another Inquiry
                             </button>
                         </div>
                     </div>

@@ -8,7 +8,7 @@ const pickupTimes = ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '2:00 PM', '3
 
 const BookingCheckout = ({ user }) => {
     const navigate = useNavigate();
-    const [inquiryItem, setInquiryItem] = useState(null);
+    const [inquiryItems, setInquiryItems] = useState([]);
     const [deliveryMethod, setDeliveryMethod] = useState('delivery');
     const [selectedPickupDate, setSelectedPickupDate] = useState('');
     const [selectedPickupTime, setSelectedPickupTime] = useState('');
@@ -40,26 +40,33 @@ const BookingCheckout = ({ user }) => {
     }, []);
 
     useEffect(() => {
-        const savedInquiry = localStorage.getItem('bookingInquiry');
+        const savedInquiry = localStorage.getItem('bookingCart');
         if (savedInquiry) {
-            const parsedInquiry = JSON.parse(savedInquiry);
-            setInquiryItem(parsedInquiry);
+            const parsedItems = JSON.parse(savedInquiry);
 
-            const { requestData } = parsedInquiry;
-            const addressString = requestData?.venue || requestData?.deliveryAddress;
+            if (parsedItems.length === 0) {
+                navigate('/');
+                return;
+            }
+
+            setInquiryItems(parsedItems);
+
+            // Use the first item's venue for delivery estimates if available
+            const firstItem = parsedItems[0];
+            const addressString = firstItem?.venue || '';
 
             if (user && addressString) {
                 const parsedAddress = parseAddress(addressString);
                 setInquiryAddress({
-                    label: requestData.type === 'booking' ? 'Event Venue' : 'Delivery Address',
+                    label: 'Delivery Address',
                     name: user.user_metadata?.name || '',
-                    phone: requestData.contact_number || user.user_metadata?.phone || '', // Use contact_number from requestData
+                    phone: firstItem.contactNumber || user.user_metadata?.phone || '',
                     ...parsedAddress
                 });
                 setIsAddressReady(true);
             }
         } else {
-            navigate('/'); // No inquiry, go home
+            navigate('/');
         }
     }, [navigate, user, parseAddress]);
 
@@ -119,32 +126,29 @@ const BookingCheckout = ({ user }) => {
 
             const request_number = `REQ-${user.id.substring(0, 4)}-${Date.now()}`;
 
-            // Exclude contact_number from the JSONB data
-            const { contact_number, ...restOfRequestData } = inquiryItem.requestData;
+            // Create submissions for every item in the cart using the same request number wrapper or process individually
+            const submissions = inquiryItems.map((item, index) => {
+                const { ...inquiryDetails } = item;
 
-            const inquiryDetails = {
-                ...restOfRequestData,
-                address_id: null,
-            };
+                return {
+                    request_number: `${request_number}-${index + 1}`,
+                    user_id: user.id,
+                    type: item.serviceType === "Event/Special Request" ? "booking" : item.serviceType,
+                    contact_number: item.contactNumber,
+                    status: 'pending',
+                    delivery_method: deliveryMethod,
+                    pickup_time: deliveryMethod === 'pickup' ? `${selectedPickupDate} - ${selectedPickupTime}` : null,
+                    shipping_fee: deliveryMethod === 'pickup' ? 0 : dynamicShippingFee,
+                    data: inquiryDetails,
+                    image_url: item.inspirationImageBase64 || null,
+                    notes: item.specialInstructions || null,
+                };
+            });
 
-            const submissionData = {
-                request_number,
-                user_id: user.id,
-                type: inquiryItem.requestData.type,
-                contact_number: contact_number, // Add as a top-level field
-                status: 'pending',
-                delivery_method: deliveryMethod,
-                pickup_time: deliveryMethod === 'pickup' ? `${selectedPickupDate} - ${selectedPickupTime}` : null,
-                shipping_fee: deliveryMethod === 'pickup' ? 0 : dynamicShippingFee,
-                data: inquiryDetails,
-                image_url: inquiryItem.requestData.image_url,
-                notes: inquiryItem.requestData.notes,
-            };
-
-            const { error } = await supabase.from('requests').insert([submissionData]);
+            const { error } = await supabase.from('requests').insert(submissions);
             if (error) throw error;
 
-            localStorage.removeItem('bookingInquiry');
+            localStorage.removeItem('bookingCart');
 
             // Add notification for inquiry submission
             const notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
@@ -152,7 +156,7 @@ const BookingCheckout = ({ user }) => {
                 id: `notif-${Date.now()}`,
                 type: 'request',
                 title: 'Inquiry Submitted Successfully!',
-                message: `Your inquiry #${request_number} has been submitted and is pending review.`,
+                message: `You successfully submitted ${inquiryItems.length} Custom Order(s). Your inquiry has been submitted and is pending review.`,
                 icon: 'fa-file-alt',
                 timestamp: new Date().toISOString(),
                 read: false,
@@ -168,7 +172,7 @@ const BookingCheckout = ({ user }) => {
         }
     };
 
-    if (!inquiryItem) {
+    if (inquiryItems.length === 0) {
         return (
             <div className="checkout-container"><div className="container text-center py-5"><div className="spinner-border text-primary"></div></div></div>
         );
@@ -239,43 +243,30 @@ const BookingCheckout = ({ user }) => {
                         <div className="checkout-section">
                             <h5 className="section-title"><i className="fas fa-info-circle"></i> Inquiry Details</h5>
                             <div className="p-3 rounded" style={{ backgroundColor: '#f8f9fa' }}>
-                                <div className="d-flex align-items-center mb-3">
-                                    <img
-                                        src={inquiryItem.image || 'https://via.placeholder.com/80'}
-                                        alt={inquiryItem.name}
-                                        className="rounded me-3"
-                                        style={{ width: '60px', height: '60px', objectFit: 'cover' }}
-                                    />
-                                    <div>
-                                        <h6 className="mb-0 fw-bold">{inquiryItem.name}</h6>
-                                        <small className="text-muted">
-                                            {inquiryItem.requestData.type === 'booking' ? 'Event Booking' : 'Special Order'}
-                                        </small>
-                                    </div>
-                                </div>
+                                {inquiryItems.map((item, idx) => (
+                                    <div key={item.id || idx} className="mb-4 pb-3 border-bottom">
+                                        <div className="d-flex align-items-center mb-3">
+                                            <img
+                                                src={item.inspirationImageBase64 || 'https://via.placeholder.com/80?text=No+Ref'}
+                                                alt={item.serviceType}
+                                                className="rounded me-3"
+                                                style={{ width: '60px', height: '60px', objectFit: 'cover' }}
+                                            />
+                                            <div>
+                                                <h6 className="mb-0 fw-bold">{item.occasion} - {item.arrangementType}</h6>
+                                                <small className="text-muted d-block">
+                                                    {item.serviceType}
+                                                </small>
+                                            </div>
+                                        </div>
 
-                                {inquiryItem.requestData.type === 'booking' ? (
-                                    <>
-                                        <p className="mb-1"><strong>Recipient:</strong> {inquiryItem.requestData.recipient_name}</p>
-                                        <p className="mb-1"><strong>Occasion:</strong> {inquiryItem.requestData.occasion}</p>
-                                        <p className="mb-1"><strong>Event Date:</strong> {inquiryItem.requestData.event_date}</p>
-                                        {inquiryItem.requestData.addon && <p className="mb-1"><strong>Add-on:</strong> {inquiryItem.requestData.addon}</p>}
-                                        {inquiryItem.requestData.message && <p className="mb-1"><strong>Message:</strong> {inquiryItem.requestData.message}</p>}
-                                        {inquiryItem.requestData.venue && (deliveryMethod !== 'delivery' || inquiryItem.requestData.venue !== `${inquiryAddress?.street || ''}, ${inquiryAddress?.barangay || ''}, ${inquiryAddress?.city || ''}`) && (
-                                            <p className="mb-1"><strong>Venue:</strong> {inquiryItem.requestData.venue}</p>
-                                        )}
-                                        {inquiryItem.requestData.notes && <p className="mb-1"><strong>Details:</strong> {inquiryItem.requestData.notes}</p>}
-                                    </>
-                                ) : ( // Special Order
-                                    <>
-                                        <p className="mb-1"><strong>Recipient:</strong> {inquiryItem.requestData.recipient_name}</p>
-                                        <p className="mb-1"><strong>Occasion:</strong> {inquiryItem.requestData.occasion}</p>
-                                        {inquiryItem.requestData.event_date && <p className="mb-1"><strong>Event Date:</strong> {inquiryItem.requestData.event_date}</p>}
-                                        {inquiryItem.requestData.addon && <p className="mb-1"><strong>Add-on:</strong> {inquiryItem.requestData.addon}</p>}
-                                        {inquiryItem.requestData.notes && <p className="mb-1"><strong>Preferences:</strong> {inquiryItem.requestData.notes}</p>}
-                                        {inquiryItem.requestData.message && <p className="mb-1"><strong>Message:</strong> {inquiryItem.requestData.message}</p>}
-                                    </>
-                                )}
+                                        <p className="mb-1"><strong>Customer:</strong> {item.customerName}</p>
+                                        <p className="mb-1"><strong>Event Date:</strong> {item.eventDate}</p>
+                                        <p className="mb-1"><strong>Location:</strong> {item.venue}</p>
+                                        {item.flowers && <p className="mb-1"><strong>Flowers:</strong> {item.flowers}</p>}
+                                        {item.specialInstructions && <p className="mb-1"><strong>Details:</strong> {item.specialInstructions}</p>}
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     </div>
@@ -315,7 +306,7 @@ const BookingCheckout = ({ user }) => {
                 linkTo={infoModal.linkTo}
                 linkText={infoModal.linkText}
             />
-        </div>
+        </div >
     );
 };
 

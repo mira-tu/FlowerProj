@@ -137,9 +137,8 @@ const Navbar = ({ cartCount, user, logout }) => {
                                     Services
                                 </a>
                                 <ul className="dropdown-menu services-menu border-0 shadow-sm">
-                                    <li><Link className="dropdown-item" to="/book-event">Booking for an Event</Link></li>
+                                    <li><Link className="dropdown-item" to="/book-event">Custom Order</Link></li>
                                     <li><Link className="dropdown-item" to="/customized">Customized Bouquets</Link></li>
-                                    <li><Link className="dropdown-item" to="/special-order">Special Orders</Link></li>
                                 </ul>
                             </li>
                         </ul>
@@ -154,7 +153,7 @@ const Navbar = ({ cartCount, user, logout }) => {
                                     <span className="badge-count">{unreadMessageCount > 9 ? '9+' : unreadMessageCount}</span>
                                 )}
                             </Link>
-                            
+
                             <div className="notification-wrapper position-relative">
                                 {/* ... existing notification code ... */}
                             </div>

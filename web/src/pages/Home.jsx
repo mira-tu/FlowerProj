@@ -110,7 +110,7 @@ const Home = ({ addToCart, products, categories }) => {
     const isInWishlist = (productName) => {
         return wishlist.some(item => item.name === productName);
     };
-    
+
     const filteredProducts = products
         .filter(product => product.name && product.name.toLowerCase().includes(searchTerm.toLowerCase()))
         .filter(product => selectedCategory === 'All' || product.category_name === selectedCategory);
@@ -157,13 +157,13 @@ const Home = ({ addToCart, products, categories }) => {
                         </div>
                     </div>
                     <div className="carousel-item">
-                        <Link to="/special-order">
+                        <Link to="/book-event">
                             <img src={specialImg} className="d-block w-100" alt="Special Orders" />
                         </Link>
                         <div className="carousel-caption">
-                            <h2>Special Orders</h2>
-                            <p>Add chocolates, teddy bears, and personalized gifts</p>
-                            <Link to="/special-order" className="btn btn-hero">Start to Craft</Link>
+                            <h2>Custom Order</h2>
+                            <p>Request bespoke floral arrangements for any occasion</p>
+                            <Link to="/book-event" className="btn btn-hero">Start to Craft</Link>
                         </div>
                     </div>
                 </div>
