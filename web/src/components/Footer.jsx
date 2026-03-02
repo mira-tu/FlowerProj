@@ -21,12 +21,15 @@ const Footer = () => {
                         <h5 className="footer-title">Follow Us</h5>
                         <div>
                             <a href="#" className="social-icon"><i className="fab fa-facebook"></i></a>
-                            <a href="#" className="social-icon"><i className="fab fa-instagram"></i></a>
-                            <a href="#" className="social-icon"><i className="fab fa-twitter"></i></a>
                         </div>
                     </div>
                 </div>
-                <div className="text-center border-top border-secondary pt-3 mt-3">
+                <div className="text-center border-top border-secondary pt-3 mt-3 d-flex justify-content-center align-items-center gap-3">
+                    <Link to="/terms" className="text-secondary text-decoration-none small">Terms of Service</Link>
+                    <span className="text-secondary small">|</span>
+                    <Link to="/privacy" className="text-secondary text-decoration-none small">Privacy Policy</Link>
+                </div>
+                <div className="text-center pt-2">
                     <p className="text-secondary mb-0">&copy; 2024 Jocery's Flower Shop. All rights reserved.</p>
                 </div>
             </div>

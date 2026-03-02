@@ -229,7 +229,7 @@ const Signup = () => {
                         <div className="form-check mb-4">
                             <input className="form-check-input" type="checkbox" id="terms" required disabled={loading} />
                             <label className="form-check-label text-muted small" htmlFor="terms">
-                                I agree to the <a href="#" className="auth-link">Terms of Service</a> and <a href="#" className="auth-link">Privacy Policy</a>
+                                I agree to the <Link to="/terms" className="auth-link" target="_blank">Terms of Service</Link> and <Link to="/privacy" className="auth-link" target="_blank">Privacy Policy</Link>
                             </label>
                         </div>
 

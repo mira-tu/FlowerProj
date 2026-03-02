@@ -64,6 +64,8 @@ import OrderBookingTracking from './pages/OrderBookingTracking';
 import OrderCustomizedTracking from './pages/OrderCustomizedTracking';
 import CustomizedCart from './pages/CustomizedCart';
 import CustomizedCheckout from './pages/CustomizedCheckout';
+import Terms from './pages/Terms';
+import Privacy from './pages/Privacy';
 
 import { supabase } from './config/supabase';
 
@@ -281,6 +283,8 @@ function AppContent() {
         <Route path="/login" element={<Login onLogin={login} />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/terms" element={<Terms />} />
+        <Route path="/privacy" element={<Privacy />} />
         <Route path="/book-event" element={<BookEvent user={user} />} />
         <Route path="/customized" element={<Customized addToCart={addToCart} />} />
         <Route path="/product/:productId" element={<ProductDetail addToCart={addToCart} />} />
