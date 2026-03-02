@@ -175,6 +175,7 @@
     transform: translate(-50%, -50%);
     max-width: 100%;
     max-height: 100%;
+    object-fit: contain;
     pointer-events: none;
     transition: all 0.3s ease;
 }
@@ -517,21 +518,36 @@
 
 /* Mobile styles */
 @media (max-width: 768px) {
+
+    /* --- PAGE: Lock viewport, no outer scroll --- */
+    .customize-page {
+        height: 100vh;
+        overflow: hidden;
+    }
+
+    /* --- HEADER: Compact single-row bar pinned to top --- */
     .customize-page .app-header {
-        height: auto;
-        min-height: 60px;
-        padding: 0.75rem 1rem;
-        flex-wrap: wrap;
-        gap: 0.75rem;
+        position: sticky;
+        top: 0;
+        height: 54px;
+        padding: 0 0.75rem;
+        flex-wrap: nowrap;
+        gap: 0;
+        z-index: 30;
     }
 
     .customize-page .header-left {
-        gap: 0.75rem;
-        flex-wrap: wrap;
+        gap: 0.5rem;
+        flex-shrink: 1;
+        min-width: 0;
+        /* allow text to truncate */
     }
 
     .customize-page .header-left h3 {
-        font-size: 1rem;
+        font-size: 0.95rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .customize-page .divider {
@@ -539,82 +555,128 @@
     }
 
     .customize-page .header-right {
-        flex-wrap: wrap;
-        gap: 0.75rem;
-        width: 100%;
-        justify-content: space-between;
+        gap: 0.5rem;
+        width: auto;
+        flex-shrink: 0;
     }
 
     .customize-page .back-link {
-        font-size: 0.85rem;
-        padding: 0.4rem 0.6rem;
+        font-size: 0.8rem;
+        padding: 0.3rem 0.5rem;
     }
 
     .customize-page .price-display {
-        order: 1;
         flex-direction: row;
         align-items: center;
-        gap: 0.5rem;
+        gap: 0.35rem;
     }
 
     .customize-page .price-display .label {
-        font-size: 0.7rem;
+        font-size: 0.65rem;
     }
 
     .customize-page .price-display .amount {
-        font-size: 1.25rem;
+        font-size: 1.1rem;
     }
 
     .customize-page .btn-action {
-        order: 2;
-        padding: 0.6rem 1.25rem;
-        font-size: 0.85rem;
-        width: 100%;
-        margin-top: 0.5rem;
+        padding: 0.5rem 1rem;
+        font-size: 0.8rem;
+        white-space: nowrap;
     }
 
+    /* --- LAYOUT: Fill remaining viewport below header --- */
     .customize-page .editor-layout {
-        height: auto;
-        min-height: calc(100vh - 60px);
+        height: calc(100vh - 54px);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
     }
 
+    /* --- PREVIEW: Takes 55% of remaining viewport --- */
     .customize-page .preview-canvas {
-        height: 50vh;
-        min-height: 300px;
+        flex: 0 0 55%;
+        min-height: 0;
+        height: 55%;
     }
 
     .customize-page .bouquet-stage {
         width: 100%;
-        max-width: 400px;
+        max-width: 100%;
         height: 100%;
-        max-height: 400px;
+        max-height: 100%;
+        margin: 0 auto;
+    }
+
+    .customize-page .layer {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
     }
 
     .customize-page .flower-zone {
-        width: 200px !important;
-        height: 180px !important;
+        width: 160px !important;
+        height: 150px !important;
+        top: 5% !important;
     }
 
     .customize-page .stem-slot {
-        width: 60px !important;
-        height: 60px !important;
+        width: 45px !important;
+        height: 45px !important;
     }
 
+    /* --- TOOLS PANEL: Fill remaining 45% --- */
     .customize-page .tools-interface {
-        max-height: 50vh;
+        flex: 1 1 45%;
+        min-height: 0;
+        height: auto;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.06);
+        border-top: 1px solid var(--border-color);
+    }
+
+    /* Horizontal tabs bar */
+    .customize-page .vertical-toolbar {
+        flex-shrink: 0;
+        padding: 0.75rem 1rem;
+        gap: 1rem;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        justify-content: center;
+    }
+
+    .customize-page .tool-btn {
+        padding: 0.75rem 1.5rem;
+        font-size: 1rem;
+        min-width: 100px;
+        flex-shrink: 0;
+        min-height: 48px;
+    }
+
+    .customize-page .tool-btn .icon-wrapper {
+        font-size: 1.4rem;
+    }
+
+    .customize-page .tool-btn span {
+        font-size: 0.9rem;
+    }
+
+    /* Scrollable options area */
+    .customize-page .options-panel {
+        flex: 1;
+        min-height: 0;
+        /* critical for flex scroll */
+        padding: 1rem;
         overflow-y: auto;
     }
 
-    .customize-page .options-panel {
-        padding: 1.25rem;
-    }
-
     .customize-page .panel-header {
-        margin-bottom: 1.5rem;
+        margin-bottom: 1rem;
     }
 
     .customize-page .panel-header h4 {
-        font-size: 1.25rem;
+        font-size: 1.15rem;
     }
 
     .customize-page .panel-header p {
@@ -622,138 +684,118 @@
     }
 
     .customize-page .control-group {
-        margin-bottom: 1.5rem;
+        margin-bottom: 1.25rem;
     }
 
     .customize-page .control-group label {
         font-size: 0.8rem;
-        margin-bottom: 0.75rem;
+        margin-bottom: 0.5rem;
     }
 
     .customize-page .bundle-selector-group {
-        padding: 0.4rem;
-        gap: 0.5rem;
+        padding: 0.35rem;
+        gap: 0.4rem;
     }
 
     .customize-page .bundle-pill {
-        padding: 0.6rem 0.5rem;
+        padding: 0.55rem 0.4rem;
         font-size: 0.85rem;
-        min-height: 44px; /* Touch target */
+        min-height: 44px;
     }
 
     .customize-page .grid-options {
         grid-template-columns: repeat(2, 1fr);
-        gap: 0.75rem;
+        gap: 0.6rem;
     }
 
     .customize-page .option-card {
-        padding: 0.75rem;
-        min-height: 44px; /* Touch target */
+        padding: 0.6rem;
+        min-height: 44px;
     }
 
     .customize-page .option-img {
-        height: 80px;
-        margin-bottom: 0.75rem;
+        height: 70px;
+        margin-bottom: 0.5rem;
     }
 
     .customize-page .option-name {
-        font-size: 0.85rem;
+        font-size: 0.8rem;
     }
 
     .customize-page .option-price {
-        font-size: 0.75rem;
-    }
-
-    .customize-page .vertical-toolbar {
-        padding: 0.5rem;
-        gap: 0.5rem;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-    }
-
-    .customize-page .tool-btn {
-        padding: 0.5rem 0.75rem;
-        font-size: 0.75rem;
-        min-width: 80px;
-        flex-shrink: 0;
-    }
-
-    .customize-page .tool-btn .icon-wrapper {
-        font-size: 1.2rem;
-    }
-
-    .customize-page .tool-btn span {
-        font-size: 0.65rem;
+        font-size: 0.7rem;
     }
 
     .customize-page .empty-state svg {
         font-size: 2.5rem;
-        margin-bottom: 0.75rem;
+        margin-bottom: 0.5rem;
     }
 
     .customize-page .empty-state p {
-        font-size: 1rem;
+        font-size: 0.95rem;
     }
 }
 
 /* Small mobile devices */
 @media (max-width: 480px) {
     .customize-page .app-header {
-        padding: 0.6rem 0.75rem;
+        height: 48px;
+        padding: 0 0.5rem;
     }
 
     .customize-page .header-left h3 {
-        font-size: 0.9rem;
+        font-size: 0.85rem;
     }
 
     .customize-page .back-link {
-        font-size: 0.8rem;
-        padding: 0.35rem 0.5rem;
+        font-size: 0.75rem;
+        padding: 0.25rem 0.4rem;
     }
 
     .customize-page .price-display .label {
-        font-size: 0.65rem;
+        font-size: 0.6rem;
     }
 
     .customize-page .price-display .amount {
-        font-size: 1.1rem;
+        font-size: 1rem;
     }
 
     .customize-page .btn-action {
-        padding: 0.55rem 1rem;
-        font-size: 0.8rem;
+        padding: 0.45rem 0.8rem;
+        font-size: 0.75rem;
     }
 
+    .customize-page .editor-layout {
+        height: calc(100vh - 48px);
+    }
+
+    /* Balanced split on small screens */
     .customize-page .preview-canvas {
-        height: 45vh;
-        min-height: 250px;
-    }
-
-    .customize-page .bouquet-stage {
-        max-width: 100%;
-        max-height: 100%;
+        flex: 0 0 42%;
+        height: 42%;
     }
 
     .customize-page .flower-zone {
-        width: 180px !important;
-        height: 160px !important;
+        width: 130px !important;
+        height: 120px !important;
+        top: 3% !important;
     }
 
     .customize-page .stem-slot {
-        width: 50px !important;
-        height: 50px !important;
+        width: 38px !important;
+        height: 38px !important;
     }
 
     .customize-page .options-panel {
-        padding: 1rem;
+        padding: 0.75rem;
     }
 
     .customize-page .panel-header {
-        margin-bottom: 1.25rem;
+        margin-bottom: 0.75rem;
     }
 
     .customize-page .panel-header h4 {
-        font-size: 1.1rem;
+        font-size: 1rem;
     }
 
     .customize-page .panel-header p {
@@ -761,87 +803,97 @@
     }
 
     .customize-page .control-group {
-        margin-bottom: 1.25rem;
+        margin-bottom: 1rem;
     }
 
     .customize-page .bundle-selector-group {
         flex-direction: column;
-        gap: 0.5rem;
+        gap: 0.35rem;
     }
 
     .customize-page .bundle-pill {
         width: 100%;
-        padding: 0.75rem;
+        padding: 0.5rem;
     }
 
     .customize-page .grid-options {
-        grid-template-columns: 1fr;
-        gap: 0.75rem;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.5rem;
     }
 
     .customize-page .option-card {
-        padding: 1rem;
+        padding: 0.5rem;
     }
 
     .customize-page .option-img {
-        height: 100px;
+        height: 60px;
+        margin-bottom: 0.4rem;
     }
 
     .customize-page .vertical-toolbar {
         padding: 0.4rem;
-        gap: 0.4rem;
+        gap: 0.35rem;
     }
 
     .customize-page .tool-btn {
         padding: 0.4rem 0.6rem;
-        min-width: 70px;
-        font-size: 0.7rem;
+        min-width: 65px;
     }
 
     .customize-page .tool-btn .icon-wrapper {
-        font-size: 1.1rem;
+        font-size: 1rem;
     }
 
     .customize-page .tool-btn span {
-        font-size: 0.6rem;
+        font-size: 0.55rem;
     }
 }
 
 /* Very small devices */
 @media (max-width: 360px) {
     .customize-page .app-header {
-        padding: 0.5rem;
+        height: 44px;
+        padding: 0 0.4rem;
     }
 
     .customize-page .header-left {
-        gap: 0.5rem;
+        gap: 0.3rem;
     }
 
-    .customize-page .header-right {
-        gap: 0.5rem;
+    .customize-page .header-left h3 {
+        font-size: 0.8rem;
+    }
+
+    .customize-page .editor-layout {
+        height: calc(100vh - 44px);
     }
 
     .customize-page .preview-canvas {
-        height: 40vh;
-        min-height: 200px;
+        flex: 0 0 38%;
+        height: 38%;
     }
 
     .customize-page .flower-zone {
-        width: 150px !important;
-        height: 140px !important;
+        width: 110px !important;
+        height: 100px !important;
+    }
+
+    .customize-page .stem-slot {
+        width: 34px !important;
+        height: 34px !important;
     }
 
     .customize-page .options-panel {
-        padding: 0.75rem;
+        padding: 0.5rem;
     }
 
     .customize-page .bundle-pill {
-        padding: 0.6rem;
+        padding: 0.45rem;
         font-size: 0.8rem;
     }
 
     .customize-page .option-img {
-        height: 90px;
+        height: 55px;
     }
 }
 
@@ -853,14 +905,19 @@
     padding: 0.5rem 1rem;
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-sm);
-    border: 1px solid var(--border-color); /* Add default border */
+    border: 1px solid var(--border-color);
+    /* Add default border */
     transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
-    max-width: 140px; /* New: Limit width to 140px */
+    max-width: 140px;
+    /* New: Limit width to 140px */
 }
 
-.customize-page .custom-bundle-input-card:focus-within { /* Use focus-within for parent */
-    border-color: var(--primary-color); /* Pink border on focus */
-    box-shadow: 0 0 0 3px rgba(214, 51, 132, 0.2); /* Pink shadow on focus */
+.customize-page .custom-bundle-input-card:focus-within {
+    /* Use focus-within for parent */
+    border-color: var(--primary-color);
+    /* Pink border on focus */
+    box-shadow: 0 0 0 3px rgba(214, 51, 132, 0.2);
+    /* Pink shadow on focus */
 }
 
 .customize-page .custom-stem-input {

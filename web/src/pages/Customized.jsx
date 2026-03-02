@@ -200,6 +200,10 @@ const Customized = ({ addToCart }) => {
     setActiveStep(1);
   };
 
+  useEffect(() => {
+    console.log('Current selection state:', selection);
+  }, [selection]);
+
   const totalPrice = useMemo(() => {
     let total = 0;
     if (selection.flowers.length > 0 && selection.bundleSize) {
@@ -275,7 +279,7 @@ const Customized = ({ addToCart }) => {
     () => Array.from({ length: stemSlots.length }, () => React.createRef()),
     [stemSlots.length]
   );
-  const isEmpty = selection.flowers.length === 0 || !selection.bundleSize;
+  const isEmpty = selection.flowers.length === 0 && !selection.wrapper && !selection.ribbon;
 
   const formatPrice = (value) => `₱${value.toLocaleString('en-PH')}`;
 
@@ -355,7 +359,7 @@ const Customized = ({ addToCart }) => {
           <div className="canvas-container">
             <div className="bouquet-stage" ref={previewRef}>
               {selection.wrapper && (
-                <img src={selection.wrapper.layerImg || placeholderImg} alt="Wrapper" className="layer" style={{ zIndex: 1, top: '50%' }} />
+                <img src={selection.wrapper.layerImg || selection.wrapper.img || placeholderImg} alt="Wrapper" className="layer" style={{ zIndex: 1, top: '50%' }} />
               )}
 
               {/* Flower Zone - Constrained Area */}
@@ -404,7 +408,7 @@ const Customized = ({ addToCart }) => {
 
               {selection.ribbon && (
                 <img
-                  src={selection.ribbon.layerImg || placeholderImg}
+                  src={selection.ribbon.layerImg || selection.ribbon.img || placeholderImg}
                   alt="Ribbon"
                   className="layer"
                   style={{ zIndex: 3, top: '65%' }}

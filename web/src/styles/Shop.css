@@ -1800,8 +1800,6 @@
         width: 40px !important;
         height: 40px !important;
     }
-
-    font-size: 0.9rem;
 }
 
 /* Cart Page Mobile Enhancements */
@@ -1826,4 +1824,19 @@
 .order-summary-card {
     margin-top: 20px;
 }
+
+/* ============================================
+   Navbar & Hamburger Menu Overrides
+   ============================================ */
+.navbar-toggler {
+    border: none !important;
+    box-shadow: none !important;
+}
+
+.navbar-toggler:focus,
+.navbar-toggler:active,
+.navbar-toggler-icon:focus {
+    outline: none !important;
+    box-shadow: none !important;
+    border: none !important;
 }

@@ -89,10 +89,21 @@ const Cart = ({ cart, updateCartItem, removeFromCart }) => {
                         {/* Cart Items */}
                         {cartItems.map(item => (
                             <div key={item.id} className="card border-0 shadow-sm mb-3">
-                                <div className="card-body" style={{ overflowX: 'auto' }}>
-                                    <div className="row align-items-center g-0">
-                                        <div className="col-md-5 d-flex align-items-center mb-3 mb-md-0">
-                                            <div className="form-check me-3">
+                                <div className="card-body position-relative">
+                                    {/* Mobile Trash Button */}
+                                    <div className="position-absolute top-0 end-0 p-3 d-md-none" style={{ zIndex: 10 }}>
+                                        <button
+                                            className="btn btn-outline-danger btn-sm rounded-circle d-inline-flex align-items-center justify-content-center"
+                                            style={{ width: '32px', height: '32px', border: 'none' }}
+                                            onClick={() => removeItem(item.id)}
+                                        >
+                                            <i className="fas fa-trash-alt"></i>
+                                        </button>
+                                    </div>
+
+                                    <div className="row align-items-center g-2">
+                                        <div className="col-12 col-md-5 d-flex align-items-center">
+                                            <div className="form-check me-2 me-md-3 mb-0">
                                                 <input
                                                     className="form-check-input"
                                                     type="checkbox"
@@ -100,37 +111,45 @@ const Cart = ({ cart, updateCartItem, removeFromCart }) => {
                                                     onChange={() => toggleSelect(item.id)}
                                                     style={{
                                                         borderColor: item.selected ? '#4caf50' : '#dee2e6',
-                                                        backgroundColor: item.selected ? '#4caf50' : 'white'
+                                                        backgroundColor: item.selected ? '#4caf50' : 'white',
+                                                        cursor: 'pointer'
                                                     }}
                                                 />
                                             </div>
                                             <img
                                                 src={item.image}
                                                 alt={item.name}
-                                                className="rounded"
-                                                style={{ width: '80px', height: '80px', objectFit: 'cover' }}
+                                                className="rounded flex-shrink-0"
+                                                style={{ width: '70px', height: '70px', objectFit: 'cover' }}
                                                 onError={(e) => e.target.src = 'https://via.placeholder.com/80'}
                                             />
-                                            <div className="ms-3">
-                                                <h6 className="mb-0 fw-bold">{item.name}</h6>
+                                            <div className="ms-2 ms-md-3 pe-4 pe-md-0 flex-grow-1">
+                                                <h6 className="mb-0 fw-bold" style={{ fontSize: '0.95rem' }}>{item.name}</h6>
+                                                <div className="d-md-none text-muted small mt-1">
+                                                    ₱{item.price.toLocaleString()}
+                                                </div>
                                             </div>
                                         </div>
-                                        <div className="col-md-2 text-center mb-2 mb-md-0">
-                                            <span className="d-md-none text-muted small me-2">Price:</span>
+
+                                        <div className="col-md-2 text-center d-none d-md-block">
                                             ₱{item.price.toLocaleString()}
                                         </div>
-                                        <div className="col-md-2 text-center mb-2 mb-md-0">
-                                            <div className="input-group input-group-sm justify-content-center" style={{ width: '100px', margin: '0 auto' }}>
-                                                <button className="btn btn-outline-secondary" onClick={() => updateQty(item.id, -1)}>-</button>
-                                                <input type="text" className="form-control text-center bg-white" value={item.qty} readOnly />
-                                                <button className="btn btn-outline-secondary" onClick={() => updateQty(item.id, 1)}>+</button>
+
+                                        <div className="col-6 col-md-2 mt-2 mt-md-0">
+                                            <div className="ms-4 ms-md-0 ps-3 ps-md-0 d-flex justify-content-start justify-content-md-center">
+                                                <div className="input-group input-group-sm" style={{ width: '90px' }}>
+                                                    <button className="btn btn-outline-secondary px-2" onClick={() => updateQty(item.id, -1)}>-</button>
+                                                    <input type="text" className="form-control text-center bg-white px-1" value={item.qty} readOnly />
+                                                    <button className="btn btn-outline-secondary px-2" onClick={() => updateQty(item.id, 1)}>+</button>
+                                                </div>
                                             </div>
                                         </div>
-                                        <div className="col-md-2 text-center fw-bold mb-2 mb-md-0" style={{ color: '#4caf50' }}>
-                                            <span className="d-md-none text-muted small me-2">Total:</span>
+
+                                        <div className="col-6 col-md-2 text-end text-md-center fw-bold mt-2 mt-md-0 align-self-end align-self-md-center" style={{ color: '#4caf50' }}>
                                             ₱{(item.price * item.qty).toLocaleString()}
                                         </div>
-                                        <div className="col-md-1 text-center">
+
+                                        <div className="col-md-1 text-center d-none d-md-block">
                                             <button
                                                 className="btn btn-outline-danger btn-sm rounded-circle d-inline-flex align-items-center justify-content-center"
                                                 style={{ width: '36px', height: '36px' }}
