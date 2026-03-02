@@ -6,7 +6,7 @@ import '../styles/About.css';
 const About = () => {
     const [aboutData, setAboutData] = useState({
         story: "Jocery's Flower Shop was born from a love for flowers and a desire to make every occasion feel special.",
-        about_description: "We are a local flower shop in Zamboanga City, offering fresh floral arrangements through a simple and convenient online store.",
+        about_description: "We are a local flower shop in Quezon City, offering fresh floral arrangements through a simple and convenient online store.",
         promise: "We promise thoughtfully crafted arrangements, reliable service, and flowers that help you celebrate life’s most meaningful moments.",
         ownerQuote: "Where flowers bloom, hope takes root.",
         ownerImage: "https://via.placeholder.com/150",
