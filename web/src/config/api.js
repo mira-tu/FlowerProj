@@ -530,11 +530,12 @@ export const stockAPI = {
                 layerImg: item.image_url,
                 stemImg: item.image_url, // Flowers will use this, others can just ignore
                 unit: item.unit,
+                quantity: item.quantity ?? 0, // <-- CRITICAL: stock limit enforcement
                 reorder_level: item.reorder_level,
                 is_available: item.is_available,
             }));
-            
-            
+
+
             return { data: mappedData };
         } catch (error) {
             console.error('Error fetching stock items from Supabase:', error.message || error);

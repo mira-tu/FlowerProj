@@ -81,6 +81,7 @@ const Customized = ({ addToCart }) => {
             img: item.img,
             layerImg: item.layerImg,
             stemImg: item.stemImg,
+            quantity: item.quantity || 0,
           }));
 
         const processedWrappers = allStockItems
@@ -91,6 +92,7 @@ const Customized = ({ addToCart }) => {
             price: item.price,
             img: item.img,
             layerImg: item.layerImg,
+            quantity: item.quantity || 0,
           }));
 
         const processedRibbons = allStockItems
@@ -101,6 +103,7 @@ const Customized = ({ addToCart }) => {
             price: item.price,
             img: item.img,
             layerImg: item.layerImg,
+            quantity: item.quantity || 0,
           }));
 
         setFlowers(processedFlowers);
@@ -118,7 +121,28 @@ const Customized = ({ addToCart }) => {
     fetchCustomizationData();
   }, []); // Run once on component mount
 
+  const getMaxAllowedBundleSize = (selectedFlowers) => {
+    if (!selectedFlowers || selectedFlowers.length === 0) return MAX_STEM_COUNT;
+    const tempCounts = selectedFlowers.map(() => 0);
+    let size = 0;
+    while (size < MAX_STEM_COUNT) {
+      const turn = size % selectedFlowers.length;
+      if (tempCounts[turn] + 1 > selectedFlowers[turn].quantity) {
+        break; // Ran out of stock for this flower
+      }
+      tempCounts[turn]++;
+      size++;
+    }
+    return size;
+  };
+
   const handleBundleSelect = (size) => {
+    const maxAllowed = getMaxAllowedBundleSize(selection.flowers);
+    if (size > maxAllowed) {
+      setInfoModal({ show: true, title: 'Stock Limit Reached', message: `Based on your selected flowers, the maximum mathematically possible bundle size is ${maxAllowed} stems.` });
+      setSelection((prev) => ({ ...prev, bundleSize: maxAllowed }));
+      return;
+    }
     setSelection((prev) => ({ ...prev, bundleSize: size }));
     setCustomBundleSizeInput(''); // Clear custom input when a predefined bundle is selected
   };
@@ -128,10 +152,12 @@ const Customized = ({ addToCart }) => {
     if (!/^\d*$/.test(value)) return; // Only allow digits
 
     let numValue = value === '' ? 0 : parseInt(value, 10);
-
     let capped = false;
-    if (numValue > MAX_STEM_COUNT) {
-      numValue = MAX_STEM_COUNT;
+
+    const maxAllowed = Math.min(MAX_STEM_COUNT, getMaxAllowedBundleSize(selection.flowers));
+
+    if (numValue > maxAllowed) {
+      numValue = maxAllowed;
       capped = true;
     }
 
@@ -147,7 +173,7 @@ const Customized = ({ addToCart }) => {
       setInfoModal({
         show: true,
         title: 'Stem Limit Reached',
-        message: `The maximum number of stems is ${MAX_STEM_COUNT}. Your input has been capped.`,
+        message: `Your input has been adjusted to ${numValue} stems due to stock limits or maximum limits (${MAX_STEM_COUNT}).`,
       });
     }
   };
@@ -181,6 +207,17 @@ const Customized = ({ addToCart }) => {
         if (newFlowers.length === 0) {
           next.bundleSize = 0;
         }
+
+        // Dynamically enforce stock reduction if the new flower combination is too restrictive
+        if (newFlowers.length > 0 && next.bundleSize > 0) {
+          const maxAllowed = getMaxAllowedBundleSize(newFlowers);
+          if (next.bundleSize > maxAllowed) {
+            setInfoModal({ show: true, title: 'Stock Adjusted', message: `Your bundle size was automatically reduced to ${maxAllowed} because your new flower selection has limited stock.` });
+            next.bundleSize = maxAllowed;
+            setCustomBundleSizeInput(maxAllowed < 2 ? '' : String(maxAllowed));
+          }
+        }
+
         return next;
       });
     } else {
@@ -222,6 +259,22 @@ const Customized = ({ addToCart }) => {
         title: 'Selection Needed',
         message: 'Please select 1 to 2 flower types and a bundle size.',
       });
+      return;
+    }
+
+    if (selection.wrapper && selection.wrapper.quantity < 1) {
+      setInfoModal({ show: true, title: 'Out of Stock', message: `The ${selection.wrapper.name} wrapper is out of stock.` });
+      return;
+    }
+
+    if (selection.ribbon && selection.ribbon.quantity < 1) {
+      setInfoModal({ show: true, title: 'Out of Stock', message: `The ${selection.ribbon.name} ribbon is out of stock.` });
+      return;
+    }
+
+    const maxAllowed = getMaxAllowedBundleSize(selection.flowers);
+    if (selection.bundleSize > maxAllowed) {
+      setInfoModal({ show: true, title: 'Check Stock', message: `Not enough flowers for a bundle of ${selection.bundleSize}. Max allowed stems based on current stock is ${maxAllowed}.` });
       return;
     }
 
