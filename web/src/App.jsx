@@ -279,7 +279,28 @@ function AppContent() {
     setCart(prevCart => prevCart.filter(item => item.id !== itemId && item.productId !== itemId));
   };
 
-  const cartCount = cart.reduce((acc, item) => acc + (item.qty || 0), 0);
+  const [customServiceCount, setCustomServiceCount] = useState(0);
+
+  useEffect(() => {
+    const updateCounts = () => {
+      try {
+        const c1 = JSON.parse(localStorage.getItem('customizedCart') || '[]').length;
+        const c2 = JSON.parse(localStorage.getItem('bookingCart') || '[]').length;
+        setCustomServiceCount(c1 + c2);
+      } catch (e) {
+        // ignore
+      }
+    };
+    updateCounts();
+    const interval = setInterval(updateCounts, 1000);
+    window.addEventListener('storage', updateCounts);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('storage', updateCounts);
+    };
+  }, []);
+
+  const cartCount = cart.reduce((acc, item) => acc + (item.qty || 0), 0) + customServiceCount;
 
   if (!hasSpinnerDelayPassed || isInitializing) {
     return (

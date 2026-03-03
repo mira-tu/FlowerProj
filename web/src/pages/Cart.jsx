@@ -153,7 +153,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart }) => {
                             onClick={() => setActiveTab('booking')}
                         >
                             <i className="fas fa-calendar-alt me-2"></i>Custom Orders
-                            {bookingItems.length > 0 && <span className="badge bg-dark text-white ms-2">{bookingItems.length}</span>}
+                            {bookingItems.length > 0 && <span className="badge bg-white text-dark ms-2">{bookingItems.length}</span>}
                         </button>
                     </div>
 
