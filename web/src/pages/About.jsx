@@ -151,59 +151,47 @@ const About = () => {
                         <h2 className="text-center mb-5 fw-bold">Our Services</h2>
                     </div>
 
-                    <div className="row g-4">
-                        <div className="col-md-4">
-                            <div className="card h-100 border-0 rounded-4 overflow-hidden shadow hover-lift">
-                                <div className="img-wrapper" style={{ height: '250px' }}>
+                    <div className="row g-4 justify-content-center">
+                        <div className="col-md-6">
+                            <div className="card h-100 border-0 rounded-4 overflow-hidden shadow hover-lift d-flex flex-column">
+                                <div className="img-wrapper" style={{ height: '300px' }}>
                                     <Link to="/customized" className="d-block w-100 h-100">
                                         <img
-                                            src={aboutData.customBouquetsImage || "https://via.placeholder.com/400x250"}
+                                            src={aboutData.customBouquetsImage || "https://via.placeholder.com/400x300"}
                                             className="w-100 h-100 object-fit-cover"
-                                            alt="Custom Bouquets"
+                                            alt="Customized Bouquets"
                                         />
                                     </Link>
                                 </div>
-                                <div className="card-body p-4 text-center">
-                                    <h3 className="h4 fw-bold mb-3">Custom Bouquets</h3>
+                                <div className="card-body p-4 text-center d-flex flex-column">
+                                    <h3 className="h4 fw-bold mb-3">Customized Bouquets</h3>
                                     <p className="text-muted mb-4">{aboutData.customBouquetsDescription}</p>
-                                    <Link to="/customized" className="btn btn-pink rounded-pill px-4 fw-semibold">Learn More</Link>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="col-md-4">
-                            <div className="card h-100 border-0 rounded-4 overflow-hidden shadow hover-lift">
-                                <div className="img-wrapper" style={{ height: '250px' }}>
-                                    <Link to="/book-event" className="d-block w-100 h-100">
-                                        <img
-                                            src={aboutData.eventDecorationsImage || "https://via.placeholder.com/400x250"}
-                                            className="w-100 h-100 object-fit-cover"
-                                            alt="Event Decorations"
-                                        />
-                                    </Link>
-                                </div>
-                                <div className="card-body p-4 text-center">
-                                    <h3 className="h4 fw-bold mb-3">Event Decorations</h3>
-                                    <p className="text-muted mb-4">{aboutData.eventDecorationsDescription}</p>
-                                    <Link to="/book-event" className="btn btn-pink rounded-pill px-4 fw-semibold">Learn More</Link>
+                                    <div className="mt-auto">
+                                        <Link to="/customized" className="btn btn-pink rounded-pill px-4 fw-semibold w-50">Learn More</Link>
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
-                        <div className="col-md-4">
-                            <div className="card h-100 border-0 rounded-4 overflow-hidden shadow hover-lift">
-                                <div className="img-wrapper" style={{ height: '250px' }}>
+                        <div className="col-md-6">
+                            <div className="card h-100 border-0 rounded-4 overflow-hidden shadow hover-lift d-flex flex-column">
+                                <div className="img-wrapper" style={{ height: '300px' }}>
                                     <Link to="/book-event" className="d-block w-100 h-100">
                                         <img
-                                            src={aboutData.specialOrdersImage || "https://via.placeholder.com/400x250"}
+                                            src={aboutData.eventDecorationsImage || "https://via.placeholder.com/400x300"}
                                             className="w-100 h-100 object-fit-cover"
-                                            alt="Special Orders"
+                                            alt="Custom Order"
                                         />
                                     </Link>
                                 </div>
-                                <div className="card-body p-4 text-center">
-                                    <h3 className="h4 fw-bold mb-3">Special Orders</h3>
-                                    <p className="text-muted mb-4">{aboutData.specialOrdersDescription}</p>
-                                    <Link to="/book-event" className="btn btn-pink rounded-pill px-4 fw-semibold">Learn More</Link>
+                                <div className="card-body p-4 text-center d-flex flex-column">
+                                    <h3 className="h4 fw-bold mb-3">Custom Order</h3>
+                                    <p className="text-muted mb-4">
+                                        {aboutData.eventDecorationsDescription} {aboutData.specialOrdersDescription}
+                                    </p>
+                                    <div className="mt-auto">
+                                        <Link to="/book-event" className="btn btn-pink rounded-pill px-4 fw-semibold w-50">Learn More</Link>
+                                    </div>
                                 </div>
                             </div>
                         </div>
