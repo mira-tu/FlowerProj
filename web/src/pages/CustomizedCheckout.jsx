@@ -335,7 +335,7 @@ const CustomizedCheckout = ({ user }) => {
                                     </div>
                                     <small className="text-muted mt-2 d-block">
                                         <i className="fas fa-map-marker-alt me-1"></i>
-                                        Pickup Location: Jocery's Flower Shop, 123 Flower St., Quezon City
+                                        Pickup Location: Jocery's Flower Shop, 63 San Jose Road, Zamboanga City
                                     </small>
                                 </div>
                             )}

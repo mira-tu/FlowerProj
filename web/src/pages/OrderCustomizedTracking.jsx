@@ -458,7 +458,7 @@ const OrderCustomizedTracking = () => {
                                 <>
                                     <div className="delivery-info-row">
                                         <div className="delivery-label">Pickup Location</div>
-                                        <div className="delivery-value">Jocery's Flower Shop, 123 Flower St., Quezon City</div>
+                                        <div className="delivery-value">Jocery's Flower Shop, 63 San Jose Road, Zamboanga City</div>
                                     </div>
                                     {request.pickupTime && (
                                         <div className="delivery-info-row">

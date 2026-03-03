@@ -211,7 +211,7 @@ const BookingCheckout = ({ user }) => {
                                     <div className="d-flex flex-wrap gap-2">
                                         {pickupTimes.map(time => (<button key={time} type="button" className={`btn btn-sm rounded-pill px-3 ${selectedPickupTime === time ? 'btn-primary' : 'btn-outline-secondary'}`} style={selectedPickupTime === time ? { background: 'var(--shop-pink)', border: 'none' } : {}} onClick={() => setSelectedPickupTime(time)}>{time}</button>))}
                                     </div>
-                                    <small className="text-muted mt-2 d-block"><i className="fas fa-map-marker-alt me-1"></i>Pickup Location: Jocery's Flower Shop, 123 Flower St., Quezon City</small>
+                                    <small className="text-muted mt-2 d-block"><i className="fas fa-map-marker-alt me-1"></i>Pickup Location: Jocery's Flower Shop, 63 San Jose Road, Zamboanga City</small>
                                 </div>
                             )}
                         </div>
