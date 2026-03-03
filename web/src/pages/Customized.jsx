@@ -252,6 +252,13 @@ const Customized = ({ addToCart }) => {
     return total;
   }, [selection]);
 
+  const stemScale = useMemo(() => {
+    if (selection.bundleSize <= 3) return 1;
+    if (selection.bundleSize <= 6) return 0.8;
+    if (selection.bundleSize <= 12) return 0.6;
+    return Math.max(0.4, 1 - (selection.bundleSize - 3) * 0.05);
+  }, [selection.bundleSize]);
+
   const handleAddToCart = async () => {
     if (selection.flowers.length < 1 || selection.flowers.length > 2 || !selection.bundleSize) {
       setInfoModal({
@@ -319,7 +326,7 @@ const Customized = ({ addToCart }) => {
       const updatedCart = [...existingCart, customizedBouquet];
       localStorage.setItem('customizedCart', JSON.stringify(updatedCart));
 
-      navigate('/customized-cart');
+      navigate('/cart');
 
     } catch (error) {
       console.error('Error adding to cart:', error);
@@ -447,7 +454,9 @@ const Customized = ({ addToCart }) => {
                           position: 'absolute',
                           zIndex: slot.zIndex,
                           cursor: 'grab',
-                          touchAction: 'none'
+                          touchAction: 'none',
+                          transform: `scale(${stemScale})`,
+                          transformOrigin: 'center center'
                         }}
                       >
                         <div style={{ transform: `rotate(${slot.rotate}deg)`, width: '100%', height: '100%' }}>
