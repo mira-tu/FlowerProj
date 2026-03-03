@@ -5,7 +5,6 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import AdminDashboard from './src/screens/AdminDashboard';
 import LoginScreen from './src/screens/LoginScreen';
 import ResetPasswordScreen from './src/screens/ResetPasswordScreen';
-import { initializeAsyncStorage } from './src/utils/mockData';
 import { supabase } from './src/config/supabase';
 import { Linking } from 'react-native';
 import Toast, { BaseToast, ErrorToast } from 'react-native-toast-message';
@@ -70,10 +69,7 @@ const toastConfig = {
 const Stack = createNativeStackNavigator();
 
 function App() {
-  // Initialize AsyncStorage with mock data on app start
   useEffect(() => {
-    initializeAsyncStorage();
-
     // Handle Deep Linking
     const handleDeepLink = async (event) => {
       const url = event.url;

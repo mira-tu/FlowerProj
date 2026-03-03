@@ -30,13 +30,8 @@ const LoginScreen = () => {
     setErrorMessage('');
 
     try {
-      console.log('Attempting login...');
-      console.log('Email:', email);
-
       const response = await authAPI.adminLogin({ email, password });
       const { user, token } = response.data;
-
-      console.log('Login successful!', user);
 
       // Save token and user data
       await AsyncStorage.setItem('token', token);
@@ -45,9 +40,7 @@ const LoginScreen = () => {
       // Navigate to dashboard
       navigation.navigate('AdminDashboard');
     } catch (error) {
-      console.error('Full error:', error.message);
-      console.error('Error response:', error.response);
-      console.error('Error message:', error.message);
+      console.error('Login error:', error.message);
 
       let errMsg = 'Could not connect to server.';
 
@@ -69,8 +62,6 @@ const LoginScreen = () => {
         errMsg = error.message || 'Unable to sign in. Please try again.';
       }
       setErrorMessage(errMsg);
-      // Optional: keep Alert if desired, but inline is better for feedback
-      // Alert.alert('Login Failed', errMsg);
     } finally {
       setLoading(false);
     }

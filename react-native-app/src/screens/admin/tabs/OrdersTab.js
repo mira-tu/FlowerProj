@@ -12,12 +12,11 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-  Switch,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
-import { adminAPI, BASE_URL } from '../../../config/api';
+import { adminAPI } from '../../../config/api';
 import { supabase } from '../../../config/supabase';
 import styles from '../../AdminDashboard.styles';
 import { formatTimestamp, getPaymentStatusDisplay, getStatusLabel } from '../adminHelpers';
@@ -49,7 +48,6 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const [selectedRider, setSelectedRider] = useState(null);
   const [orderToAssignRider, setOrderToAssignRider] = useState(null);
   const [riderSearchQuery, setRiderSearchQuery] = useState('');
-  const [riderSortOption, setRiderSortOption] = useState('name_asc');
 
   // Third party rider state
   const [isThirdParty, setIsThirdParty] = useState(false);
@@ -58,24 +56,15 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
   const filteredAndSortedRiders = React.useMemo(() => {
     let result = riders;
-
-    // Filtering
     if (riderSearchQuery) {
       result = result.filter(rider =>
         rider.name.toLowerCase().includes(riderSearchQuery.toLowerCase()) ||
         rider.email.toLowerCase().includes(riderSearchQuery.toLowerCase())
       );
     }
-
-    // Sorting
-    if (riderSortOption === 'name_asc') {
-      result.sort((a, b) => a.name.localeCompare(b.name));
-    } else if (riderSortOption === 'name_desc') {
-      result.sort((a, b) => b.name.localeCompare(a.name));
-    }
-
+    result.sort((a, b) => a.name.localeCompare(b.name));
     return result;
-  }, [riders, riderSearchQuery, riderSortOption]);
+  }, [riders, riderSearchQuery]);
 
   const ordersWithRiderDetails = React.useMemo(() => {
     if (!orders.length || !riders.length) {

@@ -15,7 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import Toast from 'react-native-toast-message';
-import { adminAPI, BASE_URL } from '../../../config/api';
+import { adminAPI } from '../../../config/api';
 import styles from '../../AdminDashboard.styles';
 import ProductCard from '../components/ProductCard';
 

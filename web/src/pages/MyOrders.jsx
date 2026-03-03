@@ -53,7 +53,8 @@ const MyOrders = () => {
                 .from('orders')
                 .select('*, order_items(*), addresses(*)') // Assuming 'order_items' is the table for items and 'addresses' for addresses
                 .eq('user_id', currentUserId)
-                .order('created_at', { ascending: false });
+                .order('created_at', { ascending: false })
+                .limit(100);
 
             if (ordersError) {
                 console.error('Error fetching orders:', ordersError);
@@ -65,7 +66,8 @@ const MyOrders = () => {
                 .from('requests')
                 .select('*')
                 .eq('user_id', currentUserId)
-                .order('created_at', { ascending: false });
+                .order('created_at', { ascending: false })
+                .limit(100);
 
             if (requestsError) {
                 console.error('Error fetching requests:', requestsError);

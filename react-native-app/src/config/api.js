@@ -66,22 +66,12 @@ export const productAPI = {
         let imageUrl = null;
         const imageFile = formData.image;
 
-        console.log('=== CREATE PRODUCT DEBUG ===');
-        console.log('imageFile type:', typeof imageFile);
-        console.log('imageFile:', imageFile);
-
         if (imageFile && imageFile.base64) {
             try {
                 const fileName = imageFile.fileName || `product-${Date.now()}.jpg`;
-                // The expo-image-picker result includes mimeType.
                 const contentType = imageFile.mimeType || 'image/jpeg';
-
-                console.log(`Uploading ${fileName} with contentType: ${contentType}`);
-
-                // Decode base64 to ArrayBuffer, which is more reliable for uploads.
                 const arrayBuffer = decode(imageFile.base64);
 
-                // Upload to Supabase Storage
                 const { data: uploadData, error: uploadError } = await supabase.storage
                     .from('product-images')
                     .upload(fileName, arrayBuffer, {
@@ -95,25 +85,18 @@ export const productAPI = {
                     throw uploadError;
                 }
 
-                console.log('Upload successful, path:', uploadData.path);
-
-                // Get public URL
                 const { data: publicUrlData } = supabase.storage
                     .from('product-images')
                     .getPublicUrl(uploadData.path);
 
                 imageUrl = publicUrlData.publicUrl;
-                console.log('Public URL generated:', imageUrl);
 
             } catch (error) {
                 console.error('Error processing image:', error);
                 throw new Error('Failed to upload image: ' + error.message);
             }
-        } else {
-            console.log('No image file with base64 data provided.');
         }
 
-        // Prepare product data
         const productToInsert = {
             name: formData.name,
             price: parseFloat(formData.price),
@@ -124,9 +107,6 @@ export const productAPI = {
             is_active: formData.is_active !== false,
         };
 
-        console.log('Inserting product to database:', productToInsert);
-
-        // Insert into database
         const { data: newProduct, error } = await supabase
             .from('products')
             .insert(productToInsert)
@@ -138,26 +118,18 @@ export const productAPI = {
             throw error;
         }
 
-        console.log('Product created successfully:', newProduct);
-        console.log('=== END CREATE PRODUCT DEBUG ===');
-
         return { data: newProduct };
     },
 
     update: async function (id, formData) {
         let imageUrl = formData.image_url_hidden;
         const imageFile = formData.image;
-        console.log('productAPI.update: existing imageUrl (hidden):', imageUrl);
-        console.log('productAPI.update: imageFile from formData (full object):', imageFile);
 
-        // If a new image is picked, it will have base64 data.
         if (imageFile && imageFile.base64) {
             try {
                 const fileName = imageFile.fileName || `${Date.now()}.jpg`;
                 const contentType = imageFile.mimeType || 'image/jpeg';
                 const arrayBuffer = decode(imageFile.base64);
-
-                console.log(`Uploading new image for update: ${fileName}`);
 
                 const { data: uploadData, error: uploadError } = await supabase.storage
                     .from('product-images')
@@ -178,7 +150,6 @@ export const productAPI = {
                 throw new Error('Failed to upload image for update: ' + error.message);
             }
         } else if (imageFile && imageFile.uri && imageFile.uri.startsWith('http')) {
-            // This is the case where no new image was selected, so we keep the old one.
             imageUrl = imageFile.uri;
         }
 
@@ -636,16 +607,10 @@ export const adminAPI = {
 
 
     getSalesSummary: async () => {
-        console.log("Fetching sales summary...");
-
-        // 1. Calculate sales figures from `sales` table
         const { data: sales, error: salesError } = await supabase.from('sales').select('total_amount, sale_date');
 
-        console.log("Sales data from Supabase:", sales);
-        console.log("Error from Supabase:", salesError);
-
         if (salesError) {
-            console.error("Error fetching sales:", salesError);
+            console.error('Error fetching sales:', salesError);
             throw salesError;
         }
 
@@ -656,13 +621,9 @@ export const adminAPI = {
 
         let totalSales = 0, todaySales = 0, weekSales = 0, monthSales = 0;
 
-        console.log(`Found ${sales ? sales.length : 0} sales records to process.`);
-
-        (sales || []).forEach((sale, index) => {
+        (sales || []).forEach((sale) => {
             const saleDate = new Date(sale.sale_date);
             const saleAmount = parseFloat(sale.total_amount || 0);
-
-            console.log(`Processing sale #${index + 1}: Amount=${saleAmount}, Date=${saleDate}`);
 
             if (!isNaN(saleAmount) && saleDate.getTime()) {
                 totalSales += saleAmount;
@@ -670,16 +631,13 @@ export const adminAPI = {
                 if (saleDate >= new Date(weekAgo)) weekSales += saleAmount;
                 if (saleDate >= new Date(monthAgo)) monthSales += saleAmount;
             } else {
-                console.warn(`Skipping invalid sale record:`, sale);
+                console.warn('Skipping invalid sale record:', sale);
             }
         });
 
-        console.log("Calculated sales:", { totalSales, todaySales, weekSales, monthSales });
-
-        // 2. Get other stats for other cards
         const { data: stats, error: statsError } = await adminAPI.getStats();
         if (statsError) {
-            console.error("Error fetching stats:", statsError);
+            console.error('Error fetching stats:', statsError);
             throw statsError;
         }
 
@@ -687,7 +645,7 @@ export const adminAPI = {
             .from('orders')
             .select('*', { count: 'exact', head: true });
         if (totalOrdersError) {
-            console.error("Error fetching total orders:", totalOrdersError);
+            console.error('Error fetching total orders:', totalOrdersError);
             throw totalOrdersError;
         }
 
@@ -695,7 +653,7 @@ export const adminAPI = {
             .from('requests')
             .select('*', { count: 'exact', head: true });
         if (totalRequestsError) {
-            console.error("Error fetching total requests:", totalRequestsError);
+            console.error('Error fetching total requests:', totalRequestsError);
             throw totalRequestsError;
         }
 
@@ -709,9 +667,6 @@ export const adminAPI = {
             pendingOrders: stats.pendingOrders + stats.pendingRequests,
         };
 
-        console.log("Returning final summary:", summary);
-
-        // 3. Combine and return
         return { data: summary };
     },
 
@@ -1273,177 +1228,6 @@ export const adminAPI = {
         }
 
         return { data: { success: true } };
-    },
-
-    getAllMessages: async () => {
-        return { data: [] };
-    },
-
-    sendMessage: async (data) => {
-        return { data: { id: Date.now(), ...data } };
-    },
-
-    getAllNotifications: async () => {
-        return { data: [] };
-    },
-
-    sendNotification: async (notificationData) => {
-        // If a specific user_id is provided, send to that user.
-        if (notificationData.user_id) {
-            const { data, error } = await supabase
-                .from('notifications')
-                .insert([notificationData])
-                .select()
-                .single();
-
-            if (error) {
-                console.error('Error sending single notification:', error);
-                throw error;
-            }
-            return { data };
-        }
-
-        // If no user_id, it's a broadcast to all customers.
-        const { data: users, error: usersError } = await supabase
-            .from('users')
-            .select('id')
-            .eq('role', 'customer');
-
-        if (usersError) {
-            console.error('Error fetching users for broadcast:', usersError);
-            throw usersError;
-        }
-
-        if (!users || users.length === 0) {
-            return { data: { success: true, message: "No customers to notify." } };
-        }
-
-        const notifications = users.map(user => ({
-            user_id: user.id,
-            title: notificationData.title,
-            message: notificationData.message,
-            link: notificationData.link || null,
-            type: 'broadcast',
-        }));
-
-        const { data, error } = await supabase
-            .from('notifications')
-            .insert(notifications)
-            .select();
-
-        if (error) {
-            console.error('Error sending broadcast notifications:', error);
-            throw error;
-        }
-
-        return { data: { success: true, count: data ? data.length : 0 } };
-    },
-
-    deleteNotification: async (id) => {
-        return { data: { success: true } };
-    },
-
-    getAbout: async () => {
-        return { data: { title: 'About Us', description: 'FlowerForge' } };
-    },
-
-    updateAbout: async (data) => {
-        return { data: { success: true } };
-    },
-
-    getContact: async () => {
-        return { data: { phone: '+63 912 345 6789', email: 'info@flowerforge.com' } };
-    },
-
-    updateContact: async (data) => {
-        return { data: { success: true } };
-    },
-
-    getEmployees: async () => {
-        return { data: [] };
-    },
-
-    addEmployee: async (data) => {
-        return { data: { id: Date.now(), ...data } };
-    },
-
-    deleteEmployee: async (id) => {
-        return { data: { success: true } };
-    },
-
-    getAllConversations: async () => {
-        const adminId = (await authAPI.getMe())?.data?.id;
-        if (!adminId) return { data: [] };
-
-        const { data: messages, error } = await supabase
-            .from('messages')
-            .select(`
-                *,
-                sender:sender_id(id, name, email),
-                receiver:receiver_id(id, name, email)
-            `)
-            .or(`sender_id.eq.${adminId},receiver_id.eq.${adminId}`)
-            .order('created_at', { ascending: false });
-
-        if (error) {
-            console.error('Error fetching all messages:', error);
-            return { data: [] };
-        }
-
-        const conversations = new Map();
-        messages.forEach(message => {
-            const otherUser = message.sender_id === adminId ? message.receiver : message.sender;
-            if (!otherUser) return;
-
-            if (!conversations.has(otherUser.id)) {
-                conversations.set(otherUser.id, {
-                    user: otherUser,
-                    lastMessage: message.message,
-                    timestamp: message.created_at,
-                });
-            }
-        });
-
-        const sortedConversations = Array.from(conversations.values())
-            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-        return { data: sortedConversations };
-    },
-
-    getMessagesWithUser: async (userId) => {
-        const adminId = (await authAPI.getMe())?.data?.id;
-        if (!adminId) return { data: [] };
-
-        const { data, error } = await supabase
-            .from('messages')
-            .select('*')
-            .or(`and(sender_id.eq.${adminId},receiver_id.eq.${userId}),and(sender_id.eq.${userId},receiver_id.eq.${adminId})`)
-            .order('created_at', { ascending: true });
-
-        if (error) {
-            console.error('Error fetching messages:', error);
-            return { data: [] };
-        }
-        return { data };
-    },
-
-    sendMessage: async (receiverId, messageText) => {
-        const adminId = (await authAPI.getMe())?.data?.id;
-        if (!adminId) return { error: { message: "Not logged in" } };
-
-        const message = {
-            sender_id: adminId,
-            receiver_id: receiverId,
-            message: messageText,
-        };
-
-        const { data, error } = await supabase.from('messages').insert([message]).select().single();
-
-        if (error) {
-            console.error('Error sending message:', error);
-            return { error };
-        }
-        return { data };
     }
 };
 

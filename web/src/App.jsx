@@ -56,7 +56,6 @@ import BookEvent from './pages/BookEvent'
 import ProductDetail from './pages/ProductDetail'
 import Checkout from './pages/Checkout'
 import OrderSuccess from './pages/OrderSuccess'
-import OrderTracking from './pages/OrderTracking'
 import Profile from './pages/Profile'
 import MyOrders from './pages/MyOrders'
 import Notifications from './pages/Notifications'
@@ -78,7 +77,14 @@ function AppContent() {
   const [user, setUser] = useState(null);
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [cart, setCart] = useState([]);
+  const [cart, setCart] = useState(() => {
+    try {
+      const saved = localStorage.getItem('cart');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
   const [isInitializing, setIsInitializing] = useState(true);
   const [hasSpinnerDelayPassed, setHasSpinnerDelayPassed] = useState(false);
   const isLoggedIn = !!user;
@@ -102,6 +108,7 @@ function AppContent() {
             .from('products')
             .select('*, categories ( name )')
             .eq('is_active', true)
+            .limit(200)
         ]);
 
         if (categoriesError) {
@@ -196,28 +203,13 @@ function AppContent() {
     if (error) {
       console.error('Error logging out:', error.message);
     }
-    localStorage.removeItem('cart');
     // Clear all order/request data to prevent data leakage between accounts
     localStorage.removeItem('orders');
     localStorage.removeItem('requests');
     localStorage.removeItem('messages');
     localStorage.removeItem('notifications');
-    setCart([]); // Clear cart state
     window.location.href = '/login'; // Force full page reload to clear any cached state
   };
-
-  // Load cart from localStorage on mount
-  useEffect(() => {
-    const savedCart = localStorage.getItem('cart');
-    if (savedCart) {
-      try {
-        setCart(JSON.parse(savedCart));
-      } catch (error) {
-        console.error('Error parsing cart from localStorage:', error);
-        setCart([]);
-      }
-    }
-  }, []);
 
   // Save cart to localStorage whenever it changes
   useEffect(() => {
@@ -290,7 +282,6 @@ function AppContent() {
         <Route path="/product/:productId" element={<ProductDetail addToCart={addToCart} />} />
         <Route path="/checkout" element={<Checkout setCart={setCart} user={user} />} />
         <Route path="/order-success/:orderNumber" element={<OrderSuccess />} />
-        <Route path="/order-tracking/:orderNumber" element={<OrderTracking />} />
         <Route path="/request-tracking/:requestNumber" element={<OrderBookingTracking />} />
         <Route path="/customized-request-tracking/:requestNumber" element={<OrderCustomizedTracking />} />
         <Route path="/profile" element={<Profile user={user} logout={logout} />} />

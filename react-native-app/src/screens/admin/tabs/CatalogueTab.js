@@ -55,7 +55,6 @@ const CatalogueTab = () => {
 
   const loadData = async () => {
     setLoading(true);
-    console.log('Loading data (CatalogueTab)...');
     try {
       const [productsRes, categoriesRes] = await Promise.all([
         productAPI.getAll({ includeInactive: true }),
@@ -263,15 +262,11 @@ const CatalogueTab = () => {
 
     try {
       if (editingCategoryId) {
-        console.log('Updating category:', editingCategoryId, 'to', newCategoryName.trim());
         await categoryAPI.updateCategory(editingCategoryId, newCategoryName.trim());
-        console.log('Category updated successfully');
         Toast.show({ type: 'success', text1: 'Category updated' });
         setEditingCategoryId(null);
       } else {
-        console.log('Adding category with name:', newCategoryName.trim());
         await categoryAPI.createCategory(newCategoryName.trim());
-        console.log('Category added successfully');
         Toast.show({ type: 'success', text1: 'Category added' });
       }
       setNewCategoryName('');
@@ -291,8 +286,6 @@ const CatalogueTab = () => {
     setCategoryToDeleteId(id);
     setCategoryDeleteModalVisible(true);
   };
-
-  // const deleteCategory = (id) => { ... OLD ... }
 
   const renderProduct = ({ item }) => {
     const imageUrl = item.image_url
@@ -610,9 +603,7 @@ const CatalogueTab = () => {
           setCategoryDeleteModalVisible(false);
           if (categoryToDeleteId) {
             try {
-              console.log('Deleting category:', categoryToDeleteId);
               await categoryAPI.deleteCategory(categoryToDeleteId);
-              console.log('Category deleted successfully');
               Toast.show({ type: 'success', text1: 'Category deleted' });
               await loadData();
             } catch (error) {
