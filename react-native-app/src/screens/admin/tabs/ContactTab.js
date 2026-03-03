@@ -6,6 +6,7 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
+    View,
 } from 'react-native';
 import { supabase } from '../../../config/supabase';
 import styles from '../../AdminDashboard.styles';
