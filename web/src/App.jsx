@@ -68,6 +68,16 @@ import Privacy from './pages/Privacy';
 
 import { supabase } from './config/supabase';
 
+function ScrollToTop() {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
+  return null;
+}
+
 // Removed cartAPI import - using localStorage instead for demo
 
 function AppContent() {
@@ -310,6 +320,7 @@ function App() {
   return (
     <ErrorBoundary>
       <Router>
+        <ScrollToTop />
         <AppContent />
       </Router>
     </ErrorBoundary>
