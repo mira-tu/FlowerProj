@@ -8,26 +8,67 @@ const Cart = ({ cart, updateCartItem, removeFromCart }) => {
 
     useEffect(() => {
         if (cart) {
-            setCartItems(cart.map((item, index) => ({
-                ...item,
-                // Ensure we have a stable ID for local items if needed, but prefer provided ID
-                id: item.id || item.productId || `local-${index}`,
-                selected: true,
-                qty: item.qty || 1
-            })));
+            setCartItems(prevCartItems => {
+                // Create a map of existing selected states
+                const existingSelection = {};
+                prevCartItems.forEach(item => {
+                    existingSelection[item.id] = item.selected;
+                });
+
+                // Load from localStorage
+                const savedSelectionStr = localStorage.getItem('cartSelection');
+                const savedSelection = savedSelectionStr ? JSON.parse(savedSelectionStr) : {};
+
+                return cart.map((item, index) => {
+                    const itemId = item.id || item.productId || `local-${index}`;
+
+                    let isSelected = true;
+                    if (existingSelection[itemId] !== undefined) {
+                        isSelected = existingSelection[itemId];
+                    } else if (savedSelection[itemId] !== undefined) {
+                        isSelected = savedSelection[itemId];
+                    }
+
+                    return {
+                        ...item,
+                        id: itemId,
+                        // Preserve previous selection state, default to true for new items
+                        selected: isSelected,
+                        qty: item.qty || 1,
+                        stockQuantity: item.stockQuantity || null
+                    };
+                });
+            });
         }
     }, [cart]);
 
     const toggleSelect = (id) => {
-        setCartItems(cartItems.map(item =>
-            item.id === id ? { ...item, selected: !item.selected } : item
-        ));
+        setCartItems(prevItems => {
+            const newItems = prevItems.map(item =>
+                item.id === id ? { ...item, selected: !item.selected } : item
+            );
+
+            // Save selection state to localstorage
+            const selectionMap = {};
+            newItems.forEach(item => {
+                selectionMap[item.id] = item.selected;
+            });
+            localStorage.setItem('cartSelection', JSON.stringify(selectionMap));
+
+            return newItems;
+        });
     };
 
     const updateQty = (id, change) => {
         const item = cartItems.find(i => i.id === id);
         if (item) {
-            const newQty = Math.max(1, item.qty + change);
+            let newQty = Math.max(1, item.qty + change);
+            if (item.stockQuantity && newQty > item.stockQuantity) {
+                newQty = item.stockQuantity;
+                if (change > 0) {
+                    alert(`Only ${item.stockQuantity} items in stock for ${item.name}`);
+                }
+            }
             updateCartItem(id, newQty);
         }
     };
@@ -88,14 +129,18 @@ const Cart = ({ cart, updateCartItem, removeFromCart }) => {
 
                         {/* Cart Items */}
                         {cartItems.map(item => (
-                            <div key={item.id} className="card border-0 shadow-sm mb-3">
+                            <div key={item.id}
+                                className="card border-0 shadow-sm mb-3"
+                                style={{ cursor: 'pointer', transition: 'box-shadow 0.2s', border: item.selected ? '1px solid #4caf50' : 'none' }}
+                                onClick={() => toggleSelect(item.id)}
+                            >
                                 <div className="card-body position-relative">
                                     {/* Mobile Trash Button */}
                                     <div className="position-absolute top-0 end-0 p-3 d-md-none" style={{ zIndex: 10 }}>
                                         <button
                                             className="btn btn-outline-danger btn-sm rounded-circle d-inline-flex align-items-center justify-content-center"
                                             style={{ width: '32px', height: '32px', border: 'none' }}
-                                            onClick={() => removeItem(item.id)}
+                                            onClick={(e) => { e.stopPropagation(); removeItem(item.id); }}
                                         >
                                             <i className="fas fa-trash-alt"></i>
                                         </button>
@@ -103,7 +148,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart }) => {
 
                                     <div className="row align-items-center g-2">
                                         <div className="col-12 col-md-5 d-flex align-items-center">
-                                            <div className="form-check me-2 me-md-3 mb-0">
+                                            <div className="form-check me-2 me-md-3 mb-0" onClick={(e) => e.stopPropagation()}>
                                                 <input
                                                     className="form-check-input"
                                                     type="checkbox"
@@ -137,10 +182,10 @@ const Cart = ({ cart, updateCartItem, removeFromCart }) => {
 
                                         <div className="col-6 col-md-2 mt-2 mt-md-0">
                                             <div className="ms-4 ms-md-0 ps-3 ps-md-0 d-flex justify-content-start justify-content-md-center">
-                                                <div className="input-group input-group-sm" style={{ width: '90px' }}>
-                                                    <button className="btn btn-outline-secondary px-2" onClick={() => updateQty(item.id, -1)}>-</button>
+                                                <div className="input-group input-group-sm" style={{ width: '90px' }} onClick={(e) => e.stopPropagation()}>
+                                                    <button className="btn btn-outline-secondary px-2" onClick={(e) => { e.stopPropagation(); updateQty(item.id, -1); }}>-</button>
                                                     <input type="text" className="form-control text-center bg-white px-1" value={item.qty} readOnly />
-                                                    <button className="btn btn-outline-secondary px-2" onClick={() => updateQty(item.id, 1)}>+</button>
+                                                    <button className="btn btn-outline-secondary px-2" onClick={(e) => { e.stopPropagation(); updateQty(item.id, 1); }}>+</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -153,7 +198,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart }) => {
                                             <button
                                                 className="btn btn-outline-danger btn-sm rounded-circle d-inline-flex align-items-center justify-content-center"
                                                 style={{ width: '36px', height: '36px' }}
-                                                onClick={() => removeItem(item.id)}
+                                                onClick={(e) => { e.stopPropagation(); removeItem(item.id); }}
                                                 title="Remove item"
                                             >
                                                 <i className="fas fa-trash-alt"></i>

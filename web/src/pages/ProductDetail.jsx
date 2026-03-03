@@ -158,14 +158,14 @@ const ProductDetail = ({ addToCart }) => {
 
     const handleAddToCart = () => {
         for (let i = 0; i < quantity; i++) {
-            addToCart(product.name, product.price, product.image, product.id);
+            addToCart(product.name, product.price, product.image, product.id, product.stock_quantity || product.stock);
         }
         navigate('/cart');
     };
 
     const handleBuyNow = () => {
         for (let i = 0; i < quantity; i++) {
-            addToCart(product.name, product.price, product.image, product.id);
+            addToCart(product.name, product.price, product.image, product.id, product.stock_quantity || product.stock);
         }
         navigate('/checkout');
     };

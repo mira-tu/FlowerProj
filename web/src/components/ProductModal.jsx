@@ -7,10 +7,11 @@ const ProductModal = ({ product, onClose, onAddToCart }) => {
     return null;
   }
 
-  const increase = () => setQuantity((prev) => prev + 1);
+  const increase = () => setQuantity((prev) => (product.stock_quantity ? Math.min(prev + 1, product.stock_quantity) : prev + 1));
   const decrease = () => setQuantity((prev) => (prev > 1 ? prev - 1 : 1));
 
   const handleAdd = () => {
+    // onAddToCart receives the product object which already contains stock_quantity.
     for (let i = 0; i < quantity; i += 1) {
       onAddToCart(product);
     }

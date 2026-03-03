@@ -74,7 +74,7 @@ const Home = ({ addToCart, products, categories }) => {
         if (product.is_active === false) {
             return;
         }
-        addToCart(product.name, product.price, product.image_url, product.id);
+        addToCart(product.name, product.price, product.image_url, product.id, product.stock_quantity);
         setShowCartPopup(true);
         setTimeout(() => setShowCartPopup(false), 2000);
     };

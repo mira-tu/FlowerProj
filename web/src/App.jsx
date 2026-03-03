@@ -216,27 +216,38 @@ function AppContent() {
     localStorage.setItem('cart', JSON.stringify(cart));
   }, [cart]);
 
-  const addToCart = (name, price, image, productId) => {
+  const addToCart = (name, price, image, productId, stockQuantity) => {
     // Always use localStorage for cart operations
     setCart(prevCart => {
       const existingItem = prevCart.find(item => (productId && item.productId === productId) || item.name === name);
       if (existingItem) {
-        return prevCart.map(item =>
-          ((productId && item.productId === productId) || item.name === name)
-            ? { ...item, qty: (item.qty || 0) + 1 }
-            : item
-        );
+        return prevCart.map(item => {
+          if ((productId && item.productId === productId) || item.name === name) {
+            const newQty = (item.qty || 0) + 1;
+            // Cap quantity at stock limit
+            const finalQty = stockQuantity ? Math.min(newQty, stockQuantity) : newQty;
+            if (stockQuantity && newQty > stockQuantity) {
+              alert(`Only ${stockQuantity} items in stock for ${name}`);
+            }
+            return { ...item, qty: finalQty, stockQuantity: stockQuantity || item.stockQuantity };
+          }
+          return item;
+        });
       } else {
-        return [...prevCart, { name, price, image, qty: 1, productId, id: productId || `local-${Date.now()}` }];
+        return [...prevCart, { name, price, image, qty: 1, productId, id: productId || `local-${Date.now()}`, stockQuantity }];
       }
     });
   };
 
   const updateCartItem = (itemId, quantity) => {
     // Always use localStorage for cart operations
-    setCart(prevCart => prevCart.map(item =>
-      (item.id === itemId || item.productId === itemId) ? { ...item, qty: quantity } : item
-    ));
+    setCart(prevCart => prevCart.map(item => {
+      if (item.id === itemId || item.productId === itemId) {
+        const finalQty = item.stockQuantity ? Math.min(quantity, item.stockQuantity) : quantity;
+        return { ...item, qty: finalQty };
+      }
+      return item;
+    }));
   };
 
   const removeFromCart = (itemId) => {
