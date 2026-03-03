@@ -14,22 +14,58 @@ const flowerOptions = [
     { value: 'Orchids', label: 'Orchids' },
     { value: 'Carnations', label: 'Carnations' },
     { value: 'Mixed Flowers', label: 'Mixed Flowers' },
-    { value: 'Custom Selection', label: 'Custom Selection' }
+    { value: 'Others', label: 'Others' }
 ];
+
+const colorOptions = [
+    { value: 'Pastel Pinks and Whites', label: 'Pastel Pinks and Whites', colors: ['#ffc0cb', '#ffffff'] },
+    { value: 'Rustic Autumn Colors', label: 'Rustic Autumn Colors', colors: ['#d2691e', '#8b4513', '#cd853f'] },
+    { value: 'Classic Red and White', label: 'Classic Red and White', colors: ['#ff0000', '#ffffff'] },
+    { value: 'All White / Elegant', label: 'All White / Elegant', colors: ['#ffffff', '#f5f5f5'] },
+    { value: 'Vibrant / Colorful', label: 'Vibrant / Colorful', colors: ['#ff0000', '#ffff00', '#0000ff'] },
+    { value: 'Soft Blues and Purples', label: 'Soft Blues and Purples', colors: ['#add8e6', '#800080'] },
+    { value: 'Others', label: 'Others', colors: [] }
+];
+
+const customColorOptionLabel = ({ label, colors }) => (
+    <div style={{ display: 'flex', alignItems: 'center' }}>
+        {colors && colors.length > 0 && (
+            <div style={{ display: 'flex', marginRight: '10px' }}>
+                {colors.map((color, index) => (
+                    <div
+                        key={index}
+                        style={{
+                            width: '15px',
+                            height: '15px',
+                            backgroundColor: color,
+                            borderRadius: '50%',
+                            marginLeft: index > 0 ? '-5px' : '0',
+                            border: '1px solid #ccc'
+                        }}
+                    ></div>
+                ))}
+            </div>
+        )}
+        <span>{label}</span>
+    </div>
+);
 
 const BookEvent = ({ user }) => {
     const [formData, setFormData] = useState({
         customerName: user?.user_metadata?.full_name || '',
         email: user?.email || '',
         contactNumber: formatPhoneNumber(user?.user_metadata?.phone || ''),
-        recipientName: '',
+        recipientName: user?.user_metadata?.full_name || '',
         occasion: '',
         otherOccasion: '',
+        otherArrangementType: '',
+        otherFlowersText: '',
+        colorPreference: '',
+        otherColorPreference: '',
         eventDate: '',
         eventTime: '',
         venue: '',
         selectedFlowers: [],
-        colorPreference: '',
         arrangementType: '',
         specialInstructions: '',
         inspirationFile: null
@@ -39,10 +75,28 @@ const BookEvent = ({ user }) => {
     const [fileSizeError, setFileSizeError] = useState('');
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [dateError, setDateError] = useState('');
+    const [timeError, setTimeError] = useState('');
 
     const navigate = useNavigate();
 
     const fileInputRef = useRef(null);
+
+    useEffect(() => {
+        if (user) {
+            const userName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || '';
+            const userEmail = user?.email || '';
+            const userPhone = formatPhoneNumber(user?.user_metadata?.phone || '');
+
+            setFormData(prev => ({
+                ...prev,
+                customerName: prev.customerName === '' ? userName : prev.customerName,
+                email: prev.email === '' ? userEmail : prev.email,
+                contactNumber: prev.contactNumber === '' ? userPhone : prev.contactNumber,
+                recipientName: prev.recipientName === '' ? userName : prev.recipientName
+            }));
+        }
+    }, [user]);
 
     // Prevent past dates
     const minEventDate = useMemo(() => {
@@ -73,6 +127,10 @@ const BookEvent = ({ user }) => {
         setFormData(prev => ({ ...prev, selectedFlowers: selectedOptions || [] }));
     };
 
+    const handleColorSelect = (selectedOption) => {
+        setFormData(prev => ({ ...prev, colorPreference: selectedOption ? selectedOption.value : '' }));
+    };
+
     const handleFileChange = (e) => {
         const file = e.target.files[0];
         setFileSizeError('');
@@ -92,9 +150,31 @@ const BookEvent = ({ user }) => {
 
             setFormData(prev => ({ ...prev, inspirationFile: file }));
 
+            // Compress image before storing as base64 to avoid localStorage quota issues
             const reader = new FileReader();
             reader.onloadend = () => {
-                setImagePreview(reader.result);
+                const img = new Image();
+                img.onload = () => {
+                    const MAX_WIDTH = 800;
+                    const MAX_HEIGHT = 800;
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > MAX_WIDTH || height > MAX_HEIGHT) {
+                        const ratio = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height);
+                        width = Math.round(width * ratio);
+                        height = Math.round(height * ratio);
+                    }
+
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
+                    setImagePreview(compressedBase64);
+                };
+                img.src = reader.result;
             };
             reader.readAsDataURL(file);
         }
@@ -111,7 +191,7 @@ const BookEvent = ({ user }) => {
         e.preventDefault();
 
         // Basic required checks (HTML5 usually catches these but good to be safe)
-        if (!formData.customerName || !formData.contactNumber || !formData.occasion || !formData.eventDate || !formData.venue || !formData.arrangementType) {
+        if (!formData.customerName || !formData.contactNumber || !formData.occasion || !formData.eventDate || !formData.venue || !formData.arrangementType || !formData.recipientName) {
             alert('Please fill in all required fields marked with *');
             return;
         }
@@ -134,9 +214,9 @@ const BookEvent = ({ user }) => {
             eventDate: formData.eventDate,
             eventTime: formData.eventTime,
             venue: formData.venue,
-            arrangementType: formData.arrangementType,
-            flowers: formData.selectedFlowers.map(f => f.label).join(', '),
-            colorPreference: formData.colorPreference,
+            arrangementType: formData.arrangementType === 'Other' ? formData.otherArrangementType : formData.arrangementType,
+            flowers: formData.selectedFlowers.map(f => f.label).join(', ') + (formData.otherFlowersText ? ` (${formData.otherFlowersText})` : ''),
+            colorPreference: formData.colorPreference === 'Others' ? formData.otherColorPreference : formData.colorPreference,
             specialInstructions: formData.specialInstructions,
             inspirationImageBase64: imagePreview,
             price: null
@@ -154,12 +234,22 @@ const BookEvent = ({ user }) => {
         }
 
         currentCart.push(newCartItem);
-        localStorage.setItem('bookingCart', JSON.stringify(currentCart));
+        // Prevent Local Storage Quota Limit by keeping only the 5 most recent Custom Booking drafts
+        if (currentCart.length > 5) {
+            currentCart = currentCart.slice(-5);
+        }
+
+        try {
+            localStorage.setItem('bookingCart', JSON.stringify(currentCart));
+        } catch (e) {
+            console.error("Quota Exceeded! Resetting tracking cart forcefully", e);
+            localStorage.setItem('bookingCart', JSON.stringify([newCartItem])); // Reset with newest item only
+        }
 
         // 3. Clear modal and navigate
         setShowConfirmModal(false);
         setIsSubmitting(false);
-        navigate('/booking-cart');
+        navigate('/cart');
     };
 
     return (
@@ -200,8 +290,8 @@ const BookEvent = ({ user }) => {
                                             <input type="tel" name="contactNumber" className="form-control bg-light border-0 py-3" placeholder="e.g., 0917 123 4567" value={formData.contactNumber} onChange={handleChange} required />
                                         </div>
                                         <div className="col-md-6">
-                                            <label className="form-label fw-semibold">Recipient Name (If different)</label>
-                                            <input type="text" name="recipientName" className="form-control bg-light border-0 py-3" value={formData.recipientName} onChange={handleChange} placeholder="Leave blank if for yourself" />
+                                            <label className="form-label fw-semibold">Recipient Full Name <span className="text-danger">*</span></label>
+                                            <input type="text" name="recipientName" className="form-control bg-light border-0 py-3" value={formData.recipientName} onChange={handleChange} placeholder="Who will receive this order?" required />
                                         </div>
                                     </div>
 
@@ -239,12 +329,61 @@ const BookEvent = ({ user }) => {
 
                                         <div className="col-md-6">
                                             <label className="form-label fw-semibold">Date Needed <span className="text-danger">*</span></label>
-                                            <input type="date" name="eventDate" className="form-control bg-light border-0 py-3" min={minEventDate} value={formData.eventDate} onChange={handleChange} required />
+                                            <input
+                                                type="date"
+                                                name="eventDate"
+                                                className={`form-control bg-light border-0 py-3 ${dateError ? 'is-invalid border-danger border-1' : ''}`}
+                                                min={minEventDate}
+                                                value={formData.eventDate}
+                                                onChange={(e) => {
+                                                    const date = new Date(e.target.value);
+                                                    const day = date.getUTCDay();
+                                                    // 0 is Sunday, 6 is Saturday
+                                                    if (day === 0 || day === 6) {
+                                                        setDateError("Deliveries are only available on Weekdays (Monday to Friday).");
+                                                    } else {
+                                                        setDateError('');
+                                                    }
+                                                    handleChange(e);
+                                                }}
+                                                required
+                                            />
+                                            {dateError ? (
+                                                <div className="invalid-feedback d-block">{dateError}</div>
+                                            ) : (
+                                                <div className="form-text small">Available Monday - Friday only.</div>
+                                            )}
                                         </div>
 
                                         <div className="col-md-6">
                                             <label className="form-label fw-semibold">Preferred Time</label>
-                                            <input type="time" name="eventTime" className="form-control bg-light border-0 py-3" value={formData.eventTime} onChange={handleChange} />
+                                            <input
+                                                type="time"
+                                                name="eventTime"
+                                                className={`form-control bg-light border-0 py-3 ${timeError ? 'is-invalid border-danger border-1' : ''}`}
+                                                value={formData.eventTime}
+                                                min="09:00"
+                                                max="16:00"
+                                                onChange={(e) => {
+                                                    const timeStr = e.target.value;
+                                                    if (timeStr) {
+                                                        const [hours, mins] = timeStr.split(':').map(Number);
+                                                        if (hours < 9 || hours > 16 || (hours === 16 && mins > 0)) {
+                                                            setTimeError("Our operating hours are from 9:00 AM to 4:00 PM.");
+                                                        } else {
+                                                            setTimeError('');
+                                                        }
+                                                    } else {
+                                                        setTimeError('');
+                                                    }
+                                                    handleChange(e);
+                                                }}
+                                            />
+                                            {timeError ? (
+                                                <div className="invalid-feedback d-block">{timeError}</div>
+                                            ) : (
+                                                <div className="form-text small">Business hours: 9:00 AM - 4:00 PM.</div>
+                                            )}
                                         </div>
                                     </div>
 
@@ -267,7 +406,11 @@ const BookEvent = ({ user }) => {
                                                 <option value="Stage Decoration">Stage Decoration</option>
                                                 <option value="Car Decoration">Bridal Car Decoration</option>
                                                 <option value="Full Event Styling">Full Event Styling</option>
+                                                <option value="Other">Others</option>
                                             </select>
+                                            {formData.arrangementType === 'Other' && (
+                                                <input type="text" name="otherArrangementType" className="form-control bg-light border-0 py-3 mt-2" placeholder="Please specify arrangement type" value={formData.otherArrangementType} onChange={handleChange} required />
+                                            )}
                                         </div>
 
                                         <div className="col-md-6">
@@ -288,16 +431,38 @@ const BookEvent = ({ user }) => {
                                                     })
                                                 }}
                                             />
+                                            {formData.selectedFlowers.some(f => f.value === 'Others') && (
+                                                <input type="text" name="otherFlowersText" className="form-control bg-light border-0 py-3 mt-2" placeholder="Please specify flowers (e.g., Peonies, Baby's Breath)" value={formData.otherFlowersText} onChange={handleChange} required />
+                                            )}
                                         </div>
 
                                         <div className="col-12 mt-3">
                                             <label className="form-label fw-semibold">Color Palette & Theme Preference</label>
-                                            <input type="text" name="colorPreference" className="form-control bg-light border-0 py-3" placeholder="e.g., Pastel Pinks and Whites, Rustic Autumn Colors" value={formData.colorPreference} onChange={handleChange} />
+                                            <Select
+                                                options={colorOptions}
+                                                formatOptionLabel={customColorOptionLabel}
+                                                placeholder="Select Color Theme (Optional)"
+                                                onChange={handleColorSelect}
+                                                value={colorOptions.find(option => option.value === formData.colorPreference) || null}
+                                                isClearable
+                                                styles={{
+                                                    control: (base) => ({
+                                                        ...base,
+                                                        border: '0',
+                                                        backgroundColor: '#f8f9fa',
+                                                        padding: '6px',
+                                                        borderRadius: '8px'
+                                                    })
+                                                }}
+                                            />
+                                            {formData.colorPreference === 'Others' && (
+                                                <input type="text" name="otherColorPreference" className="form-control bg-light border-0 py-3 mt-2" placeholder="Please specify your color preference" value={formData.otherColorPreference} onChange={handleChange} required />
+                                            )}
                                         </div>
 
                                         <div className="col-12 mt-4">
-                                            <label className="form-label fw-semibold">Special Instructions & Message Card</label>
-                                            <textarea name="specialInstructions" className="form-control bg-light border-0 py-3" rows="5" placeholder="Include any specific details, themes, motifs, or what you want written on the message card..." value={formData.specialInstructions} onChange={handleChange}></textarea>
+                                            <label className="form-label fw-semibold">Special Instructions</label>
+                                            <textarea name="specialInstructions" className="form-control bg-light border-0 py-3" rows="5" placeholder="Include any specific directions, themes, budgets, or other details you'd like us to know..." value={formData.specialInstructions} onChange={handleChange}></textarea>
                                         </div>
 
                                         <div className="col-12 mt-4">
@@ -321,7 +486,12 @@ const BookEvent = ({ user }) => {
                                     </div>
 
                                     <div className="mt-5 pt-4 text-center">
-                                        <button type="submit" className="btn btn-pink rounded-pill px-5 py-3 fw-bold fs-5 shadow-sm text-white" style={{ minWidth: '250px' }}>
+                                        <button
+                                            type="submit"
+                                            className="btn btn-pink rounded-pill px-5 py-3 fw-bold fs-5 shadow-sm text-white"
+                                            style={{ minWidth: '250px' }}
+                                            disabled={!!dateError || !!timeError}
+                                        >
                                             Review Request <i className="fas fa-arrow-right ms-2"></i>
                                         </button>
                                     </div>
@@ -344,23 +514,76 @@ const BookEvent = ({ user }) => {
                             <p className="text-muted">Please verify your details before submitting.</p>
                         </div>
 
-                        <div className="bg-light rounded p-3 mb-4 small">
+                        <div className="bg-light rounded p-3 mb-4 small" style={{ maxHeight: '400px', overflowY: 'auto' }}>
                             <div className="d-flex justify-content-between mb-2">
-                                <span className="text-muted">Name:</span>
+                                <span className="text-muted">Your Name:</span>
                                 <span className="fw-semibold text-end">{formData.customerName}</span>
                             </div>
+                            <div className="d-flex justify-content-between mb-2">
+                                <span className="text-muted">Email:</span>
+                                <span className="fw-semibold text-end">{formData.email}</span>
+                            </div>
+                            <div className="d-flex justify-content-between mb-2">
+                                <span className="text-muted">Contact:</span>
+                                <span className="fw-semibold text-end">{formData.contactNumber}</span>
+                            </div>
+                            <div className="d-flex justify-content-between mb-2">
+                                <span className="text-muted">Recipient:</span>
+                                <span className="fw-semibold text-end">{formData.recipientName || '—'}</span>
+                            </div>
+                            <hr className="my-2" />
                             <div className="d-flex justify-content-between mb-2">
                                 <span className="text-muted">Occasion:</span>
                                 <span className="fw-semibold text-end">{formData.occasion === 'Other' ? formData.otherOccasion : formData.occasion}</span>
                             </div>
                             <div className="d-flex justify-content-between mb-2">
-                                <span className="text-muted">Type:</span>
-                                <span className="fw-semibold text-end">{formData.arrangementType}</span>
+                                <span className="text-muted">Venue:</span>
+                                <span className="fw-semibold text-end" style={{ maxWidth: '60%' }}>{formData.venue}</span>
                             </div>
-                            <div className="d-flex justify-content-between">
+                            <div className="d-flex justify-content-between mb-2">
                                 <span className="text-muted">Date Needed:</span>
                                 <span className="fw-semibold text-end">{formData.eventDate}</span>
                             </div>
+                            {formData.eventTime && (
+                                <div className="d-flex justify-content-between mb-2">
+                                    <span className="text-muted">Preferred Time:</span>
+                                    <span className="fw-semibold text-end">{formData.eventTime}</span>
+                                </div>
+                            )}
+                            <hr className="my-2" />
+                            <div className="d-flex justify-content-between mb-2">
+                                <span className="text-muted">Arrangement:</span>
+                                <span className="fw-semibold text-end">{formData.arrangementType === 'Other' ? formData.otherArrangementType : formData.arrangementType}</span>
+                            </div>
+                            {formData.selectedFlowers.length > 0 && (
+                                <div className="d-flex justify-content-between mb-2">
+                                    <span className="text-muted">Flowers:</span>
+                                    <span className="fw-semibold text-end" style={{ maxWidth: '60%' }}>
+                                        {formData.selectedFlowers.map(f => f.label).join(', ')}
+                                        {formData.otherFlowersText ? ` (${formData.otherFlowersText})` : ''}
+                                    </span>
+                                </div>
+                            )}
+                            {formData.colorPreference && (
+                                <div className="d-flex justify-content-between mb-2">
+                                    <span className="text-muted">Color Theme:</span>
+                                    <span className="fw-semibold text-end" style={{ maxWidth: '60%' }}>
+                                        {formData.colorPreference === 'Others' ? formData.otherColorPreference : formData.colorPreference}
+                                    </span>
+                                </div>
+                            )}
+                            {formData.specialInstructions && (
+                                <div className="mb-2">
+                                    <span className="text-muted d-block mb-1">Special Instructions:</span>
+                                    <span className="fw-semibold" style={{ whiteSpace: 'pre-line' }}>{formData.specialInstructions}</span>
+                                </div>
+                            )}
+                            {imagePreview && (
+                                <div className="mt-2 text-center">
+                                    <span className="text-muted d-block mb-1">Inspiration Photo:</span>
+                                    <img src={imagePreview} alt="Inspiration" className="rounded-3 border" style={{ maxHeight: '120px', maxWidth: '100%', objectFit: 'cover' }} />
+                                </div>
+                            )}
                         </div>
 
                         <div className="d-flex gap-3">
