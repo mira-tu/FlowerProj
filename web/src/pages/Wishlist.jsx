@@ -4,10 +4,29 @@ import '../styles/Shop.css';
 
 import { wishlistAPI } from '../config/api';
 
-const Wishlist = ({ cart, addToCart }) => {
+const Wishlist = ({ cart, addToCart, products = [] }) => {
     const [wishlistItems, setWishlistItems] = useState([]);
     const [showPopup, setShowPopup] = useState(false);
     const isLoggedIn = !!localStorage.getItem('token');
+
+    // Filter local storage wishlist against active products
+    const filterAndSetWishlist = (rawWishlist) => {
+        if (!products || products.length === 0) {
+            setWishlistItems(rawWishlist); // fallback if products not loaded yet
+            return;
+        }
+
+        const validWishlist = rawWishlist.filter(item => {
+            return products.some(p => p.id === item.product_id || p.id === item.id || p.name === item.name);
+        });
+
+        // Optionally update storage to clean it up automatically
+        if (validWishlist.length !== rawWishlist.length && rawWishlist.length > 0) {
+            localStorage.setItem('wishlist', JSON.stringify(validWishlist));
+        }
+
+        setWishlistItems(validWishlist);
+    };
 
     useEffect(() => {
         if (isLoggedIn) {
@@ -16,19 +35,19 @@ const Wishlist = ({ cart, addToCart }) => {
             const savedWishlist = localStorage.getItem('wishlist');
             if (savedWishlist) {
                 try {
-                    setWishlistItems(JSON.parse(savedWishlist));
+                    filterAndSetWishlist(JSON.parse(savedWishlist));
                 } catch (e) {
                     console.error('Error parsing wishlist:', e);
                 }
             }
         }
-    }, [isLoggedIn]);
+    }, [isLoggedIn, products]); // Re-run when products load
 
     const fetchWishlist = async () => {
         try {
             const response = await wishlistAPI.getAll();
             if (response.data.success) {
-                setWishlistItems(response.data.wishlist);
+                filterAndSetWishlist(response.data.wishlist);
             }
         } catch (error) {
             console.error('Error fetching wishlist:', error);

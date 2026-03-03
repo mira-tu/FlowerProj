@@ -136,6 +136,20 @@ function AppContent() {
           }));
           const sortedProducts = productsWithCategories.sort((a, b) => b.id - a.id);
           setProducts(sortedProducts);
+
+          // Clean up strictly deleted/inactive products from the user's cart
+          setCart(prevCart => {
+            const activeCart = prevCart.filter(cartItem =>
+              sortedProducts.some(p =>
+                String(p.id) === String(cartItem.productId || cartItem.id) ||
+                p.name === cartItem.name
+              )
+            );
+            if (activeCart.length !== prevCart.length) {
+              localStorage.setItem('cart', JSON.stringify(activeCart));
+            }
+            return activeCart;
+          });
         }
       } catch (err) {
         // Catch any unexpected thrown errors (network timeouts, etc.)
@@ -287,7 +301,7 @@ function AppContent() {
         <Route path="/" element={<Home addToCart={addToCart} products={products} categories={categories} />} />
         <Route path="/about" element={<About />} />
         <Route path="/contact" element={<Contact />} />
-        <Route path="/wishlist" element={<Wishlist cart={cart} addToCart={addToCart} />} />
+        <Route path="/wishlist" element={<Wishlist cart={cart} addToCart={addToCart} products={products} />} />
         <Route path="/cart" element={<Cart cart={cart} updateCartItem={updateCartItem} removeFromCart={removeFromCart} />} />
         <Route path="/customized-cart" element={<CustomizedCart user={user} />} />
         <Route path="/customized-checkout" element={<CustomizedCheckout user={user} />} />
