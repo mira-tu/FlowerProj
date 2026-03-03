@@ -6,7 +6,7 @@ import '../styles/About.css';
 const About = () => {
     const [aboutData, setAboutData] = useState({
         story: "Jocery's Flower Shop was born from a love for flowers and a desire to make every occasion feel special.",
-        about_description: "We are a local flower shop in Quezon City, offering fresh floral arrangements through a simple and convenient online store.",
+        about_description: "We are a local flower shop in Zamboanga City, offering fresh floral arrangements through a simple and convenient online store.",
         promise: "We promise thoughtfully crafted arrangements, reliable service, and flowers that help you celebrate life’s most meaningful moments.",
         ownerQuote: "Where flowers bloom, hope takes root.",
         ownerImage: "https://via.placeholder.com/150",
@@ -123,7 +123,13 @@ const About = () => {
                     <div className="row align-items-center g-5">
                         <div className="col-lg-6">
                             <div className="story-image-wrapper">
-                                <img src={aboutData.ourShopImage || "https://via.placeholder.com/600x400"} alt="Our Shop" className="story-img shadow-lg" />
+                                <img
+                                    src={aboutData.ourShopImage || "https://via.placeholder.com/600x400"}
+                                    alt="Our Shop"
+                                    className="story-img shadow-lg"
+                                    loading="lazy"
+                                    decoding="async"
+                                />
                             </div>
                         </div>
                         <div className="col-lg-6">
@@ -160,6 +166,8 @@ const About = () => {
                                             src={aboutData.customBouquetsImage || "https://via.placeholder.com/400x300"}
                                             className="w-100 h-100 object-fit-cover"
                                             alt="Customized Bouquets"
+                                            loading="lazy"
+                                            decoding="async"
                                         />
                                     </Link>
                                 </div>
@@ -181,6 +189,8 @@ const About = () => {
                                             src={aboutData.eventDecorationsImage || "https://via.placeholder.com/400x300"}
                                             className="w-100 h-100 object-fit-cover"
                                             alt="Custom Order"
+                                            loading="lazy"
+                                            decoding="async"
                                         />
                                     </Link>
                                 </div>
@@ -203,7 +213,7 @@ const About = () => {
                         <div className="col-md-4">
                             <div className="promise-card">
                                 {aboutData.promises_responsibly_sourced_image && (
-                                    <img src={aboutData.promises_responsibly_sourced_image} alt="Responsibly Sourced" className="promise-img" />
+                                    <img src={aboutData.promises_responsibly_sourced_image} alt="Responsibly Sourced" className="promise-img" loading="lazy" decoding="async" />
                                 )}
                                 <h3>Responsibly Sourced</h3>
                                 <p className="text-muted">{aboutData.promises_responsibly_sourced_description}</p>
@@ -212,7 +222,7 @@ const About = () => {
                         <div className="col-md-4">
                             <div className="promise-card">
                                 {aboutData.promises_crafted_by_experts_image && (
-                                    <img src={aboutData.promises_crafted_by_experts_image} alt="Crafted by Experts" className="promise-img" />
+                                    <img src={aboutData.promises_crafted_by_experts_image} alt="Crafted by Experts" className="promise-img" loading="lazy" decoding="async" />
                                 )}
                                 <h3>Crafted by Experts</h3>
                                 <p className="text-muted">{aboutData.promises_crafted_by_experts_description}</p>
@@ -221,7 +231,7 @@ const About = () => {
                         <div className="col-md-4">
                             <div className="promise-card">
                                 {aboutData.promises_caring_for_moments_image && (
-                                    <img src={aboutData.promises_caring_for_moments_image} alt="Caring for Moments" className="promise-img" />
+                                    <img src={aboutData.promises_caring_for_moments_image} alt="Caring for Moments" className="promise-img" loading="lazy" decoding="async" />
                                 )}
                                 <h3>Caring for Moments</h3>
                                 <p className="text-muted">{aboutData.promises_caring_for_moments_description}</p>
@@ -239,6 +249,8 @@ const About = () => {
                         src={aboutData.ownerImage || 'https://via.placeholder.com/150'}
                         alt="Owner"
                         className="owner-img shadow"
+                        loading="lazy"
+                        decoding="async"
                         onError={(e) => e.target.src = 'https://via.placeholder.com/150'}
                     />
                     <figure className="text-center">
