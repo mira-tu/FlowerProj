@@ -329,6 +329,7 @@ const StockTab = () => {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#ec4899" />
+        <Text style={styles.loadingText}>Loading stock...</Text>
       </View>
     );
   }

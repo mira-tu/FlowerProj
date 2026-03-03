@@ -167,7 +167,10 @@ const DeliveryFeesTab = () => {
             </View>
 
             {loading ? (
-                <ActivityIndicator size="large" color="#ec4899" style={{ marginTop: 50 }} />
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color="#ec4899" />
+                    <Text style={styles.loadingText}>Loading delivery fees...</Text>
+                </View>
             ) : (
                 <FlatList
                     data={filteredBarangays}

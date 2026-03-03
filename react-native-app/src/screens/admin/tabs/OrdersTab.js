@@ -12,11 +12,12 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Switch,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
-import { adminAPI } from '../../../config/api';
+import { adminAPI, BASE_URL } from '../../../config/api';
 import { supabase } from '../../../config/supabase';
 import styles from '../../AdminDashboard.styles';
 import { formatTimestamp, getPaymentStatusDisplay, getStatusLabel } from '../adminHelpers';
@@ -410,7 +411,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
             <Text style={styles.eoLabel}>Order ID</Text>
             <Text style={styles.eoOrderId}>#{item.order_number}</Text>
             <View style={[styles.eoDeliveryTypeBadge, { backgroundColor: item.delivery_method === 'delivery' ? '#3B82F6' : '#10B981' }]}>
-              <Ionicons name={item.delivery_method === 'delivery' ? 'rocket-outline' : 'storefront-outline'} size={12} color="#fff" />
+              <Ionicons name={item.delivery_method === 'delivery' ? 'rocket-outline' : 'business-outline'} size={12} color="#fff" />
               <Text style={styles.eoDeliveryTypeBadgeText}>
                 {item.delivery_method === 'delivery' ? 'Delivery' : 'Pick-up'}
               </Text>
@@ -462,7 +463,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.eoIconBtnBlue}
-                onPress={() => onMessageCustomer(item.users.id, item.users.name, item.users.email)}
+                onPress={() => onMessageCustomer(item.users?.id, item.users?.name, item.users?.email)}
               >
                 <Ionicons name="chatbubble" size={20} color="#fff" />
               </TouchableOpacity>
@@ -753,6 +754,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#ec4899" />
+        <Text style={styles.loadingText}>Loading orders...</Text>
       </View>
     );
   }

@@ -813,6 +813,15 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     );
   };
 
+  if (loading && !refreshing) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#ec4899" />
+        <Text style={styles.loadingText}>Loading requests...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.tabContent}>
       <Text style={styles.tabTitle}>Booking & Custom Requests</Text>

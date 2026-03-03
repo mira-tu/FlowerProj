@@ -195,7 +195,12 @@ const MessagingTab = ({ customerToMessage, setCustomerToMessage }) => {
                     <Text style={styles.chatHeaderTitle}>{selectedConversation.user.name}</Text>
                     <View style={{ width: 24 }} />
                 </View>
-                {loading && messages.length === 0 ? (<ActivityIndicator style={{ marginTop: 20 }} size="large" color="#ec4899" />) : (
+                {loading && messages.length === 0 ? (
+                    <View style={styles.loadingContainer}>
+                        <ActivityIndicator size="large" color="#ec4899" />
+                        <Text style={styles.loadingText}>Loading messages...</Text>
+                    </View>
+                ) : (
                     <FlatList
                         ref={flatListRef} data={messages} renderItem={renderMessageItem} keyExtractor={(item) => item.id.toString()}
                         style={styles.chatMessagesContainer} contentContainerStyle={{ padding: 10 }}
@@ -214,7 +219,12 @@ const MessagingTab = ({ customerToMessage, setCustomerToMessage }) => {
     return (
         <View style={styles.tabContent}>
             <Text style={styles.tabTitle}>Conversations</Text>
-            {loading && !conversations.length ? (<ActivityIndicator style={{ marginTop: 20 }} size="large" color="#ec4899" />) : (
+            {loading && !conversations.length ? (
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color="#ec4899" />
+                    <Text style={styles.loadingText}>Loading conversations...</Text>
+                </View>
+            ) : (
                 <FlatList
                     data={conversations} renderItem={renderConversationItem} keyExtractor={(item) => item.user?.id?.toString()}
                     onRefresh={() => fetchConversations(currentUser)} refreshing={loading}

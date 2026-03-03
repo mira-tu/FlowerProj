@@ -403,6 +403,7 @@ const SalesTab = () => {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#ec4899" />
+        <Text style={styles.loadingText}>Loading sales data...</Text>
       </View>
     );
   }

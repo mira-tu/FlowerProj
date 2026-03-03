@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  ScrollView,
-  Text,
-  TextInput,
-  TouchableOpacity,
+    ActivityIndicator,
+    Alert,
+    ScrollView,
+    Text,
+    TextInput,
+    TouchableOpacity,
 } from 'react-native';
 import { supabase } from '../../../config/supabase';
 import styles from '../../AdminDashboard.styles';
@@ -60,29 +60,29 @@ const ContactTab = () => {
             ];
 
             const { data: existingKeysData, error: fetchError } = await supabase
-              .from('app_content')
-              .select('key')
-              .in('key', updates.map(u => u.key));
-            
-            if(fetchError) throw fetchError;
+                .from('app_content')
+                .select('key')
+                .in('key', updates.map(u => u.key));
+
+            if (fetchError) throw fetchError;
 
             const existingKeys = existingKeysData.map(item => item.key);
             const toUpdate = updates.filter(u => existingKeys.includes(u.key));
             const toInsert = updates.filter(u => !existingKeys.includes(u.key) && u.value);
 
             if (toUpdate.length > 0) {
-              for (const item of toUpdate) {
-                const { error } = await supabase
-                  .from('app_content')
-                  .update({ value: item.value, updated_at: new Date().toISOString() })
-                  .eq('key', item.key);
-                if (error) throw new Error(`Failed to update ${item.key}: ${error.message}`);
-              }
+                for (const item of toUpdate) {
+                    const { error } = await supabase
+                        .from('app_content')
+                        .update({ value: item.value, updated_at: new Date().toISOString() })
+                        .eq('key', item.key);
+                    if (error) throw new Error(`Failed to update ${item.key}: ${error.message}`);
+                }
             }
 
             if (toInsert.length > 0) {
-              const { error } = await supabase.from('app_content').insert(toInsert);
-              if (error) throw new Error(`Failed to insert new keys: ${error.message}`);
+                const { error } = await supabase.from('app_content').insert(toInsert);
+                if (error) throw new Error(`Failed to insert new keys: ${error.message}`);
             }
 
             Alert.alert('Success', 'Contact information has been updated.');
@@ -94,13 +94,18 @@ const ContactTab = () => {
     };
 
     if (loading) {
-        return <ActivityIndicator style={{ marginTop: 20 }} size="large" color="#ec4899" />;
+        return (
+            <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#ec4899" />
+                <Text style={styles.loadingText}>Loading contact info...</Text>
+            </View>
+        );
     }
 
     return (
         <ScrollView style={styles.tabContent} keyboardShouldPersistTaps="handled">
             <Text style={styles.tabTitle}>Contact Page Settings</Text>
-            
+
             <Text style={styles.inputLabel}>Address</Text>
             <TextInput
                 style={styles.input}
@@ -108,7 +113,7 @@ const ContactTab = () => {
                 onChangeText={text => setContactInfo(prev => ({ ...prev, address: text }))}
                 placeholder="Shop Address"
             />
-            
+
             <Text style={styles.inputLabel}>Phone Number</Text>
             <TextInput
                 style={styles.input}
@@ -137,7 +142,7 @@ const ContactTab = () => {
                 multiline
             />
 
-            <TouchableOpacity style={[styles.addButton, {alignSelf: 'center', marginTop: 20}]} onPress={handleSave} disabled={isSaving}>
+            <TouchableOpacity style={[styles.addButton, { alignSelf: 'center', marginTop: 20 }]} onPress={handleSave} disabled={isSaving}>
                 <Text style={styles.addButtonText}>{isSaving ? 'Saving...' : 'Save Changes'}</Text>
             </TouchableOpacity>
         </ScrollView>
