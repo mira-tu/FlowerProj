@@ -24,4 +24,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:3000/ || exit 1
 
 # Serve with security headers (CSP, X-Frame-Options, etc.)
-CMD ["sh", "-c", "serve -s dist -l ${PORT} --cors --config ../serve.json"]
+CMD ["sh", "-c", "serve -s dist -l ${PORT} --cors"]
