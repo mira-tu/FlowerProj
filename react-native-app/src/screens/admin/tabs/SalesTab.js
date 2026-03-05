@@ -669,7 +669,7 @@ const SalesTab = () => {
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#333' }}>
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#333', flexShrink: 1 }} numberOfLines={1} ellipsizeMode="middle">
                         #{txn.refNumber}
                       </Text>
                       <View style={{

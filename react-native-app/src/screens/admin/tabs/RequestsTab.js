@@ -649,9 +649,9 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
               <View style={styles.eoAvatar}>
                 <Text style={styles.eoAvatarText}>{getCustomerInitials(item.user_name)}</Text>
               </View>
-              <View>
+              <View style={{ flexShrink: 1 }}>
                 <Text style={styles.eoLabel}>Customer</Text>
-                <Text style={styles.eoCustomerName}>{item.user_name}</Text>
+                <Text style={styles.eoCustomerName} numberOfLines={1}>{item.user_name}</Text>
               </View>
             </View>
             <View style={styles.eoActionButtons}>
