@@ -21,14 +21,15 @@
       }
     },
     "android": {
+      "package": "com.flowerforge.admin",
       "adaptiveIcon": {
         "backgroundColor": "#ec4899"
       },
-      "package": "com.flowerforge.admin",
       "permissions": [
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE"
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {},
@@ -39,7 +40,23 @@
           "photosPermission": "The app accesses your photos to let you select images for products and stock items.",
           "cameraPermission": "The app accesses your camera to let you take photos for products and stock items."
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 34,
+            "targetSdkVersion": 34,
+            "minSdkVersion": 23
+          }
+        }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "dfb3bfbd-931d-414a-9513-5ddb7fc84750"
+      }
+    },
+    "owner": "neneth"
   }
 }
