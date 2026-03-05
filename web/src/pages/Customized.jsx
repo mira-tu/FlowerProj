@@ -322,11 +322,12 @@ const Customized = ({ addToCart }) => {
         qty: 1
       };
 
-      const existingCart = JSON.parse(localStorage.getItem('customizedCart') || '[]');
+      const cartKey = `customizedCart_${session?.user?.id || 'guest'}`;
+      const existingCart = JSON.parse(localStorage.getItem(cartKey) || '[]');
       const updatedCart = [...existingCart, customizedBouquet];
-      localStorage.setItem('customizedCart', JSON.stringify(updatedCart));
+      localStorage.setItem(cartKey, JSON.stringify(updatedCart));
 
-      navigate('/cart');
+      navigate('/cart', { state: { justAdded: 'customized' } });
 
     } catch (error) {
       console.error('Error adding to cart:', error);
@@ -398,11 +399,22 @@ const Customized = ({ addToCart }) => {
             <span className="label">Total</span>
             <span className="amount">{formatPrice(totalPrice)}</span>
           </div>
-          <button type="button" className="btn-action" onClick={handleAddToCart}>Add to Cart</button>
+          <button type="button" className="btn-action header-cart-btn" onClick={handleAddToCart}>Add to Cart</button>
         </div>
       </header>
 
 
+      {/* Mobile floating Add to Cart button */}
+      <div className="mobile-add-to-cart-bar">
+        <div className="mobile-cart-price">
+          <span className="mobile-cart-label">Total</span>
+          <span className="mobile-cart-amount">{formatPrice(totalPrice)}</span>
+        </div>
+        <button type="button" className="mobile-cart-btn" onClick={handleAddToCart}>
+          <i className="fas fa-shopping-cart" style={{ marginRight: '0.5rem' }}></i>
+          Add to Cart
+        </button>
+      </div>
 
       <InfoModal
         show={infoModal.show}

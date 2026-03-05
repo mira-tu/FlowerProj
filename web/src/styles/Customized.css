@@ -579,10 +579,12 @@
         font-size: 1.1rem;
     }
 
-    .customize-page .btn-action {
-        padding: 0.5rem 1rem;
-        font-size: 0.8rem;
-        white-space: nowrap;
+    .customize-page .header-cart-btn {
+        display: none;
+    }
+
+    .customize-page .price-display {
+        display: none;
     }
 
     /* --- LAYOUT: Fill remaining viewport below header --- */
@@ -760,9 +762,12 @@
         font-size: 1rem;
     }
 
-    .customize-page .btn-action {
-        padding: 0.45rem 0.8rem;
-        font-size: 0.75rem;
+    .customize-page .header-cart-btn {
+        display: none;
+    }
+
+    .customize-page .price-display {
+        display: none;
     }
 
     .customize-page .editor-layout {
@@ -938,4 +943,72 @@
 
 .customize-page .custom-stem-input::placeholder {
     color: var(--text-muted);
+}
+
+/* Mobile floating Add to Cart bar — hidden on desktop */
+.customize-page .mobile-add-to-cart-bar {
+    display: none;
+}
+
+@media (max-width: 768px) {
+    .customize-page .mobile-add-to-cart-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 50;
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(12px);
+        border-top: 1px solid var(--border-color);
+        padding: 0.75rem 1rem;
+        box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.1);
+    }
+
+    .customize-page .mobile-cart-price {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .customize-page .mobile-cart-label {
+        font-size: 0.7rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-weight: 600;
+    }
+
+    .customize-page .mobile-cart-amount {
+        font-size: 1.3rem;
+        font-weight: 700;
+        color: var(--primary-color);
+        line-height: 1.2;
+    }
+
+    .customize-page .mobile-cart-btn {
+        background: linear-gradient(135deg, var(--primary-color), #e91e90);
+        color: #fff;
+        border: none;
+        padding: 0.85rem 1.75rem;
+        border-radius: var(--radius-full);
+        font-weight: 700;
+        font-size: 0.95rem;
+        cursor: pointer;
+        box-shadow: 0 4px 16px rgba(214, 51, 132, 0.35);
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        white-space: nowrap;
+    }
+
+    .customize-page .mobile-cart-btn:active {
+        transform: scale(0.96);
+    }
+
+    /* Adjust tools panel to not be hidden behind the floating bar */
+    .customize-page .tools-interface {
+        padding-bottom: 70px;
+    }
 }

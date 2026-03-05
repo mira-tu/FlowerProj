@@ -52,9 +52,14 @@ const Navbar = ({ cartCount, user, logout }) => {
         checkMobile();
         window.addEventListener('resize', checkMobile);
 
-        // Load notifications from localStorage
+        // Load notifications from localStorage scoped to user
         const loadNotifications = () => {
-            const savedNotifications = JSON.parse(localStorage.getItem('notifications') || '[]');
+            if (!user) {
+                setNotifications([]);
+                setUnreadCount(0);
+                return;
+            }
+            const savedNotifications = JSON.parse(localStorage.getItem(`notifications_${user.id}`) || '[]');
             setNotifications(savedNotifications);
             setUnreadCount(savedNotifications.filter(n => !n.read).length);
         };
@@ -89,11 +94,12 @@ const Navbar = ({ cartCount, user, logout }) => {
     }, [showNotifications]);
 
     const handleNotificationClick = (notification) => {
+        if (!user) return;
         // Mark as read
         const updatedNotifications = notifications.map(n =>
             n.id === notification.id ? { ...n, read: true } : n
         );
-        localStorage.setItem('notifications', JSON.stringify(updatedNotifications));
+        localStorage.setItem(`notifications_${user.id}`, JSON.stringify(updatedNotifications));
         setNotifications(updatedNotifications);
         setUnreadCount(updatedNotifications.filter(n => !n.read).length);
 
@@ -105,14 +111,16 @@ const Navbar = ({ cartCount, user, logout }) => {
     };
 
     const markAllAsRead = () => {
+        if (!user) return;
         const updatedNotifications = notifications.map(n => ({ ...n, read: true }));
-        localStorage.setItem('notifications', JSON.stringify(updatedNotifications));
+        localStorage.setItem(`notifications_${user.id}`, JSON.stringify(updatedNotifications));
         setNotifications(updatedNotifications);
         setUnreadCount(0);
     };
 
     const clearAllNotifications = () => {
-        localStorage.setItem('notifications', JSON.stringify([]));
+        if (!user) return;
+        localStorage.setItem(`notifications_${user.id}`, JSON.stringify([]));
         setNotifications([]);
         setUnreadCount(0);
     };
@@ -175,12 +183,12 @@ const Navbar = ({ cartCount, user, logout }) => {
                             </div>
                             <Link to="/cart" className="btn-icon">
                                 <i className="fa-solid fa-cart-shopping"></i>
-                                <span className="badge-count">{cartCount}</span>
+                                {user && cartCount > 0 && <span className="badge-count">{cartCount}</span>}
                             </Link>
 
                             <Link to="/notifications" className="btn-icon">
                                 <i className="fa-regular fa-bell"></i>
-                                {unreadCount > 0 && (
+                                {user && unreadCount > 0 && (
                                     <span className="badge-count">{unreadCount > 9 ? '9+' : unreadCount}</span>
                                 )}
                             </Link>
@@ -243,12 +251,12 @@ const Navbar = ({ cartCount, user, logout }) => {
                         <Link to="/cart" className="mobile-icon-btn" onClick={closeMenu}>
                             <i className="fa-solid fa-cart-shopping"></i>
                             <span>Cart</span>
-                            {cartCount > 0 && <span className="mobile-badge">{cartCount}</span>}
+                            {user && cartCount > 0 && <span className="mobile-badge">{cartCount}</span>}
                         </Link>
                         <Link to="/notifications" className="mobile-icon-btn" onClick={closeMenu}>
                             <i className="fa-regular fa-bell"></i>
                             <span>Alerts</span>
-                            {unreadCount > 0 && <span className="mobile-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>}
+                            {user && unreadCount > 0 && <span className="mobile-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>}
                         </Link>
                     </div>
 

@@ -126,11 +126,41 @@ const BookingCheckout = ({ user }) => {
 
             const request_number = `REQ-${user.id.substring(0, 4)}-${Date.now()}`;
 
-            // Create submissions for every item in the cart using the same request number wrapper or process individually
-            const submissions = inquiryItems.map((item, index) => {
-                const { ...inquiryDetails } = item;
+            // Create submissions for every item in the cart
+            const submissions = [];
+            for (let index = 0; index < inquiryItems.length; index++) {
+                const item = inquiryItems[index];
 
-                return {
+                // Upload inspiration image to Supabase Storage if it exists (base64)
+                let uploadedImageUrl = null;
+                if (item.inspirationImageBase64) {
+                    try {
+                        // Convert base64 to blob
+                        const base64Data = item.inspirationImageBase64;
+                        const response = await fetch(base64Data);
+                        const blob = await response.blob();
+                        const fileExt = blob.type.split('/')[1] || 'png';
+                        const fileName = `inquiries/${user.id}-${Date.now()}-${index}.${fileExt}`;
+
+                        const { error: uploadError } = await supabase.storage
+                            .from('receipts')
+                            .upload(fileName, blob);
+
+                        if (!uploadError) {
+                            const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(fileName);
+                            uploadedImageUrl = urlData.publicUrl;
+                        } else {
+                            console.error('Error uploading inspiration image:', uploadError);
+                        }
+                    } catch (imgErr) {
+                        console.error('Error processing inspiration image:', imgErr);
+                    }
+                }
+
+                // Strip the large base64 from data to keep payload small
+                const { inspirationImageBase64, ...cleanDetails } = item;
+
+                submissions.push({
                     request_number: `${request_number}-${index + 1}`,
                     user_id: user.id,
                     type: item.serviceType === "Event/Special Request" ? "booking" : item.serviceType,
@@ -139,16 +169,17 @@ const BookingCheckout = ({ user }) => {
                     delivery_method: deliveryMethod,
                     pickup_time: deliveryMethod === 'pickup' ? `${selectedPickupDate} - ${selectedPickupTime}` : null,
                     shipping_fee: deliveryMethod === 'pickup' ? 0 : dynamicShippingFee,
-                    data: inquiryDetails,
-                    image_url: item.inspirationImageBase64 || null,
+                    data: { ...cleanDetails, image_url: uploadedImageUrl },
+                    image_url: uploadedImageUrl,
                     notes: item.specialInstructions || null,
-                };
-            });
+                });
+            }
 
             const { error } = await supabase.from('requests').insert(submissions);
             if (error) throw error;
 
             localStorage.removeItem('bookingCart');
+            localStorage.removeItem(`bookingCart_${user.id}`);
 
             // Add notification for inquiry submission
             const notifications = JSON.parse(localStorage.getItem('notifications') || '[]');

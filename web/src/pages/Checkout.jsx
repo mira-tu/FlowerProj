@@ -237,6 +237,18 @@ const Checkout = ({ setCart, user }) => {
         };
         localStorage.setItem('notifications', JSON.stringify([newNotification, ...notifications]));
 
+        // Also insert notification into Supabase for persistence
+        const { error: notifError } = await supabase
+            .from('notifications')
+            .insert([{
+                user_id: user.id,
+                type: 'order',
+                title: 'Order Placed Successfully!',
+                message: `Your order #${order_number} has been placed. ${selectedPayment === 'cod' ? 'Payment will be collected on delivery.' : 'Waiting for payment confirmation.'}`,
+                link: `/order-tracking/${newOrderNumber}`,
+            }]);
+        if (notifError) console.error('Error creating notification:', notifError);
+
         const currentCart = JSON.parse(localStorage.getItem('cart') || '[]');
         const checkoutItemIds = checkoutItems.map(item => item.id);
         const remainingCart = currentCart.filter(item => !checkoutItemIds.includes(item.id));

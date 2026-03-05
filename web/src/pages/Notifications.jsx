@@ -8,27 +8,45 @@ const Notifications = () => {
     const navigate = useNavigate();
     const [notifications, setNotifications] = useState([]);
     const [filter, setFilter] = useState('all'); // all, unread, read
-    const [confirmModal, setConfirmModal] = useState({ show: false, onConfirm: null, title: '', message: '' });
+    const [user, setUser] = useState(null);
+    const [confirmModal, setConfirmModal] = useState({ show: false, title: '', message: '', onConfirm: null });
 
     useEffect(() => {
-        const loadFromLocalStorage = () => {
-            const savedNotifications = JSON.parse(localStorage.getItem('notifications') || '[]');
+        // Fetch current user first
+        const fetchUser = async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            const currentUser = session?.user ?? null;
+            setUser(currentUser);
+
+            if (currentUser) {
+                loadFromLocalStorage(currentUser);
+            } else {
+                setNotifications([]);
+            }
+        };
+
+        const loadFromLocalStorage = (currentUser) => {
+            if (!currentUser) return;
+            const savedNotifications = JSON.parse(localStorage.getItem(`notifications_${currentUser.id}`) || '[]');
             savedNotifications.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
             setNotifications(savedNotifications);
         };
 
-        // Load initial data from local storage
-        loadFromLocalStorage();
+        fetchUser();
 
         // The global listener in App.jsx will update localStorage and dispatch a 'storage' event.
         // This listener reacts to that event to update the view.
-        window.addEventListener('storage', loadFromLocalStorage);
+        const handleStorageChange = () => {
+            if (user) loadFromLocalStorage(user);
+        };
+
+        window.addEventListener('storage', handleStorageChange);
 
         // Cleanup the event listener when the component unmounts
         return () => {
-            window.removeEventListener('storage', loadFromLocalStorage);
+            window.removeEventListener('storage', handleStorageChange);
         };
-    }, []);
+    }, [user?.id]); // Re-run if user ID somehow changes
 
     const filteredNotifications = notifications.filter(notification => {
         if (filter === 'unread') return !notification.read;
@@ -39,11 +57,13 @@ const Notifications = () => {
     const unreadCount = notifications.filter(n => !n.read).length;
 
     const handleNotificationClick = async (notification) => {
+        if (!user) return;
+
         // Optimistically update the UI to feel responsive
         const updatedNotifications = notifications.map(n =>
             n.id === notification.id ? { ...n, read: true } : n
         );
-        localStorage.setItem('notifications', JSON.stringify(updatedNotifications));
+        localStorage.setItem(`notifications_${user.id}`, JSON.stringify(updatedNotifications));
         setNotifications(updatedNotifications);
 
         // Update the database in the background
@@ -64,9 +84,11 @@ const Notifications = () => {
     };
 
     const markAllAsRead = async () => {
+        if (!user) return;
+
         // Optimistic UI update
         const updatedNotifications = notifications.map(n => ({ ...n, read: true }));
-        localStorage.setItem('notifications', JSON.stringify(updatedNotifications));
+        localStorage.setItem(`notifications_${user.id}`, JSON.stringify(updatedNotifications));
         setNotifications(updatedNotifications);
 
         // Update database
@@ -84,6 +106,8 @@ const Notifications = () => {
     };
 
     const clearAllNotifications = async () => {
+        if (!user) return;
+
         setConfirmModal({
             show: true,
             title: 'Clear Notifications',
@@ -92,7 +116,7 @@ const Notifications = () => {
                 const allIds = notifications.map(n => n.id);
 
                 // Optimistic UI update
-                localStorage.setItem('notifications', JSON.stringify([]));
+                localStorage.setItem(`notifications_${user.id}`, JSON.stringify([]));
                 setNotifications([]);
 
                 // Update database
@@ -111,9 +135,11 @@ const Notifications = () => {
     };
 
     const deleteNotification = async (notificationId) => {
+        if (!user) return;
+
         // Optimistic UI update
         const updatedNotifications = notifications.filter(n => n.id !== notificationId);
-        localStorage.setItem('notifications', JSON.stringify(updatedNotifications));
+        localStorage.setItem(`notifications_${user.id}`, JSON.stringify(updatedNotifications));
         setNotifications(updatedNotifications);
 
         // Update database

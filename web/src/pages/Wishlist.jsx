@@ -1,13 +1,30 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import '../styles/Shop.css';
-
+import { supabase } from '../config/supabase';
 import { wishlistAPI } from '../config/api';
+import InfoModal from '../components/InfoModal';
 
 const Wishlist = ({ cart, addToCart, products = [] }) => {
+    const navigate = useNavigate();
     const [wishlistItems, setWishlistItems] = useState([]);
     const [showPopup, setShowPopup] = useState(false);
-    const isLoggedIn = !!localStorage.getItem('token');
+    const [user, setUser] = useState(null);
+    const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null });
+
+    // Fetch user on mount
+    useEffect(() => {
+        const fetchUser = async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            setUser(session?.user ?? null);
+        };
+        fetchUser();
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            setUser(session?.user ?? null);
+        });
+        return () => subscription.unsubscribe();
+    }, []);
 
     // Filter local storage wishlist against active products
     const filterAndSetWishlist = (rawWishlist) => {
@@ -29,19 +46,12 @@ const Wishlist = ({ cart, addToCart, products = [] }) => {
     };
 
     useEffect(() => {
-        if (isLoggedIn) {
+        if (user) {
             fetchWishlist();
         } else {
-            const savedWishlist = localStorage.getItem('wishlist');
-            if (savedWishlist) {
-                try {
-                    filterAndSetWishlist(JSON.parse(savedWishlist));
-                } catch (e) {
-                    console.error('Error parsing wishlist:', e);
-                }
-            }
+            setWishlistItems([]);
         }
-    }, [isLoggedIn, products]); // Re-run when products load
+    }, [user, products]); // Re-run when products load or user changes
 
     const fetchWishlist = async () => {
         try {
@@ -55,13 +65,31 @@ const Wishlist = ({ cart, addToCart, products = [] }) => {
     };
 
     const removeFromWishlist = async (item) => {
-        // Always use localStorage-based removal (name-based filtering)
-        const newItems = wishlistItems.filter(i => i.name !== item.name);
+        if (!user) return;
+
+        // Optimistic UI update
+        const newItems = wishlistItems.filter(i => i.product_id !== item.product_id && i.id !== item.id);
         setWishlistItems(newItems);
-        localStorage.setItem('wishlist', JSON.stringify(newItems));
+
+        try {
+            await wishlistAPI.remove(item.product_id || item.id, user.id);
+        } catch (error) {
+            console.error("Error removing from wishlist in DB:", error);
+        }
     };
 
     const handleAddToCart = (item) => {
+        if (!user) {
+            setInfoModal({
+                show: true,
+                title: 'Login Required',
+                message: 'Please login first to add items to your cart.',
+                linkTo: '/login',
+                linkText: 'Log In'
+            });
+            return;
+        }
+
         // item from API: { product_id, name, price, image_url }
         // item from local: { name, price, image }
         const productId = item.product_id || item.id;
@@ -73,6 +101,16 @@ const Wishlist = ({ cart, addToCart, products = [] }) => {
 
     return (
         <div style={{ background: '#f8f9fa', minHeight: '100vh', paddingTop: '90px', paddingBottom: '40px' }}>
+            <InfoModal
+                show={infoModal.show}
+                onClose={() => setInfoModal({ show: false, title: '', message: '' })}
+                title={infoModal.title}
+                message={infoModal.message}
+                linkTo={infoModal.linkTo}
+                linkText={infoModal.linkText}
+                linkState={infoModal.linkState}
+            />
+
             {/* Popup */}
             {showPopup && (
                 <div style={{

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Select from 'react-select';
 import { formatPhoneNumber } from '../utils/format';
 import InfoModal from '../components/InfoModal';
+import CheckoutAddressSelection from '../components/CheckoutAddressSelection';
 import '../styles/BookEvent.css'; // Reusing event styling basics
 import '../styles/Shop.css';
 
@@ -75,8 +76,19 @@ const BookEvent = ({ user }) => {
     const [fileSizeError, setFileSizeError] = useState('');
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null });
     const [dateError, setDateError] = useState('');
     const [timeError, setTimeError] = useState('');
+    const [deliveryAddress, setDeliveryAddress] = useState(null);
+    const [selectedAddressId, setSelectedAddressId] = useState(null);
+
+    // Sync selected address to venue field
+    useEffect(() => {
+        if (deliveryAddress) {
+            const venueStr = `${deliveryAddress.street || ''}, ${deliveryAddress.barangay || ''}, ${deliveryAddress.city || ''}, ${deliveryAddress.province || ''}`.replace(/, ,/g, ',').replace(/^, |, $/g, '');
+            setFormData(prev => ({ ...prev, venue: venueStr }));
+        }
+    }, [deliveryAddress]);
 
     const navigate = useNavigate();
 
@@ -190,9 +202,24 @@ const BookEvent = ({ user }) => {
     const triggerValidation = (e) => {
         e.preventDefault();
 
+        if (!user) {
+            setInfoModal({
+                show: true,
+                title: 'Login Required',
+                message: 'Please login first to submit a custom booking request.',
+                linkTo: '/login',
+                linkText: 'Log In'
+            });
+            return;
+        }
+
         // Basic required checks (HTML5 usually catches these but good to be safe)
-        if (!formData.customerName || !formData.contactNumber || !formData.occasion || !formData.eventDate || !formData.venue || !formData.arrangementType || !formData.recipientName) {
-            alert('Please fill in all required fields marked with *');
+        if (!formData.customerName || !formData.contactNumber || !formData.occasion || !formData.eventDate || (!formData.venue && !deliveryAddress) || !formData.arrangementType || !formData.recipientName) {
+            setInfoModal({
+                show: true,
+                title: 'Missing Required Fields',
+                message: 'Please fill in all required fields marked with *'
+            });
             return;
         }
 
@@ -214,6 +241,8 @@ const BookEvent = ({ user }) => {
             eventDate: formData.eventDate,
             eventTime: formData.eventTime,
             venue: formData.venue,
+            address_id: selectedAddressId || null,
+            deliveryAddress: deliveryAddress || null,
             arrangementType: formData.arrangementType === 'Other' ? formData.otherArrangementType : formData.arrangementType,
             flowers: formData.selectedFlowers.map(f => f.label).join(', ') + (formData.otherFlowersText ? ` (${formData.otherFlowersText})` : ''),
             colorPreference: formData.colorPreference === 'Others' ? formData.otherColorPreference : formData.colorPreference,
@@ -224,8 +253,9 @@ const BookEvent = ({ user }) => {
 
         // 2. Save to Local Storage
         let currentCart = [];
+        const cartKey = `bookingCart_${user?.id || 'guest'}`;
         try {
-            const stored = localStorage.getItem('bookingCart');
+            const stored = localStorage.getItem(cartKey);
             if (stored) {
                 currentCart = JSON.parse(stored);
             }
@@ -240,20 +270,29 @@ const BookEvent = ({ user }) => {
         }
 
         try {
-            localStorage.setItem('bookingCart', JSON.stringify(currentCart));
+            localStorage.setItem(cartKey, JSON.stringify(currentCart));
         } catch (e) {
             console.error("Quota Exceeded! Resetting tracking cart forcefully", e);
-            localStorage.setItem('bookingCart', JSON.stringify([newCartItem])); // Reset with newest item only
+            localStorage.setItem(cartKey, JSON.stringify([newCartItem])); // Reset with newest item only
         }
 
         // 3. Clear modal and navigate
         setShowConfirmModal(false);
         setIsSubmitting(false);
-        navigate('/cart');
+        navigate('/cart', { state: { justAdded: 'booking' } });
     };
 
     return (
         <div style={{ backgroundColor: '#fcfaf8', minHeight: '100vh', paddingTop: '80px', paddingBottom: '60px' }}>
+            <InfoModal
+                show={infoModal.show}
+                onClose={() => setInfoModal({ show: false, title: '', message: '' })}
+                title={infoModal.title}
+                message={infoModal.message}
+                linkTo={infoModal.linkTo}
+                linkText={infoModal.linkText}
+                linkState={infoModal.linkState}
+            />
             <div className="container">
 
                 {/* Header Section */}
@@ -322,9 +361,20 @@ const BookEvent = ({ user }) => {
                                             )}
                                         </div>
 
-                                        <div className="col-md-6">
+                                        <div className="col-12">
                                             <label className="form-label fw-semibold">Venue / Full Delivery Address <span className="text-danger">*</span></label>
-                                            <input type="text" name="venue" className="form-control bg-light border-0 py-3" placeholder="Enter complete address..." value={formData.venue} onChange={handleChange} required />
+                                            {user ? (
+                                                <CheckoutAddressSelection
+                                                    user={user}
+                                                    address={deliveryAddress}
+                                                    setAddress={setDeliveryAddress}
+                                                    selectedAddressId={selectedAddressId}
+                                                    setSelectedAddressId={setSelectedAddressId}
+                                                    showInfoModal={(title, message) => setInfoModal({ show: true, title, message })}
+                                                />
+                                            ) : (
+                                                <input type="text" name="venue" className="form-control bg-light border-0 py-3" placeholder="Enter complete address..." value={formData.venue} onChange={handleChange} required />
+                                            )}
                                         </div>
 
                                         <div className="col-md-6">

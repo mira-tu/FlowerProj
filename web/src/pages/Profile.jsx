@@ -1083,7 +1083,7 @@ const Profile = ({ user, logout }) => {
                                             )}
 
                                             {/* TRACK BUTTONS */}
-                                            {['accepted', 'processing', 'out_for_delivery', 'ready_for_pickup', 'completed'].includes(order.status) && order.type && (
+                                            {!['cancelled', 'declined'].includes(order.status) && order.type && (
                                                 <button
                                                     className="btn-order-action primary"
                                                     onClick={() => navigate(
@@ -1095,7 +1095,7 @@ const Profile = ({ user, logout }) => {
                                                     Track Request
                                                 </button>
                                             )}
-                                            {['processing', 'out_for_delivery', 'ready_for_pickup'].includes(order.status) && !order.type && (
+                                            {!['cancelled', 'declined'].includes(order.status) && !order.type && (
                                                 <button
                                                     className="btn-order-action primary"
                                                     onClick={() => navigate(`/order-tracking/${order.order_number}`)}

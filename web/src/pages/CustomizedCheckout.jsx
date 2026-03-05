@@ -178,6 +178,10 @@ const CustomizedCheckout = ({ user }) => {
             contact_number: address.phone,
             final_price: total,
             shipping_fee: shippingFee,
+            receipt_url: uploadedReceiptUrl,
+            delivery_method: deliveryMethod,
+            pickup_time: deliveryMethod === 'pickup' ? `${selectedPickupDate} - ${selectedPickupTime}` : null,
+            payment_status: payment_status,
             data: {
                 items: uploadedItems,
                 address: deliveryMethod === 'delivery' ? address : null,
@@ -221,8 +225,9 @@ const CustomizedCheckout = ({ user }) => {
             console.error('Error creating notification:', notificationError);
         }
 
-        // 6. Clean up local storage
+        // 6. Clean up local storage (both scoped and non-scoped keys)
         localStorage.removeItem('customizedCart');
+        localStorage.removeItem(`customizedCart_${user.id}`);
         localStorage.removeItem('checkoutItems');
 
         // 7. Navigate to tracking page

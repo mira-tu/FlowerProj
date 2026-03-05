@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import '../styles/Shop.css';
+import InfoModal from '../components/InfoModal';
 
 import allSouls1 from '../assets/pictures/occasions/ALLSOULSDAY1.png';
 import allSouls2 from '../assets/pictures/occasions/ALLSOULSDAY2.png';
@@ -92,13 +93,14 @@ const reviews = [
     { id: 3, user: 'Ana Reyes', avatar: 'https://i.pravatar.cc/100?img=5', rating: 5, date: '2024-01-05', text: 'The bouquet exceeded my expectations! My wife loved it. Thank you Jocerys!' },
 ];
 
-const ProductDetail = ({ addToCart }) => {
+const ProductDetail = ({ addToCart, user }) => {
     const { productId } = useParams();
     const navigate = useNavigate();
     const [quantity, setQuantity] = useState(1);
     const [activeTab, setActiveTab] = useState('description');
     const [product, setProduct] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null });
 
     useEffect(() => {
         loadProduct();
@@ -157,6 +159,16 @@ const ProductDetail = ({ addToCart }) => {
     };
 
     const handleAddToCart = () => {
+        if (!user) {
+            setInfoModal({
+                show: true,
+                title: 'Login Required',
+                message: 'Please login first to add items to your cart.',
+                linkTo: '/login',
+                linkText: 'Log In'
+            });
+            return;
+        }
         for (let i = 0; i < quantity; i++) {
             addToCart(product.name, product.price, product.image, product.id, product.stock_quantity || product.stock);
         }
@@ -164,6 +176,16 @@ const ProductDetail = ({ addToCart }) => {
     };
 
     const handleBuyNow = () => {
+        if (!user) {
+            setInfoModal({
+                show: true,
+                title: 'Login Required',
+                message: 'Please login first to proceed to checkout.',
+                linkTo: '/login',
+                linkText: 'Log In'
+            });
+            return;
+        }
         for (let i = 0; i < quantity; i++) {
             addToCart(product.name, product.price, product.image, product.id, product.stock_quantity || product.stock);
         }
@@ -178,6 +200,15 @@ const ProductDetail = ({ addToCart }) => {
 
     return (
         <div className="product-detail-container">
+            <InfoModal
+                show={infoModal.show}
+                onClose={() => setInfoModal({ show: false, title: '', message: '' })}
+                title={infoModal.title}
+                message={infoModal.message}
+                linkTo={infoModal.linkTo}
+                linkText={infoModal.linkText}
+                linkState={infoModal.linkState}
+            />
             <div className="container">
                 <nav aria-label="breadcrumb" className="mb-3">
                     <ol className="breadcrumb">

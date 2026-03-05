@@ -5,29 +5,29 @@ import TrackingPaymentDetails from '../components/TrackingPaymentDetails';
 import InfoModal from '../components/InfoModal';
 import '../styles/Shop.css';
 
-// Timeline steps for Delivery Requests
-const requestDeliverySteps = [
-    { id: 1, key: 'submitted', title: 'Request Submitted', description: 'Your request has been received.', icon: 'fa-clipboard-check' },
-    { id: 2, key: 'payment', title: 'Payment', description: 'We are confirming your GCash payment.', icon: 'fa-credit-card' },
-    { id: 3, key: 'processing', title: 'Processing', description: 'Your payment is confirmed and our florists are preparing your request.', icon: 'fa-seedling' },
-    { id: 4, key: 'ready_for_delivery', title: 'Ready for Delivery', description: 'Your request is ready to be shipped.', icon: 'fa-box' },
-    { id: 5, key: 'out_for_delivery', title: 'Out for Delivery', description: 'Your request is on its way.', icon: 'fa-truck' },
-    { id: 6, key: 'completed', title: 'Delivered', description: 'Your request has been delivered successfully.', icon: 'fa-truck' },
+// Timeline steps for Delivery Orders
+const deliverySteps = [
+    { id: 1, key: 'pending', title: 'Order Placed', description: 'Your order has been placed and is awaiting confirmation.', icon: 'fa-clipboard-check' },
+    { id: 2, key: 'payment', title: 'Payment', description: 'We are confirming your payment.', icon: 'fa-credit-card' },
+    { id: 3, key: 'processing', title: 'Processing', description: 'Your payment is confirmed and our team is preparing your order.', icon: 'fa-seedling' },
+    { id: 4, key: 'ready_for_delivery', title: 'Ready for Delivery', description: 'Your order is packed and ready to be shipped.', icon: 'fa-box' },
+    { id: 5, key: 'out_for_delivery', title: 'Out for Delivery', description: 'Your order is on its way to you.', icon: 'fa-truck' },
+    { id: 6, key: 'completed', title: 'Delivered', description: 'Your order has been delivered successfully.', icon: 'fa-check-circle' },
 ];
 
-// Timeline steps for Pickup Requests
-const requestPickupSteps = [
-    { id: 1, key: 'submitted', title: 'Request Submitted', description: 'Your request has been received.', icon: 'fa-clipboard-check' },
-    { id: 2, key: 'payment', title: 'Payment', description: 'We are confirming your GCash payment.', icon: 'fa-credit-card' },
-    { id: 3, key: 'processing', title: 'Processing', description: 'Your payment is confirmed and our florists are preparing your request.', icon: 'fa-seedling' },
-    { id: 4, key: 'ready_for_pickup', title: 'Ready for Pickup', description: 'Your request is ready for pickup.', icon: 'fa-store' },
-    { id: 5, key: 'completed', title: 'Picked up', description: 'Your request has been picked up.', icon: 'fa-check-circle' },
+// Timeline steps for Pickup Orders
+const pickupSteps = [
+    { id: 1, key: 'pending', title: 'Order Placed', description: 'Your order has been placed and is awaiting confirmation.', icon: 'fa-clipboard-check' },
+    { id: 2, key: 'payment', title: 'Payment', description: 'We are confirming your payment.', icon: 'fa-credit-card' },
+    { id: 3, key: 'processing', title: 'Processing', description: 'Your payment is confirmed and our team is preparing your order.', icon: 'fa-seedling' },
+    { id: 4, key: 'ready_for_pickup', title: 'Ready for Pickup', description: 'Your order is ready for pickup at our store.', icon: 'fa-store' },
+    { id: 5, key: 'completed', title: 'Picked Up', description: 'Your order has been picked up.', icon: 'fa-check-circle' },
 ];
 
-const OrderCustomizedTracking = () => {
+const OrderTracking = ({ user }) => {
     const navigate = useNavigate();
-    const { requestNumber } = useParams();
-    const [request, setRequest] = useState(null);
+    const { orderNumber } = useParams();
+    const [order, setOrder] = useState(null);
     const [currentStep, setCurrentStep] = useState(1);
     const [loading, setLoading] = useState(true);
     const [additionalFile, setAdditionalFile] = useState(null);
@@ -35,123 +35,103 @@ const OrderCustomizedTracking = () => {
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
 
     useEffect(() => {
-        const fetchRequest = async () => {
-            if (!requestNumber) {
+        const fetchOrder = async () => {
+            if (!orderNumber) {
                 setLoading(false);
                 return;
             }
 
             setLoading(true);
-            const { data: foundRequest, error: dbError } = await supabase
-                .from('requests')
-                .select('*')
-                .eq('request_number', requestNumber)
+
+            const { data: foundOrder, error: dbError } = await supabase
+                .from('orders')
+                .select('*, order_items(*), addresses(*)')
+                .eq('order_number', orderNumber)
                 .single();
 
-            if (dbError || !foundRequest) {
-                console.error('Error fetching request:', dbError);
-                setRequest(null);
+            if (dbError || !foundOrder) {
+                console.error('Error fetching order:', dbError);
+                setOrder(null);
                 setLoading(false);
                 return;
             }
 
-            let finalAddress = null;
-            if (foundRequest.data?.address_id) {
-                const { data: foundAddress, error: addressError } = await supabase
-                    .from('addresses')
-                    .select('*')
-                    .eq('id', foundRequest.data.address_id)
-                    .single();
-
-                if (addressError) {
-                    console.error('Error fetching address:', addressError);
-                } else {
-                    finalAddress = foundAddress;
-                }
-            } else if (foundRequest.data?.address) {
-                finalAddress = foundRequest.data.address;
-            }
-
-
+            // Fetch rider details if assigned
             let riderDetails = null;
-            if (foundRequest.assigned_rider && ['processing', 'ready_for_delivery', 'out_for_delivery', 'completed', 'claimed'].includes(foundRequest.status)) {
+            if (foundOrder.assigned_rider && ['processing', 'ready_for_delivery', 'out_for_delivery', 'completed', 'claimed'].includes(foundOrder.status)) {
                 const { data: rider, error: riderError } = await supabase
                     .from('users')
                     .select('name, phone')
-                    .eq('id', foundRequest.assigned_rider)
+                    .eq('id', foundOrder.assigned_rider)
                     .single();
-                if (riderError) {
-                    console.error('Error fetching rider for request:', riderError);
-                } else {
+                if (!riderError && rider) {
                     riderDetails = rider;
                 }
-            } else if (foundRequest.third_party_rider_name) {
+            } else if (foundOrder.third_party_rider_name) {
                 // Third-party rider assigned by admin
                 riderDetails = {
-                    name: foundRequest.third_party_rider_name,
-                    phone: foundRequest.third_party_rider_info || null
+                    name: foundOrder.third_party_rider_name,
+                    phone: foundOrder.third_party_rider_info || null
                 };
             }
 
-            const transformedRequest = {
-                ...foundRequest,
+            const transformedOrder = {
+                ...foundOrder,
                 rider: riderDetails,
-                date: foundRequest.created_at,
-                deliveryMethod: foundRequest.data?.delivery_method,
-                pickupTime: foundRequest.data?.pickup_time,
-                address: finalAddress,
-                type: foundRequest.type,
-                requestData: foundRequest.data,
-                imageUrl: foundRequest.data?.items?.[0]?.image_url || foundRequest.image_url,
-                finalPrice: foundRequest.final_price,
+                date: foundOrder.created_at,
+                items: foundOrder.order_items || [],
+                address: foundOrder.addresses,
+                deliveryMethod: foundOrder.delivery_method,
+                pickupTime: foundOrder.pickup_time,
             };
-            setRequest(transformedRequest);
+            setOrder(transformedOrder);
 
-            const steps = transformedRequest.deliveryMethod === 'pickup' ? requestPickupSteps : requestDeliverySteps;
-            const finalRequestStatuses = ['completed', 'claimed', 'declined', 'cancelled'];
+            // Determine current step
+            const steps = transformedOrder.deliveryMethod === 'pickup' ? pickupSteps : deliverySteps;
+            const finalStatuses = ['completed', 'claimed', 'declined', 'cancelled'];
 
-            if (finalRequestStatuses.includes(transformedRequest.status)) {
-                if (transformedRequest.status === 'completed' || transformedRequest.status === 'claimed') {
+            if (finalStatuses.includes(transformedOrder.status)) {
+                if (transformedOrder.status === 'completed' || transformedOrder.status === 'claimed') {
                     setCurrentStep(steps.length + 1);
                 } else {
                     setCurrentStep(-1);
                 }
             } else {
                 let currentStepKey;
-                if (transformedRequest.status === 'pending') {
-                    currentStepKey = 'submitted';
-                } else if (transformedRequest.status === 'accepted') {
-                    currentStepKey = 'payment';
+                const status = transformedOrder.status;
+
+                if (status === 'pending') {
+                    // If payment is COD or already confirmed, skip payment step
+                    if (transformedOrder.payment_method === 'cod' || transformedOrder.payment_status === 'paid') {
+                        currentStepKey = 'pending';
+                    } else {
+                        currentStepKey = 'payment';
+                    }
+                } else if (status === 'to_receive') {
+                    currentStepKey = 'out_for_delivery';
                 } else {
-                    currentStepKey = transformedRequest.status;
+                    currentStepKey = status;
                 }
 
                 let stepIndex = steps.findIndex(step => step.key === currentStepKey);
-
-                if (stepIndex === -1) {
-                    stepIndex = 0; // Default to first step if no match
-                }
-
+                if (stepIndex === -1) stepIndex = 0;
                 setCurrentStep(stepIndex + 1);
             }
 
             setLoading(false);
         };
 
-        fetchRequest();
+        fetchOrder();
 
+        // Real-time subscription for order updates
         const channel = supabase
-            .channel(`requests:${requestNumber}`)
+            .channel(`orders:${orderNumber}`)
             .on(
                 'postgres_changes',
-                {
-                    event: 'UPDATE',
-                    schema: 'public',
-                    table: 'requests'
-                },
+                { event: 'UPDATE', schema: 'public', table: 'orders' },
                 (payload) => {
-                    if (payload.new && payload.new.request_number === requestNumber) {
-                        fetchRequest();
+                    if (payload.new && payload.new.order_number === orderNumber) {
+                        fetchOrder();
                     }
                 }
             )
@@ -160,10 +140,10 @@ const OrderCustomizedTracking = () => {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [requestNumber]);
+    }, [orderNumber]);
 
     const handleUploadReceipt = async () => {
-        if (!additionalFile || !request) return;
+        if (!additionalFile || !order) return;
 
         setUploadingReceipt(true);
         try {
@@ -184,7 +164,7 @@ const OrderCustomizedTracking = () => {
             if (!urlData.publicUrl) throw new Error('Failed to get public URL');
 
             let updatePayload = {};
-            if (!request.receipt_url) {
+            if (!order.receipt_url) {
                 updatePayload = {
                     receipt_url: urlData.publicUrl,
                     payment_status: 'waiting_for_confirmation'
@@ -194,7 +174,7 @@ const OrderCustomizedTracking = () => {
                     url: urlData.publicUrl,
                     uploaded_at: new Date().toISOString()
                 };
-                const currentReceipts = request.additional_receipts || [];
+                const currentReceipts = order.additional_receipts || [];
                 updatePayload = {
                     additional_receipts: [...currentReceipts, newReceipt],
                     payment_status: 'waiting_for_confirmation'
@@ -202,27 +182,28 @@ const OrderCustomizedTracking = () => {
             }
 
             const { error: updateError } = await supabase
-                .from('requests')
+                .from('orders')
                 .update(updatePayload)
-                .eq('id', request.id);
+                .eq('id', order.id);
 
             if (updateError) throw updateError;
 
             setInfoModal({ show: true, title: 'Success', message: 'Receipt uploaded successfully!' });
             setAdditionalFile(null);
-            // Refresh request data manually
-            const { data: updatedRequest } = await supabase
-                .from('requests')
+
+            // Refresh order data
+            const { data: updatedOrder } = await supabase
+                .from('orders')
                 .select('*')
-                .eq('id', request.id)
+                .eq('id', order.id)
                 .single();
 
-            if (updatedRequest) {
-                setRequest(prev => ({
+            if (updatedOrder) {
+                setOrder(prev => ({
                     ...prev,
-                    receipt_url: updatedRequest.receipt_url,
-                    payment_status: updatedRequest.payment_status,
-                    additional_receipts: updatedRequest.additional_receipts || []
+                    receipt_url: updatedOrder.receipt_url,
+                    payment_status: updatedOrder.payment_status,
+                    additional_receipts: updatedOrder.additional_receipts || []
                 }));
             }
         } catch (error) {
@@ -234,14 +215,14 @@ const OrderCustomizedTracking = () => {
     };
 
     const getTrackingSteps = () => {
-        if (!request) return requestDeliverySteps;
-        return request.deliveryMethod === 'pickup' ? requestPickupSteps : requestDeliverySteps;
+        if (!order) return deliverySteps;
+        return order.deliveryMethod === 'pickup' ? pickupSteps : deliverySteps;
     };
 
     const getTimelineDate = (stepId) => {
-        if (!request) return '';
-        const requestDate = new Date(request.date);
-        const stepDate = new Date(requestDate.getTime() + (stepId - 1) * 6 * 60 * 60 * 1000);
+        if (!order) return '';
+        const orderDate = new Date(order.date);
+        const stepDate = new Date(orderDate.getTime() + (stepId - 1) * 6 * 60 * 60 * 1000);
 
         if (stepId <= currentStep && currentStep !== -1) {
             return stepDate.toLocaleString('en-PH', {
@@ -254,10 +235,10 @@ const OrderCustomizedTracking = () => {
         return currentStep === -1 ? 'N/A' : 'Pending';
     };
 
-    const getExpectedResolutionDate = () => {
-        if (!request) return '';
-        const requestDate = new Date(request.date);
-        const expectedDate = new Date(requestDate.getTime() + 48 * 60 * 60 * 1000);
+    const getExpectedDeliveryDate = () => {
+        if (!order) return '';
+        const orderDate = new Date(order.date);
+        const expectedDate = new Date(orderDate.getTime() + 48 * 60 * 60 * 1000);
         return expectedDate.toLocaleDateString('en-PH', {
             weekday: 'long',
             month: 'long',
@@ -265,24 +246,24 @@ const OrderCustomizedTracking = () => {
         });
     };
 
-    const handleRequestReceived = async () => {
-        if (!request) return;
+    const handleOrderReceived = async () => {
+        if (!order) return;
 
         const { error } = await supabase
-            .from('requests')
+            .from('orders')
             .update({ status: 'completed' })
-            .eq('id', request.id);
+            .eq('id', order.id);
 
         if (error) {
-            console.error('Error updating request status:', error);
-            setInfoModal({ show: true, title: 'Error', message: 'There was an error confirming your request. Please try again.' });
+            console.error('Error updating order status:', error);
+            setInfoModal({ show: true, title: 'Error', message: 'There was an error confirming delivery. Please try again.' });
         } else {
-            setInfoModal({ show: true, title: 'Request Confirmed', message: 'Thank you for confirming! Your request is now marked as completed.' });
+            setInfoModal({ show: true, title: 'Order Confirmed', message: 'Thank you for confirming! Your order is now marked as completed.' });
         }
     };
 
     const trackingSteps = getTrackingSteps();
-    const isPickup = request?.deliveryMethod === 'pickup';
+    const isPickup = order?.deliveryMethod === 'pickup';
     const isFinalStep = currentStep >= trackingSteps.length && currentStep !== -1;
     const isDeclinedOrCancelled = currentStep === -1;
 
@@ -293,12 +274,13 @@ const OrderCustomizedTracking = () => {
                     <div className="spinner-border text-primary" role="status">
                         <span className="visually-hidden">Loading...</span>
                     </div>
-                    <p className="mt-2">Finding your request...</p>
+                    <p className="mt-2">Finding your order...</p>
                 </div>
             </div>
         );
     }
-    if (!request) {
+
+    if (!order) {
         return (
             <div className="tracking-container">
                 <div className="container">
@@ -306,9 +288,9 @@ const OrderCustomizedTracking = () => {
                         <div className="empty-state-icon">
                             <i className="fas fa-search"></i>
                         </div>
-                        <h3>Request Not Found</h3>
-                        <p>We couldn't find a request with number: {requestNumber}</p>
-                        <Link to="/profile" className="btn-shop-now">View My Requests</Link>
+                        <h3>Order Not Found</h3>
+                        <p>We couldn't find an order with number: {orderNumber}</p>
+                        <Link to="/profile" state={{ activeMenu: 'orders' }} className="btn-shop-now">View My Orders</Link>
                     </div>
                 </div>
             </div>
@@ -321,17 +303,17 @@ const OrderCustomizedTracking = () => {
                 <nav aria-label="breadcrumb" className="mb-3">
                     <ol className="breadcrumb">
                         <li className="breadcrumb-item"><Link to="/">Home</Link></li>
-                        <li className="breadcrumb-item"><Link to="/profile">My Requests</Link></li>
-                        <li className="breadcrumb-item active">Track Request</li>
+                        <li className="breadcrumb-item"><Link to="/profile" state={{ activeMenu: 'orders' }}>My Orders</Link></li>
+                        <li className="breadcrumb-item active">Track Order</li>
                     </ol>
                 </nav>
 
                 <div className="tracking-header">
                     <div className="tracking-order-info">
                         <div className="tracking-order-id">
-                            <h2>Request #{request.request_number}</h2>
+                            <h2>Order #{order.order_number}</h2>
                             <div className="tracking-order-date">
-                                Submitted on {new Date(request.date).toLocaleDateString('en-PH', {
+                                Placed on {new Date(order.date).toLocaleDateString('en-PH', {
                                     weekday: 'long',
                                     year: 'numeric',
                                     month: 'long',
@@ -339,11 +321,11 @@ const OrderCustomizedTracking = () => {
                                 })}
                             </div>
                             <span className="badge mt-2" style={{ background: 'rgba(255,255,255,0.2)', fontSize: '0.8rem' }}>
-                                Customized Bouquet
+                                Product Order
                             </span>
                         </div>
                         <div className="tracking-current-status">
-                            {request.status === 'out_for_delivery' && (
+                            {order.status === 'out_for_delivery' && (
                                 <button
                                     style={{
                                         padding: '8px 20px',
@@ -357,7 +339,7 @@ const OrderCustomizedTracking = () => {
                                         marginBottom: '8px',
                                         marginRight: '0.5rem',
                                     }}
-                                    onClick={handleRequestReceived}
+                                    onClick={handleOrderReceived}
                                 >
                                     Order Received
                                 </button>
@@ -365,7 +347,7 @@ const OrderCustomizedTracking = () => {
 
                             {isDeclinedOrCancelled ? (
                                 <div className="current-status-badge" style={{ backgroundColor: '#f44336', color: '#fff' }}>
-                                    Request {request.status === 'declined' ? 'Declined' : 'Cancelled'}
+                                    Order {order.status === 'declined' ? 'Declined' : 'Cancelled'}
                                 </div>
                             ) : (
                                 <div className="current-status-badge">
@@ -373,9 +355,9 @@ const OrderCustomizedTracking = () => {
                                 </div>
                             )}
                             <div className="expected-delivery">
-                                {!isFinalStep && !isDeclinedOrCancelled && `Expected resolution by: ${getExpectedResolutionDate()}`}
-                                {isFinalStep && (isPickup ? 'Picked up successfully!' : 'Request fulfilled!')}
-                                {isDeclinedOrCancelled && (request.status === 'declined' ? 'Request not fulfilled.' : 'Request cancelled by user.')}
+                                {!isFinalStep && !isDeclinedOrCancelled && `Expected delivery by: ${getExpectedDeliveryDate()}`}
+                                {isFinalStep && (isPickup ? 'Picked up successfully!' : 'Delivered successfully!')}
+                                {isDeclinedOrCancelled && (order.status === 'declined' ? 'Order not fulfilled.' : 'Order cancelled.')}
                             </div>
                         </div>
                     </div>
@@ -384,24 +366,23 @@ const OrderCustomizedTracking = () => {
                 <div className="row">
                     <div className="col-lg-8">
                         <TrackingPaymentDetails
-                            paymentMethod={request.payment_method || request.requestData?.payment_method || 'gcash'}
-                            paymentStatus={request.payment_status}
-                            totalAmount={request.finalPrice}
-                            amountPaid={request.amount_received}
-                            receiptUrl={request.receipt_url}
-                            additionalReceipts={request.additional_receipts}
+                            paymentMethod={order.payment_method}
+                            paymentStatus={order.payment_status}
+                            totalAmount={order.total}
+                            amountPaid={order.amount_received}
+                            receiptUrl={order.receipt_url}
+                            additionalReceipts={order.additional_receipts}
                             onUploadReceipt={handleUploadReceipt}
                             uploadingReceipt={uploadingReceipt}
                             additionalFile={additionalFile}
                             setAdditionalFile={setAdditionalFile}
-                            shippingFee={request.shipping_fee}
+                            shippingFee={order.shipping_fee}
                         />
 
                         <div className="tracking-timeline">
-
                             <h5 className="fw-bold mb-4">
                                 <i className="fas fa-route me-2" style={{ color: 'var(--shop-pink)' }}></i>
-                                Request Timeline
+                                Order Timeline
                             </h5>
                             <div className="timeline">
                                 {trackingSteps.map((step) => (
@@ -418,7 +399,7 @@ const OrderCustomizedTracking = () => {
                                             <h5>{step.title}</h5>
                                             <div className="timeline-info-container">
                                                 {step.description}
-                                                {step.key === 'payment' && (request.payment_status === 'partial' || (request.payment_status !== 'paid' && request.amount_received > 0)) && (
+                                                {step.key === 'payment' && (order.payment_status === 'partial' || (order.payment_status !== 'paid' && order.amount_received > 0)) && (
                                                     <div className="mt-2 p-2 rounded shadow-sm border-start border-4 border-warning" style={{ backgroundColor: '#fffbeb', fontSize: '0.85rem' }}>
                                                         <div className="d-flex align-items-center text-warning-emphasis fw-bold mb-1">
                                                             <i className="fas fa-info-circle me-2"></i>
@@ -426,16 +407,16 @@ const OrderCustomizedTracking = () => {
                                                         </div>
                                                         <div className="d-flex justify-content-between">
                                                             <span>Paid:</span>
-                                                            <span className="text-success">₱{(request.amount_received || 0).toLocaleString()}</span>
+                                                            <span className="text-success">₱{(order.amount_received || 0).toLocaleString()}</span>
                                                         </div>
                                                         <div className="d-flex justify-content-between border-top mt-1 pt-1 fw-bold">
                                                             <span>Remaining Balance:</span>
-                                                            <span className="text-danger">₱{((request.finalPrice || 0) - (request.amount_received || 0)).toLocaleString()}</span>
+                                                            <span className="text-danger">₱{((order.total || 0) - (order.amount_received || 0)).toLocaleString()}</span>
                                                         </div>
                                                     </div>
                                                 )}
-                                                {step.key === 'out_for_delivery' && ['out_for_delivery', 'delivered', 'completed', 'claimed'].includes(request.status) && request.rider && (
-                                                    <><br /><span className="fw-bold">Rider:</span> {request.rider.name} {request.rider.phone && `(${request.rider.phone})`}</>
+                                                {step.key === 'out_for_delivery' && ['out_for_delivery', 'delivered', 'completed', 'claimed'].includes(order.status) && order.rider && (
+                                                    <><br /><span className="fw-bold">Rider:</span> {order.rider.name} {order.rider.phone && `(${order.rider.phone})`}</>
                                                 )}
                                             </div>
                                             <div className="timeline-date">{getTimelineDate(step.id)}</div>
@@ -448,9 +429,9 @@ const OrderCustomizedTracking = () => {
                                             <i className="fas fa-times-circle"></i>
                                         </div>
                                         <div className="timeline-content">
-                                            <h5>Request {request.status === 'declined' ? 'Declined' : 'Cancelled'}</h5>
-                                            <p>{request.status === 'declined' ? 'Your request could not be fulfilled.' : 'You have cancelled this request.'}</p>
-                                            <div className="timeline-date">{new Date(request.date).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                                            <h5>Order {order.status === 'declined' ? 'Declined' : 'Cancelled'}</h5>
+                                            <p>{order.status === 'declined' ? 'Your order could not be fulfilled.' : 'You have cancelled this order.'}</p>
+                                            <div className="timeline-date">{new Date(order.date).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
                                         </div>
                                     </div>
                                 )}
@@ -469,101 +450,84 @@ const OrderCustomizedTracking = () => {
                                         <div className="delivery-label">Pickup Location</div>
                                         <div className="delivery-value">Jocery's Flower Shop, 63 San Jose Road, Zamboanga City</div>
                                     </div>
-                                    {request.pickupTime && (
+                                    {order.pickupTime && (
                                         <div className="delivery-info-row">
                                             <div className="delivery-label">Pickup Time</div>
-                                            <div className="delivery-value">{request.pickupTime}</div>
+                                            <div className="delivery-value">{order.pickupTime}</div>
                                         </div>
                                     )}
-                                    {request.requestData?.payment_method && (
-                                        <div className="delivery-info-row">
-                                            <div className="delivery-label">Payment</div>
-                                            <div className="delivery-value">{request.requestData.payment_method === 'gcash' ? 'GCash' : request.requestData.payment_method}</div>
-                                        </div>
-                                    )}
+                                    <div className="delivery-info-row">
+                                        <div className="delivery-label">Payment</div>
+                                        <div className="delivery-value">{order.payment_method === 'gcash' ? 'GCash' : order.payment_method === 'cod' ? 'Cash on Delivery' : order.payment_method}</div>
+                                    </div>
                                 </>
                             ) : (
                                 <>
                                     <div className="delivery-info-row">
                                         <div className="delivery-label">Recipient</div>
-                                        <div className="delivery-value">{request.address?.name}</div>
+                                        <div className="delivery-value">{order.address?.name || 'N/A'}</div>
                                     </div>
                                     <div className="delivery-info-row">
                                         <div className="delivery-label">Phone</div>
-                                        <div className="delivery-value">{request.contact_number}</div>
+                                        <div className="delivery-value">{order.address?.phone || 'N/A'}</div>
                                     </div>
                                     <div className="delivery-info-row">
                                         <div className="delivery-label">Address</div>
                                         <div className="delivery-value">
-                                            {request.address ?
-                                                `${request.address.street}, ${request.address.barangay}, ${request.address.city}, ${request.address.province}` :
-                                                (request.requestData?.deliveryAddress || 'N/A')
+                                            {order.address
+                                                ? `${order.address.street}, ${order.address.barangay}, ${order.address.city}, ${order.address.province}`
+                                                : 'N/A'
                                             }
                                         </div>
                                     </div>
-                                    {request.requestData?.payment_method && (
-                                        <div className="delivery-info-row">
-                                            <div className="delivery-label">Payment</div>
-                                            <div className="delivery-value">{request.requestData.payment_method === 'gcash' ? 'GCash' : request.requestData.payment_method}</div>
-                                        </div>
-                                    )}
+                                    <div className="delivery-info-row">
+                                        <div className="delivery-label">Payment</div>
+                                        <div className="delivery-value">{order.payment_method === 'gcash' ? 'GCash' : order.payment_method === 'cod' ? 'Cash on Delivery' : order.payment_method}</div>
+                                    </div>
                                 </>
                             )}
                         </div>
 
                     </div>
 
-
                     <div className="col-lg-4">
                         <div className="tracking-items p-4 rounded-4 shadow-sm bg-white">
                             <h5 className="fw-bold mb-4 pb-3 border-bottom d-flex align-items-center">
-                                <i className="fas fa-info-circle fs-5 me-2" style={{ color: 'var(--shop-pink)' }}></i>
-                                Request Details
+                                <i className="fas fa-box fs-5 me-2" style={{ color: 'var(--shop-pink)' }}></i>
+                                Order Items
                             </h5>
 
-                            {request.requestData && request.requestData.items && request.requestData.items.map((item, index) => (
-                                <div key={item.id || index} className="mb-4 d-flex flex-column gap-3">
-                                    <div className="d-flex align-items-center mb-1">
-                                        {item.image_url && (
-                                            <img
-                                                src={item.image_url}
-                                                alt={item.name}
-                                                className="rounded-3 shadow-sm me-3"
-                                                style={{ width: '56px', height: '56px', objectFit: 'cover' }}
-                                            />
-                                        )}
-                                        <div>
-                                            <div className="text-muted small text-uppercase fw-bold letter-spacing-1 mb-1">Item #{index + 1}</div>
-                                            <h6 className="mb-0 fw-bold fs-5">{item.name}</h6>
-                                        </div>
+                            {order.items && order.items.map((item, index) => (
+                                <div key={item.id || index} className="d-flex align-items-center mb-3 pb-3 border-bottom">
+                                    <img
+                                        src={item.image_url || item.image || item.photo || 'https://via.placeholder.com/56'}
+                                        alt={item.name}
+                                        className="rounded-3 shadow-sm me-3"
+                                        style={{ width: '56px', height: '56px', objectFit: 'cover' }}
+                                        onError={(e) => e.target.src = 'https://via.placeholder.com/56'}
+                                    />
+                                    <div className="flex-grow-1">
+                                        <div className="fw-bold">{item.name}</div>
+                                        <div className="text-muted small">Qty: {item.quantity || item.qty || 1}</div>
                                     </div>
-
-                                    <div className="d-flex flex-column gap-2 ms-1">
-                                        <div className="d-flex flex-column"><span className="text-muted small fw-medium">Flowers</span><span className="fw-bold text-dark">{item.flowers.map(f => f.name).join(', ')}</span></div>
-                                        <div className="d-flex flex-column"><span className="text-muted small fw-medium">Bundle Size</span><span className="fw-bold text-dark">{item.bundleSize} stems</span></div>
-                                        {item.wrapper && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Wrapper</span><span className="fw-bold text-dark">{item.wrapper.name}</span></div>}
-                                        {item.ribbon && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Ribbon</span><span className="fw-bold text-dark">{item.ribbon.name}</span></div>}
+                                    <div className="fw-bold" style={{ color: 'var(--shop-pink)' }}>
+                                        ₱{((item.price || 0) * (item.quantity || item.qty || 1)).toLocaleString()}
                                     </div>
                                 </div>
                             ))}
 
-                            <div className="mt-4 pt-3 border-top">
+                            <div className="mt-3 pt-3 border-top">
                                 <div className="d-flex justify-content-between mb-2 small text-muted">
                                     <span>Subtotal</span>
-                                    <span>{request.requestData.subtotal ? `₱${request.requestData.subtotal.toLocaleString()}` : 'N/A'}</span>
+                                    <span>₱{(order.subtotal || 0).toLocaleString()}</span>
                                 </div>
                                 <div className="d-flex justify-content-between mb-3 small text-muted">
-                                    <span>Shipping Fee</span>
-                                    <span>
-                                        {request.deliveryMethod === 'pickup'
-                                            ? 'FREE'
-                                            : (request.requestData.shipping_fee ? `₱${request.requestData.shipping_fee.toLocaleString()}` : 'N/A')}
-                                    </span>
+                                    <span>{isPickup ? 'Pickup' : 'Shipping Fee'}</span>
+                                    <span>{order.shipping_fee === 0 ? 'FREE' : `₱${(order.shipping_fee || 0).toLocaleString()}`}</span>
                                 </div>
-
                                 <div className="d-flex justify-content-between align-items-center pt-3 border-top">
-                                    <span className="text-muted fw-bold">Final Price</span>
-                                    <span className="fs-5 fw-bold" style={{ color: 'var(--shop-pink)' }}>{request.finalPrice ? `₱${request.finalPrice.toLocaleString()}` : 'For Discussion'}</span>
+                                    <span className="text-muted fw-bold">Total</span>
+                                    <span className="fs-5 fw-bold" style={{ color: 'var(--shop-pink)' }}>₱{(order.total || 0).toLocaleString()}</span>
                                 </div>
                             </div>
                         </div>
@@ -573,12 +537,12 @@ const OrderCustomizedTracking = () => {
                             style={{ background: 'var(--shop-pink)', color: 'white' }}
                             onClick={() => navigate('/profile', { state: { activeMenu: 'orders' } })}
                         >
-                            <i className="fas fa-clipboard-list me-2"></i>View My Requests
+                            <i className="fas fa-clipboard-list me-2"></i>View My Orders
                         </button>
 
                         <div className="mt-3">
-                            <Link to="/profile" className="btn w-100 py-2" style={{ background: 'var(--shop-pink-light)', color: 'var(--shop-pink)' }}>
-                                <i className="fas fa-arrow-left me-2"></i>Back to My Requests
+                            <Link to="/" className="btn w-100 py-2" style={{ background: 'var(--shop-pink-light)', color: 'var(--shop-pink)' }}>
+                                <i className="fas fa-arrow-left me-2"></i>Back to Home
                             </Link>
                         </div>
                     </div>
@@ -595,4 +559,4 @@ const OrderCustomizedTracking = () => {
     );
 };
 
-export default OrderCustomizedTracking;
+export default OrderTracking;

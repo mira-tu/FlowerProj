@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, Component } from 'react'
+import { useState, useEffect, useMemo, Component, useRef } from 'react'
 import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom'
 
 // ErrorBoundary: catches unhandled React errors so the SPA never goes blank.
@@ -49,7 +49,6 @@ import Signup from './pages/Signup'
 import ResetPassword from './pages/ResetPassword'
 import Wishlist from './pages/Wishlist'
 import Cart from './pages/Cart'
-import BookingCart from './pages/BookingCart'
 import BookingCheckout from './pages/BookingCheckout'
 import Customized from './pages/Customized'
 import BookEvent from './pages/BookEvent'
@@ -61,7 +60,7 @@ import MyOrders from './pages/MyOrders'
 import Notifications from './pages/Notifications'
 import OrderBookingTracking from './pages/OrderBookingTracking';
 import OrderCustomizedTracking from './pages/OrderCustomizedTracking';
-import CustomizedCart from './pages/CustomizedCart';
+import OrderTracking from './pages/OrderTracking';
 import CustomizedCheckout from './pages/CustomizedCheckout';
 import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
@@ -87,9 +86,16 @@ function AppContent() {
   const [user, setUser] = useState(null);
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+
+  // Use a ref to track the current auth state for synchronous access in cart functions
+  const userRef = useRef(null);
+
+  const getCartKey = (userId) => `cart_${userId || 'guest'}`;
+
   const [cart, setCart] = useState(() => {
     try {
-      const saved = localStorage.getItem('cart');
+      // Initially load from guest or standard cart if no user info is available synchronously yet
+      const saved = localStorage.getItem('cart_guest') || localStorage.getItem('cart');
       return saved ? JSON.parse(saved) : [];
     } catch (e) {
       return [];
@@ -145,9 +151,7 @@ function AppContent() {
                 p.name === cartItem.name
               )
             );
-            if (activeCart.length !== prevCart.length) {
-              localStorage.setItem('cart', JSON.stringify(activeCart));
-            }
+            // We'll let the user-specific useEffect handle saving to localStorage
             return activeCart;
           });
         }
@@ -166,13 +170,40 @@ function AppContent() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
+      const currentUser = session?.user ?? null;
+      setUser(currentUser);
+      userRef.current = currentUser;
+
+      // Load user-specific cart on initial session fetch
+      try {
+        const cartKey = getCartKey(currentUser?.id);
+        const saved = localStorage.getItem(cartKey);
+        if (saved) {
+          setCart(JSON.parse(saved));
+        } else if (currentUser) {
+          // If user logged in but no cart, init empty so they don't see guest cart
+          setCart([]);
+        }
+      } catch (e) { }
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+      const currentUser = session?.user ?? null;
+      setUser(currentUser);
+      userRef.current = currentUser;
+
+      // Load user-specific cart on auth change
+      try {
+        const cartKey = getCartKey(currentUser?.id);
+        const saved = localStorage.getItem(cartKey);
+        if (saved) {
+          setCart(JSON.parse(saved));
+        } else {
+          setCart([]);
+        }
+      } catch (e) { }
     });
 
     return () => subscription.unsubscribe();
@@ -200,10 +231,10 @@ function AppContent() {
             icon: payload.new.icon || null,
           };
 
-          const existingNotifications = JSON.parse(localStorage.getItem('notifications') || '[]');
+          const existingNotifications = JSON.parse(localStorage.getItem(`notifications_${user.id}`) || '[]');
           const updatedNotifications = [newNotification, ...existingNotifications];
           const uniqueNotifications = Array.from(new Map(updatedNotifications.map(item => [item.id, item])).values());
-          localStorage.setItem('notifications', JSON.stringify(uniqueNotifications));
+          localStorage.setItem(`notifications_${user.id}`, JSON.stringify(uniqueNotifications));
 
           // Dispatch storage event to trigger updates on the Notifications page
           window.dispatchEvent(new Event('storage'));
@@ -228,17 +259,25 @@ function AppContent() {
       console.error('Error logging out:', error.message);
     }
     // Clear all order/request data to prevent data leakage between accounts
+    // Clear generic keys just in case, but keep user-specific ones isolated
     localStorage.removeItem('orders');
     localStorage.removeItem('requests');
     localStorage.removeItem('messages');
-    localStorage.removeItem('notifications');
+    localStorage.removeItem('bookingCart'); // Clean up any lingering generic carts
+    localStorage.removeItem('customizedCart');
+
+    // Switch to guest cart immediately before reload to prevent flicker
+    setCart([]);
+    userRef.current = null;
+
     window.location.href = '/login'; // Force full page reload to clear any cached state
   };
 
-  // Save cart to localStorage whenever it changes
+  // Save cart to user-specific localStorage whenever it changes
   useEffect(() => {
-    localStorage.setItem('cart', JSON.stringify(cart));
-  }, [cart]);
+    const cartKey = getCartKey(userRef.current?.id);
+    localStorage.setItem(cartKey, JSON.stringify(cart));
+  }, [cart, user]); // Added user dependency to ensure key updates if user changes without cart changing
 
   const addToCart = (name, price, image, productId, stockQuantity) => {
     // Always use localStorage for cart operations
@@ -284,8 +323,15 @@ function AppContent() {
   useEffect(() => {
     const updateCounts = () => {
       try {
-        const c1 = JSON.parse(localStorage.getItem('customizedCart') || '[]').length;
-        const c2 = JSON.parse(localStorage.getItem('bookingCart') || '[]').length;
+        const currentUserId = userRef.current?.id;
+        if (!currentUserId) {
+          setCustomServiceCount(0);
+          return;
+        }
+
+        // Scope custom/booking carts to user if possible, otherwise we just reset them on logout
+        const c1 = JSON.parse(localStorage.getItem(`customizedCart_${currentUserId}`) || localStorage.getItem('customizedCart') || '[]').length;
+        const c2 = JSON.parse(localStorage.getItem(`bookingCart_${currentUserId}`) || localStorage.getItem('bookingCart') || '[]').length;
         setCustomServiceCount(c1 + c2);
       } catch (e) {
         // ignore
@@ -298,9 +344,9 @@ function AppContent() {
       clearInterval(interval);
       window.removeEventListener('storage', updateCounts);
     };
-  }, []);
+  }, [user]); // Re-run when user changes
 
-  const cartCount = cart.reduce((acc, item) => acc + (item.qty || 0), 0) + customServiceCount;
+  const cartCount = user ? (cart.reduce((acc, item) => acc + (item.qty || 0), 0) + customServiceCount) : 0;
 
   if (!hasSpinnerDelayPassed || isInitializing) {
     return (
@@ -319,14 +365,12 @@ function AppContent() {
 
       <Routes>
         {/* Public Routes */}
-        <Route path="/" element={<Home addToCart={addToCart} products={products} categories={categories} />} />
+        <Route path="/" element={<Home addToCart={addToCart} products={products} categories={categories} user={user} />} />
         <Route path="/about" element={<About />} />
         <Route path="/contact" element={<Contact />} />
         <Route path="/wishlist" element={<Wishlist cart={cart} addToCart={addToCart} products={products} />} />
-        <Route path="/cart" element={<Cart cart={cart} updateCartItem={updateCartItem} removeFromCart={removeFromCart} />} />
-        <Route path="/customized-cart" element={<CustomizedCart user={user} />} />
+        <Route path="/cart" element={<Cart cart={cart} updateCartItem={updateCartItem} removeFromCart={removeFromCart} user={user} />} />
         <Route path="/customized-checkout" element={<CustomizedCheckout user={user} />} />
-        <Route path="/booking-cart" element={<BookingCart user={user} />} />
         <Route path="/booking-checkout" element={<BookingCheckout user={user} />} />
         <Route path="/login" element={<Login onLogin={login} />} />
         <Route path="/signup" element={<Signup />} />
@@ -335,13 +379,13 @@ function AppContent() {
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/book-event" element={<BookEvent user={user} />} />
         <Route path="/customized" element={<Customized addToCart={addToCart} />} />
-        <Route path="/product/:productId" element={<ProductDetail addToCart={addToCart} />} />
+        <Route path="/product/:productId" element={<ProductDetail addToCart={addToCart} user={user} />} />
         <Route path="/checkout" element={<Checkout setCart={setCart} user={user} />} />
         <Route path="/order-success/:orderNumber" element={<OrderSuccess />} />
         <Route path="/request-tracking/:requestNumber" element={<OrderBookingTracking />} />
         <Route path="/customized-request-tracking/:requestNumber" element={<OrderCustomizedTracking />} />
+        <Route path="/order-tracking/:orderNumber" element={<OrderTracking user={user} />} />
         <Route path="/profile" element={<Profile user={user} logout={logout} />} />
-        <Route path="/my-orders" element={<MyOrders />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/events" element={<div className="container py-5"><h2>Events Page</h2></div>} />
       </Routes>

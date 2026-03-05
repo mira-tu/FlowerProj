@@ -854,10 +854,10 @@ export const adminAPI = {
             }
 
             // Strip out 'Zamboanga Del Sur' if present in custom request address fields
-            if (requestData?.deliveryAddress) {
+            if (requestData?.deliveryAddress && typeof requestData.deliveryAddress === 'string') {
                 requestData.deliveryAddress = requestData.deliveryAddress.replace(/, Zamboanga [Dd]el Sur/gi, '');
             }
-            if (requestData?.venue) {
+            if (requestData?.venue && typeof requestData.venue === 'string') {
                 requestData.venue = requestData.venue.replace(/, Zamboanga [Dd]el Sur/gi, '');
             }
 

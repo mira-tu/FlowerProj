@@ -87,6 +87,12 @@ const OrderBookingTracking = () => {
                 } else {
                     riderDetails = rider;
                 }
+            } else if (foundRequest.third_party_rider_name) {
+                // Third-party rider assigned by admin
+                riderDetails = {
+                    name: foundRequest.third_party_rider_name,
+                    phone: foundRequest.third_party_rider_info || null
+                };
             }
 
             // Step 3: Combine data and set state
@@ -198,7 +204,8 @@ const OrderBookingTracking = () => {
                 };
                 const currentReceipts = request.additional_receipts || [];
                 updatePayload = {
-                    additional_receipts: [...currentReceipts, newReceipt]
+                    additional_receipts: [...currentReceipts, newReceipt],
+                    payment_status: 'waiting_for_confirmation'
                 };
             }
 

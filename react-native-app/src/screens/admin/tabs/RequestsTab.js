@@ -922,13 +922,33 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                     <>
                       <TouchableOpacity
                         style={[styles.actionButton, styles.acceptButton]}
-                        onPress={() => handleStatusChange(selectedRequest.id, 'processing')}
+                        onPress={async () => {
+                          try {
+                            await adminAPI.updateRequestStatus(selectedRequest.id, 'accepted');
+                            Toast.show({ type: 'success', text1: 'Request Accepted' });
+                            setModalVisible(false);
+                            loadRequests();
+                          } catch (err) {
+                            console.error('Error accepting request:', err);
+                            Toast.show({ type: 'error', text1: 'Failed to accept request' });
+                          }
+                        }}
                       >
                         <Text style={styles.buttonText}>Accept</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={[styles.actionButton, styles.rejectButton]}
-                        onPress={() => handleStatusChange(selectedRequest.id, 'cancelled')}
+                        onPress={async () => {
+                          try {
+                            await adminAPI.updateRequestStatus(selectedRequest.id, 'declined');
+                            Toast.show({ type: 'success', text1: 'Request Declined' });
+                            setModalVisible(false);
+                            loadRequests();
+                          } catch (err) {
+                            console.error('Error declining request:', err);
+                            Toast.show({ type: 'error', text1: 'Failed to decline request' });
+                          }
+                        }}
                       >
                         <Text style={styles.buttonText}>Decline</Text>
                       </TouchableOpacity>

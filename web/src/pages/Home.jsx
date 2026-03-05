@@ -6,6 +6,7 @@ import eventImg from '../assets/pictures/EVENTSPECIFIC.jpg';
 import customImg from '../assets/pictures/CUSTOMIZED.jpg';
 import specialImg from '../assets/pictures/SPECIALORDERPAGE.jpg';
 import ProductModal from '../components/ProductModal';
+import InfoModal from '../components/InfoModal';
 
 // Import Occasion Images
 import allSouls1 from '../assets/pictures/occasions/ALLSOULSDAY1.png';
@@ -46,7 +47,7 @@ import val9 from '../assets/pictures/occasions/VALENTINES9.png';
 
 
 
-const Home = ({ addToCart, products, categories }) => {
+const Home = ({ addToCart, products, categories, user }) => {
     const [selectedCategory, setSelectedCategory] = useState('All');
     const [searchTerm, setSearchTerm] = useState('');
     const [wishlist, setWishlist] = useState([]);
@@ -54,6 +55,7 @@ const Home = ({ addToCart, products, categories }) => {
     const [popupMessage, setPopupMessage] = useState('');
     const [showCartPopup, setShowCartPopup] = useState(false);
     const [selectedProduct, setSelectedProduct] = useState(null);
+    const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null });
 
     useEffect(() => {
         const savedWishlist = localStorage.getItem('wishlist');
@@ -74,6 +76,18 @@ const Home = ({ addToCart, products, categories }) => {
         if (product.is_active === false) {
             return;
         }
+
+        if (!user) {
+            setInfoModal({
+                show: true,
+                title: 'Login Required',
+                message: 'Please login first to add items to your cart.',
+                linkTo: '/login',
+                linkText: 'Log In'
+            });
+            return;
+        }
+
         addToCart(product.name, product.price, product.image_url, product.id, product.stock_quantity);
         setShowCartPopup(true);
         setTimeout(() => setShowCartPopup(false), 2000);
@@ -118,6 +132,16 @@ const Home = ({ addToCart, products, categories }) => {
 
     return (
         <div>
+            <InfoModal
+                show={infoModal.show}
+                onClose={() => setInfoModal({ show: false, title: '', message: '' })}
+                title={infoModal.title}
+                message={infoModal.message}
+                linkTo={infoModal.linkTo}
+                linkText={infoModal.linkText}
+                linkState={infoModal.linkState}
+            />
+
             {/* Wishlist Popup */}
             {showWishlistPopup && (
                 <div className="wishlist-popup">

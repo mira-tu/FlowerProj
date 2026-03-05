@@ -7,13 +7,14 @@ const BookingCart = ({ user }) => {
     const [inquiryItems, setInquiryItems] = useState([]);
 
     useEffect(() => {
-        const savedInquiry = localStorage.getItem('bookingCart');
+        const cartKey = `bookingCart_${user?.id || 'guest'}`;
+        const savedInquiry = localStorage.getItem(cartKey) || localStorage.getItem('bookingCart');
         if (savedInquiry) {
             setInquiryItems(JSON.parse(savedInquiry));
         } else {
             navigate('/');
         }
-    }, [navigate]);
+    }, [navigate, user]);
 
     const getOriginPage = () => {
         return '/book-event';
@@ -21,13 +22,14 @@ const BookingCart = ({ user }) => {
 
     const handleRemoveItem = (id) => {
         const updatedItems = inquiryItems.filter(item => item.id !== id);
+        const cartKey = `bookingCart_${user?.id || 'guest'}`;
 
         if (updatedItems.length === 0) {
-            localStorage.removeItem('bookingCart');
+            localStorage.removeItem(cartKey);
             navigate(getOriginPage());
         } else {
             setInquiryItems(updatedItems);
-            localStorage.setItem('bookingCart', JSON.stringify(updatedItems));
+            localStorage.setItem(cartKey, JSON.stringify(updatedItems));
         }
     };
 

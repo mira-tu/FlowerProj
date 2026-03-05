@@ -10,12 +10,13 @@ const CustomizedCart = ({ user }) => {
     const [address, setAddress] = useState(null);
 
     useEffect(() => {
-        const savedCart = localStorage.getItem('customizedCart');
+        const cartKey = `customizedCart_${user?.id || 'guest'}`;
+        const savedCart = localStorage.getItem(cartKey) || localStorage.getItem('customizedCart');
         if (savedCart) {
             setCartItems(JSON.parse(savedCart).map(item => ({ ...item, selected: true })));
         }
-    }, []);
-    
+    }, [user]);
+
     useEffect(() => {
         const fetchDefaultAddress = async () => {
             if (user) {
@@ -30,7 +31,7 @@ const CustomizedCart = ({ user }) => {
                     console.error('Error fetching default address:', error);
                     return;
                 }
-                
+
                 if (data && data.length > 0) {
                     setAddress(data[0]);
                 } else {
@@ -95,7 +96,8 @@ const CustomizedCart = ({ user }) => {
     const removeItem = (id) => {
         const updatedCart = cartItems.filter(item => item.id !== id);
         setCartItems(updatedCart);
-        localStorage.setItem('customizedCart', JSON.stringify(updatedCart));
+        const cartKey = `customizedCart_${user?.id || 'guest'}`;
+        localStorage.setItem(cartKey, JSON.stringify(updatedCart));
     };
 
     const totalItems = cartItems.filter(item => item.selected).length;
