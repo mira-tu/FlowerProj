@@ -90,7 +90,7 @@ const products = {
 const reviews = [
     { id: 1, user: 'Maria Santos', avatar: 'https://i.pravatar.cc/100?img=1', rating: 5, date: '2024-01-15', text: 'Absolutely stunning arrangement! The flowers were fresh and beautifully arranged. Perfect for my mothers birthday.' },
     { id: 2, user: 'Juan dela Cruz', avatar: 'https://i.pravatar.cc/100?img=3', rating: 4, date: '2024-01-10', text: 'Great quality flowers. Delivery was on time. Would definitely order again.' },
-    { id: 3, user: 'Ana Reyes', avatar: 'https://i.pravatar.cc/100?img=5', rating: 5, date: '2024-01-05', text: 'The bouquet exceeded my expectations! My wife loved it. Thank you Jocerys!' },
+    { id: 3, user: 'Ana Reyes', avatar: 'https://i.pravatar.cc/100?img=5', rating: 5, date: '2024-01-05', text: 'The bouquet exceeded my expectations! My wife loved it. Thank you Jocerrys!' },
 ];
 
 const ProductDetail = ({ addToCart, user }) => {

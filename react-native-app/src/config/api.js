@@ -467,9 +467,19 @@ export const adminAPI = {
     },
 
     updateOrderStatus: async (id, status) => {
+        // Fetch current timestamps first
+        const { data: current, error: fetchError } = await supabase
+            .from('orders')
+            .select('status_timestamps')
+            .eq('id', id)
+            .single();
+
+        const existingTimestamps = (current && current.status_timestamps) || {};
+        const updatedTimestamps = { ...existingTimestamps, [status]: new Date().toISOString() };
+
         const { data, error } = await supabase
             .from('orders')
-            .update({ status: status })
+            .update({ status: status, status_timestamps: updatedTimestamps })
             .eq('id', id)
             .select()
             .single();
@@ -940,9 +950,19 @@ export const adminAPI = {
     },
 
     updateRequestStatus: async (id, status) => {
+        // Fetch current timestamps first
+        const { data: current, error: fetchError } = await supabase
+            .from('requests')
+            .select('status_timestamps')
+            .eq('id', id)
+            .single();
+
+        const existingTimestamps = (current && current.status_timestamps) || {};
+        const updatedTimestamps = { ...existingTimestamps, [status]: new Date().toISOString() };
+
         const { data, error } = await supabase
             .from('requests')
-            .update({ status: status })
+            .update({ status: status, status_timestamps: updatedTimestamps })
             .eq('id', id)
             .select()
             .single();

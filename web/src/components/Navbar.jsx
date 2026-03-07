@@ -135,7 +135,7 @@ const Navbar = ({ cartCount, user, logout }) => {
             <nav className="navbar navbar-expand-lg fixed-top">
                 <div className="container-fluid px-5">
                     <Link className="navbar-brand d-flex align-items-center" to="/">
-                        <span>Jocery's Flower Shop</span>
+                        <span>Jocerry's Flower Shop</span>
                     </Link>
 
                     {/* Custom hamburger button */}

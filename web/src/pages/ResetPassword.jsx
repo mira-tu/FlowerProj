@@ -68,7 +68,7 @@ const ResetPassword = () => {
                     <div className="auth-overlay"></div>
                     <div className="auth-text">
                         <h3>Reset Your Password</h3>
-                        <h2>Jocery&apos;s Flower Shop</h2>
+                        <h2>Jocerry&apos;s Flower Shop</h2>
                         <p>Enter a new password to regain access.</p>
                     </div>
                 </div>

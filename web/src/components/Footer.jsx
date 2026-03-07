@@ -8,7 +8,7 @@ const Footer = () => {
             <div className="container">
                 <div className="row">
                     <div className="col-md-4 mb-4">
-                        <h5 className="footer-title">Jocery's Flower Shop</h5>
+                        <h5 className="footer-title">Jocerry's Flower Shop</h5>
                         <p className="text-secondary">Making every moment special with beautiful flowers.</p>
                     </div>
                     <div className="col-md-4 mb-4">
@@ -30,7 +30,7 @@ const Footer = () => {
                     <Link to="/privacy" className="text-secondary text-decoration-none small">Privacy Policy</Link>
                 </div>
                 <div className="text-center pt-2">
-                    <p className="text-secondary mb-0">&copy; 2024 Jocery's Flower Shop. All rights reserved.</p>
+                    <p className="text-secondary mb-0">&copy; 2024 Jocerry's Flower Shop. All rights reserved.</p>
                 </div>
             </div>
         </footer>

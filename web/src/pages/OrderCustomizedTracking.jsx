@@ -35,6 +35,27 @@ const OrderCustomizedTracking = () => {
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
 
     useEffect(() => {
+        const generateTrackingSteps = (requestObj) => {
+            if (!requestObj) return requestDeliverySteps;
+            let baseSteps = requestObj.deliveryMethod === 'pickup' ? [...requestPickupSteps] : [...requestDeliverySteps];
+            baseSteps = baseSteps.map(step => ({ ...step }));
+
+            if (requestObj.payment_method === 'cod') {
+                const paymentStepIndex = baseSteps.findIndex(s => s.key === 'payment');
+                if (paymentStepIndex !== -1) {
+                    const [paymentStep] = baseSteps.splice(paymentStepIndex, 1);
+                    paymentStep.description = requestObj.deliveryMethod === 'pickup'
+                        ? 'Payment to be collected upon pickup.'
+                        : 'Payment to be collected upon delivery.';
+                    baseSteps.splice(baseSteps.length - 1, 0, paymentStep);
+                    baseSteps.forEach((step, index) => {
+                        step.id = index + 1;
+                    });
+                }
+            }
+            return baseSteps;
+        };
+
         const fetchRequest = async () => {
             if (!requestNumber) {
                 setLoading(false);
@@ -107,7 +128,8 @@ const OrderCustomizedTracking = () => {
             };
             setRequest(transformedRequest);
 
-            const steps = transformedRequest.deliveryMethod === 'pickup' ? requestPickupSteps : requestDeliverySteps;
+            // Determine current step
+            const steps = generateTrackingSteps(transformedRequest);
             const finalRequestStatuses = ['completed', 'claimed', 'declined', 'cancelled'];
 
             if (finalRequestStatuses.includes(transformedRequest.status)) {
@@ -235,21 +257,53 @@ const OrderCustomizedTracking = () => {
 
     const getTrackingSteps = () => {
         if (!request) return requestDeliverySteps;
-        return request.deliveryMethod === 'pickup' ? requestPickupSteps : requestDeliverySteps;
+        let baseSteps = request.deliveryMethod === 'pickup' ? [...requestPickupSteps] : [...requestDeliverySteps];
+        baseSteps = baseSteps.map(step => ({ ...step }));
+
+        if (request.payment_method === 'cod') {
+            const paymentStepIndex = baseSteps.findIndex(s => s.key === 'payment');
+            if (paymentStepIndex !== -1) {
+                const [paymentStep] = baseSteps.splice(paymentStepIndex, 1);
+                paymentStep.description = request.deliveryMethod === 'pickup'
+                    ? 'Payment to be collected upon pickup.'
+                    : 'Payment to be collected upon delivery.';
+                baseSteps.splice(baseSteps.length - 1, 0, paymentStep);
+                baseSteps.forEach((step, index) => {
+                    step.id = index + 1;
+                });
+            }
+        }
+        return baseSteps;
     };
 
     const getTimelineDate = (stepId) => {
         if (!request) return '';
-        const requestDate = new Date(request.date);
-        const stepDate = new Date(requestDate.getTime() + (stepId - 1) * 6 * 60 * 60 * 1000);
+        const steps = getTrackingSteps();
+        const step = steps.find(s => s.id === stepId);
+        if (!step) return '';
+
+        const timestamps = request.status_timestamps || {};
+        const stepTimestamp = timestamps[step.key];
 
         if (stepId <= currentStep && currentStep !== -1) {
-            return stepDate.toLocaleString('en-PH', {
-                month: 'short',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
+            if (stepTimestamp) {
+                return new Date(stepTimestamp).toLocaleString('en-PH', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            }
+            // Fallback: use created_at for the first step
+            if (stepId === 1 && request.date) {
+                return new Date(request.date).toLocaleString('en-PH', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            }
+            return '';
         }
         return currentStep === -1 ? 'N/A' : 'Pending';
     };
@@ -477,7 +531,7 @@ const OrderCustomizedTracking = () => {
                                 <>
                                     <div className="delivery-info-row">
                                         <div className="delivery-label">Pickup Location</div>
-                                        <div className="delivery-value">Jocery's Flower Shop, 63 San Jose Road, Zamboanga City</div>
+                                        <div className="delivery-value">Jocerry's Flower Shop, 63 San Jose Road, Zamboanga City</div>
                                     </div>
                                     {request.pickupTime && (
                                         <div className="delivery-info-row">

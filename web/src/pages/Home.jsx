@@ -2,9 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import '../styles/Home.css';
 // Removed API import - using localStorage instead
-import eventImg from '../assets/pictures/EVENTSPECIFIC.jpg';
-import customImg from '../assets/pictures/CUSTOMIZED.jpg';
-import specialImg from '../assets/pictures/SPECIALORDERPAGE.jpg';
+import customImg from '../assets/pictures/aboutpage/Customized-image.jpg';
+import specialImg from '../assets/pictures/aboutpage/Custom-Order.jpg';
 import ProductModal from '../components/ProductModal';
 import InfoModal from '../components/InfoModal';
 

@@ -35,6 +35,27 @@ const OrderTracking = ({ user }) => {
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
 
     useEffect(() => {
+        const generateTrackingSteps = (orderObj) => {
+            if (!orderObj) return deliverySteps;
+            let baseSteps = orderObj.deliveryMethod === 'pickup' ? [...pickupSteps] : [...deliverySteps];
+            baseSteps = baseSteps.map(step => ({ ...step }));
+
+            if (orderObj.payment_method === 'cod') {
+                const paymentStepIndex = baseSteps.findIndex(s => s.key === 'payment');
+                if (paymentStepIndex !== -1) {
+                    const [paymentStep] = baseSteps.splice(paymentStepIndex, 1);
+                    paymentStep.description = orderObj.deliveryMethod === 'pickup'
+                        ? 'Payment to be collected upon pickup.'
+                        : 'Payment to be collected upon delivery.';
+                    baseSteps.splice(baseSteps.length - 1, 0, paymentStep);
+                    baseSteps.forEach((step, index) => {
+                        step.id = index + 1;
+                    });
+                }
+            }
+            return baseSteps;
+        };
+
         const fetchOrder = async () => {
             if (!orderNumber) {
                 setLoading(false);
@@ -87,7 +108,7 @@ const OrderTracking = ({ user }) => {
             setOrder(transformedOrder);
 
             // Determine current step
-            const steps = transformedOrder.deliveryMethod === 'pickup' ? pickupSteps : deliverySteps;
+            const steps = generateTrackingSteps(transformedOrder);
             const finalStatuses = ['completed', 'claimed', 'declined', 'cancelled'];
 
             if (finalStatuses.includes(transformedOrder.status)) {
@@ -216,21 +237,53 @@ const OrderTracking = ({ user }) => {
 
     const getTrackingSteps = () => {
         if (!order) return deliverySteps;
-        return order.deliveryMethod === 'pickup' ? pickupSteps : deliverySteps;
+        let baseSteps = order.deliveryMethod === 'pickup' ? [...pickupSteps] : [...deliverySteps];
+        baseSteps = baseSteps.map(step => ({ ...step }));
+
+        if (order.payment_method === 'cod') {
+            const paymentStepIndex = baseSteps.findIndex(s => s.key === 'payment');
+            if (paymentStepIndex !== -1) {
+                const [paymentStep] = baseSteps.splice(paymentStepIndex, 1);
+                paymentStep.description = order.deliveryMethod === 'pickup'
+                    ? 'Payment to be collected upon pickup.'
+                    : 'Payment to be collected upon delivery.';
+                baseSteps.splice(baseSteps.length - 1, 0, paymentStep);
+                baseSteps.forEach((step, index) => {
+                    step.id = index + 1;
+                });
+            }
+        }
+        return baseSteps;
     };
 
     const getTimelineDate = (stepId) => {
         if (!order) return '';
-        const orderDate = new Date(order.date);
-        const stepDate = new Date(orderDate.getTime() + (stepId - 1) * 6 * 60 * 60 * 1000);
+        const steps = order.deliveryMethod === 'pickup' ? pickupSteps : deliverySteps;
+        const step = steps.find(s => s.id === stepId);
+        if (!step) return '';
+
+        const timestamps = order.status_timestamps || {};
+        const stepTimestamp = timestamps[step.key];
 
         if (stepId <= currentStep && currentStep !== -1) {
-            return stepDate.toLocaleString('en-PH', {
-                month: 'short',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
+            if (stepTimestamp) {
+                return new Date(stepTimestamp).toLocaleString('en-PH', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            }
+            // Fallback: use created_at for the first step
+            if (stepId === 1 && order.date) {
+                return new Date(order.date).toLocaleString('en-PH', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            }
+            return '';
         }
         return currentStep === -1 ? 'N/A' : 'Pending';
     };
@@ -458,7 +511,7 @@ const OrderTracking = ({ user }) => {
                                 <>
                                     <div className="delivery-info-row">
                                         <div className="delivery-label">Pickup Location</div>
-                                        <div className="delivery-value">Jocery's Flower Shop, 63 San Jose Road, Zamboanga City</div>
+                                        <div className="delivery-value">Jocerry's Flower Shop, 63 San Jose Road, Zamboanga City</div>
                                     </div>
                                     {order.pickupTime && (
                                         <div className="delivery-info-row">

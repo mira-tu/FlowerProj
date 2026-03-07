@@ -6,7 +6,7 @@ const Contact = () => {
     const [contactData, setContactData] = useState({
         address: 'Quezon City, Philippines',
         phone: '+63 756 347 901',
-        email: 'JoceryFlowerShop@gmail.com',
+        email: 'JocerryFlowerShop@gmail.com',
         mapUrl: 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d247076.6575168868!2d120.9161946869711!3d14.684126130438186!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3397ba0942ef7375%3A0x4a9a32d9fe083d40!2sQuezon%20City%2C%20Metro%20Manila!5e0!3m2!1sen!2sph!4v1715000000000!5m2!1sen!2sph'
     });
 
@@ -85,7 +85,7 @@ const Contact = () => {
                                 <i className="fas fa-phone-alt"></i>
                             </div>
                             <h3>Call Us</h3>
-                            <p>{contactData.phone}</p>
+                            <p>09975607168</p>
                         </div>
                     </div>
                     <div className="col-md-4">
@@ -94,7 +94,7 @@ const Contact = () => {
                                 <i className="fas fa-envelope"></i>
                             </div>
                             <h3>Email Us</h3>
-                            <p>{contactData.email}</p>
+                            <p>jocerryflowershop@gmail.com</p>
                         </div>
                     </div>
                 </div>

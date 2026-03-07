@@ -1026,7 +1026,7 @@ const Profile = ({ user, logout }) => {
                                                     )}
                                                     <div className="small text-muted">
                                                         <i className="fas fa-map-marker-alt me-1"></i>
-                                                        Jocery's Flower Shop, 63 San Jose Road, Zamboanga City
+                                                        Jocerry's Flower Shop, 63 San Jose Road, Zamboanga City
                                                     </div>
                                                 </div>
                                             </div>
