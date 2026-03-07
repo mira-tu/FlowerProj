@@ -366,20 +366,30 @@ const OrderBookingTracking = () => {
                             {request.status === 'out_for_delivery' && (
                                 <button
                                     style={{
+                                        display: 'inline-block',
                                         padding: '8px 20px',
-                                        backgroundColor: '#e8f5e9', // Light green
-                                        color: '#2e7d32', // Darker green text
-                                        borderRadius: '25px', // Rounded pill shape
+                                        backgroundColor: 'var(--shop-success)',
+                                        color: 'white',
+                                        borderRadius: '6px',
                                         fontWeight: '600',
                                         border: 'none',
                                         cursor: 'pointer',
                                         whiteSpace: 'nowrap',
                                         marginBottom: '8px',
                                         marginRight: '0.5rem',
+                                        transition: 'all 0.2s ease'
                                     }}
                                     onClick={handleRequestReceived}
+                                    onMouseOver={(e) => {
+                                        e.currentTarget.style.transform = 'scale(1.02)';
+                                        e.currentTarget.style.opacity = '0.85';
+                                    }}
+                                    onMouseOut={(e) => {
+                                        e.currentTarget.style.transform = 'scale(1)';
+                                        e.currentTarget.style.opacity = '1';
+                                    }}
                                 >
-                                    Order Received
+                                    <i className="fas fa-check-circle me-2"></i>Order Received
                                 </button>
                             )}
 
@@ -399,7 +409,7 @@ const OrderBookingTracking = () => {
                                     request.status === 'quoted' ? `Please review quote by: ${getExpectedResolutionDate()}` :
                                         `Expected resolution by: ${getExpectedResolutionDate()}`
                                 )}
-                                {isFinalStep && (isPickup ? 'Picked up successfully!' : 'Request fulfilled!')}
+
                                 {isDeclinedOrCancelled && (request.status === 'declined' ? 'Request not fulfilled.' : 'Request cancelled by user.')}
                             </div>
                         </div>

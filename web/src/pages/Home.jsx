@@ -161,16 +161,6 @@ const Home = ({ addToCart, products, categories, user }) => {
             <div id="heroCarousel" className="carousel slide carousel-fade" data-bs-ride="carousel">
                 <div className="carousel-inner">
                     <div className="carousel-item active">
-                        <Link to="/book-event">
-                            <img src={eventImg} className="d-block w-100" alt="Event Flowers" />
-                        </Link>
-                        <div className="carousel-caption">
-                            <h2>Booking for an Event</h2>
-                            <p>Booking early helps us craft your perfect floral experience</p>
-                            <Link to="/book-event" className="btn btn-hero">Book Now</Link>
-                        </div>
-                    </div>
-                    <div className="carousel-item">
                         <Link to="/customized">
                             <img src={customImg} className="d-block w-100" alt="Custom Flowers" />
                         </Link>

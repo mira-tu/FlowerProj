@@ -328,20 +328,30 @@ const OrderTracking = ({ user }) => {
                             {order.status === 'out_for_delivery' && (
                                 <button
                                     style={{
+                                        display: 'inline-block',
                                         padding: '8px 20px',
-                                        backgroundColor: '#e8f5e9',
-                                        color: '#2e7d32',
-                                        borderRadius: '25px',
+                                        backgroundColor: 'var(--shop-success)',
+                                        color: 'white',
+                                        borderRadius: '6px',
                                         fontWeight: '600',
                                         border: 'none',
                                         cursor: 'pointer',
                                         whiteSpace: 'nowrap',
                                         marginBottom: '8px',
                                         marginRight: '0.5rem',
+                                        transition: 'all 0.2s ease'
                                     }}
                                     onClick={handleOrderReceived}
+                                    onMouseOver={(e) => {
+                                        e.currentTarget.style.transform = 'scale(1.02)';
+                                        e.currentTarget.style.opacity = '0.85';
+                                    }}
+                                    onMouseOut={(e) => {
+                                        e.currentTarget.style.transform = 'scale(1)';
+                                        e.currentTarget.style.opacity = '1';
+                                    }}
                                 >
-                                    Order Received
+                                    <i className="fas fa-check-circle me-2"></i>Order Received
                                 </button>
                             )}
 
@@ -356,7 +366,7 @@ const OrderTracking = ({ user }) => {
                             )}
                             <div className="expected-delivery">
                                 {!isFinalStep && !isDeclinedOrCancelled && `Expected delivery by: ${getExpectedDeliveryDate()}`}
-                                {isFinalStep && (isPickup ? 'Picked up successfully!' : 'Delivered successfully!')}
+
                                 {isDeclinedOrCancelled && (order.status === 'declined' ? 'Order not fulfilled.' : 'Order cancelled.')}
                             </div>
                         </div>

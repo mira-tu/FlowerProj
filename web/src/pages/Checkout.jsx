@@ -375,7 +375,18 @@ const Checkout = ({ setCart, user }) => {
                                         className="form-control mb-3"
                                         value={selectedPickupDate}
                                         min={new Date().toISOString().split('T')[0]}
-                                        onChange={(e) => setSelectedPickupDate(e.target.value)}
+                                        onKeyDown={(e) => e.preventDefault()}
+                                        onChange={(e) => {
+                                            const selected = e.target.value;
+                                            const date = new Date(selected);
+                                            const day = date.getUTCDay();
+                                            if (day === 0 || day === 6) {
+                                                showInfoModal('Invalid Date', 'Pickup is only available on weekdays (Monday to Friday).');
+                                                setSelectedPickupDate('');
+                                            } else {
+                                                setSelectedPickupDate(selected);
+                                            }
+                                        }}
                                     />
                                     <div className="d-flex flex-wrap gap-2">
                                         {pickupTimes.map(time => (

@@ -261,7 +261,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
         { key: 'all', label: 'All' },
         { key: 'products', label: 'Products', count: cartItems.length },
         { key: 'customized', label: 'Bouquets', count: customizedItems.length },
-        { key: 'booking', label: 'Event Requests', count: bookingItems.length },
+        { key: 'booking', label: 'Custom Orders', count: bookingItems.length },
     ];
 
     const showProducts = filter === 'all' || filter === 'products';
@@ -325,7 +325,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
     const renderBookingSummary = () => (
         <>
             <div className="d-flex justify-content-between mb-2 pb-2">
-                <span className="text-muted">Event Requests ({selectedBookingCount})</span>
+                <span className="text-muted">Custom Order Requests ({selectedBookingCount})</span>
                 <span className="badge text-white" style={{ background: 'var(--shop-pink)' }}>Pending Quote</span>
             </div>
             <div className="text-muted small mb-3 p-3 rounded" style={{ background: '#fff5f8', border: '1px dashed var(--shop-pink)' }}>
@@ -509,7 +509,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                                             </div>
                                                         </div>
                                                     </div>
-                                                    <div className="col-12 col-md-4 text-end fw-bold align-self-end align-self-md-center fs-4" style={{ color: 'var(--shop-pink)' }}>
+                                                    <div className="col-12 col-md-4 text-end fw-bold align-self-end align-self-md-center fs-4 mt-4 mt-md-0 pt-md-4 pe-3" style={{ color: 'var(--shop-pink)' }}>
                                                         ₱{(item.price || 0).toLocaleString()}
                                                     </div>
                                                 </div>
@@ -523,7 +523,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                             {showBooking && bookingItems.length > 0 && (
                                 <div className="mb-5" style={isTypeDisabled('booking') ? disabledSectionStyle : {}}>
                                     <div className="d-flex align-items-center justify-content-between mb-3 pb-2 border-bottom">
-                                        <h5 className="fw-bold mb-0">Event Booking Requests <span className="badge text-white fs-6 ms-2 align-middle" style={{ background: 'var(--shop-pink)' }}>Pending Quote</span></h5>
+                                        <h5 className="fw-bold mb-0">Custom Order Requests <span className="badge text-white fs-6 ms-2 align-middle" style={{ background: 'var(--shop-pink)' }}>Pending Quote</span></h5>
                                         {isTypeDisabled('booking') && (
                                             <span className="badge bg-light text-muted border small"><i className="fas fa-lock me-1"></i>Deselect current items first</span>
                                         )}
@@ -557,7 +557,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                                             </div>
                                                         </div>
                                                     </div>
-                                                    <div className="col-12 col-md-4 text-end fw-bold align-self-end align-self-md-center">
+                                                    <div className="col-12 col-md-4 text-end fw-bold align-self-end align-self-md-center mt-4 mt-md-0 pt-md-4 pe-3">
                                                         <span className="badge bg-white shadow-sm text-dark border p-2" style={{ color: 'var(--shop-pink)' }}><i className="fas fa-search-dollar me-1" style={{ color: 'var(--shop-pink)' }}></i> For Discussion</span>
                                                     </div>
                                                 </div>
