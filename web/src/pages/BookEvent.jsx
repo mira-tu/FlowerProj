@@ -449,13 +449,18 @@ const BookEvent = ({ user }) => {
                                             <label className="form-label fw-semibold">Arrangement Type <span className="text-danger">*</span></label>
                                             <select name="arrangementType" className="form-select bg-light border-0 py-3" value={formData.arrangementType} onChange={handleChange} required>
                                                 <option value="" disabled>Select Type</option>
-                                                <option value="Bouquet">Hand-tied Bouquet</option>
-                                                <option value="Flower Box">Flower Box</option>
-                                                <option value="Basket Arrangement">Basket Arrangement</option>
-                                                <option value="Table Centerpiece">Table Centerpiece</option>
-                                                <option value="Stage Decoration">Stage Decoration</option>
-                                                <option value="Car Decoration">Bridal Car Decoration</option>
-                                                <option value="Full Event Styling">Full Event Styling</option>
+                                                <option value="Funeral Wreath (Large, 100 flowers)">Funeral Wreath (Large, 100 flowers)</option>
+                                                <option value="Funeral Wreath (Medium, 50 flowers)">Funeral Wreath (Medium, 50 flowers)</option>
+                                                <option value="Funeral Flower Stand (Large, 100 flowers)">Funeral Flower Stand (Large, 100 flowers)</option>
+                                                <option value="Funeral Flower Stand (Medium, 50 flowers)">Funeral Flower Stand (Medium, 50 flowers)</option>
+                                                <option value="Bridal Bouquet (20 flowers)">Bridal Bouquet (20 flowers)</option>
+                                                <option value="Table Centerpiece (12 flowers)">Table Centerpiece (12 flowers)</option>
+                                                <option value="Corsage (3 flowers)">Corsage (3 flowers)</option>
+                                                <option value="Bridesmaid Bouquet (10 flowers)">Bridesmaid Bouquet (10 flowers)</option>
+                                                <option value="Flower Box (Medium, 9 flowers)">Flower Box (Medium, 9 flowers)</option>
+                                                <option value="Flower Box (Large, 15 flowers)">Flower Box (Large, 15 flowers)</option>
+                                                <option value="Heart-Shaped Funeral Wreath (Large, 100 flowers)">Heart-Shaped Funeral Wreath (Large, 100 flowers)</option>
+                                                <option value="Heart-Shaped Funeral Wreath (Medium, 50 flowers)">Heart-Shaped Funeral Wreath (Medium, 50 flowers)</option>
                                                 <option value="Other">Others</option>
                                             </select>
                                             {formData.arrangementType === 'Other' && (

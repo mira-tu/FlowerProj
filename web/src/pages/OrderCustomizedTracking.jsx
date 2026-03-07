@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabase';
 import TrackingPaymentDetails from '../components/TrackingPaymentDetails';
 import InfoModal from '../components/InfoModal';
+import { buildTimelineTimestampMap, formatTimelineTimestamp } from '../utils/timelineTimestamps';
 import '../styles/Shop.css';
 
 // Timeline steps for Delivery Requests
@@ -278,34 +279,14 @@ const OrderCustomizedTracking = () => {
 
     const getTimelineDate = (stepId) => {
         if (!request) return '';
-        const steps = getTrackingSteps();
-        const step = steps.find(s => s.id === stepId);
+        const step = trackingSteps.find((s) => s.id === stepId);
         if (!step) return '';
 
-        const timestamps = request.status_timestamps || {};
-        const stepTimestamp = timestamps[step.key];
+        if (currentStep === -1) return 'N/A';
+        if (stepId > currentStep) return 'Pending';
 
-        if (stepId <= currentStep && currentStep !== -1) {
-            if (stepTimestamp) {
-                return new Date(stepTimestamp).toLocaleString('en-PH', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
-            }
-            // Fallback: use created_at for the first step
-            if (stepId === 1 && request.date) {
-                return new Date(request.date).toLocaleString('en-PH', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
-            }
-            return '';
-        }
-        return currentStep === -1 ? 'N/A' : 'Pending';
+        const resolvedTimestamp = timelineTimestampMap[stepId] || request.date || request.updated_at;
+        return formatTimelineTimestamp(resolvedTimestamp, 'en-PH');
     };
 
     const getExpectedResolutionDate = () => {
@@ -336,6 +317,13 @@ const OrderCustomizedTracking = () => {
     };
 
     const trackingSteps = getTrackingSteps();
+    const timelineTimestampMap = buildTimelineTimestampMap({
+        steps: trackingSteps,
+        currentStep,
+        statusTimestamps: request?.status_timestamps || {},
+        createdAt: request?.date,
+        updatedAt: request?.updated_at
+    });
     const isPickup = request?.deliveryMethod === 'pickup';
     const isFinalStep = currentStep >= trackingSteps.length && currentStep !== -1;
     const isDeclinedOrCancelled = currentStep === -1;
@@ -660,3 +648,4 @@ const OrderCustomizedTracking = () => {
 };
 
 export default OrderCustomizedTracking;
+
