@@ -258,10 +258,10 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
 
     // ===== FILTER =====
     const filterOptions = [
-        { key: 'all', label: 'All', icon: 'fas fa-th-list' },
-        { key: 'products', label: 'Products', icon: 'fas fa-box', count: cartItems.length },
-        { key: 'customized', label: 'Bouquets', icon: 'fas fa-paint-brush', count: customizedItems.length },
-        { key: 'booking', label: 'Event Requests', icon: 'fas fa-calendar-alt', count: bookingItems.length },
+        { key: 'all', label: 'All' },
+        { key: 'products', label: 'Products', count: cartItems.length },
+        { key: 'customized', label: 'Bouquets', count: customizedItems.length },
+        { key: 'booking', label: 'Event Requests', count: bookingItems.length },
     ];
 
     const showProducts = filter === 'all' || filter === 'products';
@@ -285,11 +285,11 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
             <hr />
             <div className="d-flex justify-content-between mb-4 mt-3">
                 <span className="fw-bold fs-5">Estimated Total</span>
-                <span className="fw-bold fs-4" style={{ color: 'var(--shop-success)' }}>₱{productTotal.toLocaleString()}</span>
+                <span className="fw-bold fs-4" style={{ color: 'var(--shop-pink)' }}>₱{productTotal.toLocaleString()}</span>
             </div>
             <button
                 className="btn w-100 py-3 fw-bold shadow-sm text-white rounded-pill"
-                style={{ background: 'var(--shop-success)', border: 'none', fontSize: '1.1rem' }}
+                style={{ background: 'var(--shop-pink)', border: 'none', fontSize: '1.1rem' }}
                 onClick={handleProductCheckout}
             >
                 <i className="fas fa-shopping-bag me-2"></i>Proceed to Checkout ({selectedProductsCount})
@@ -310,11 +310,11 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
             <hr />
             <div className="d-flex justify-content-between mb-4 mt-3">
                 <span className="fw-bold fs-5">Estimated Total</span>
-                <span className="fw-bold fs-4" style={{ color: '#9c27b0' }}>₱{customizedTotal.toLocaleString()}</span>
+                <span className="fw-bold fs-4" style={{ color: 'var(--shop-pink)' }}>₱{customizedTotal.toLocaleString()}</span>
             </div>
             <button
                 className="btn w-100 py-3 fw-bold shadow-sm text-white rounded-pill"
-                style={{ background: '#9c27b0', border: 'none', fontSize: '1.1rem' }}
+                style={{ background: 'var(--shop-pink)', border: 'none', fontSize: '1.1rem' }}
                 onClick={handleCustomizedCheckout}
             >
                 <i className="fas fa-paint-brush me-2"></i>Checkout Bouquets ({selectedCustomizedCount})
@@ -326,15 +326,15 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
         <>
             <div className="d-flex justify-content-between mb-2 pb-2">
                 <span className="text-muted">Event Requests ({selectedBookingCount})</span>
-                <span className="badge bg-warning text-dark">Pending Quote</span>
+                <span className="badge text-white" style={{ background: 'var(--shop-pink)' }}>Pending Quote</span>
             </div>
-            <div className="text-muted small mb-3 p-3 rounded" style={{ background: '#fffdf6', border: '1px dashed #f39c12' }}>
-                <i className="fas fa-info-circle me-2" style={{ color: '#f39c12' }}></i>
+            <div className="text-muted small mb-3 p-3 rounded" style={{ background: '#fff5f8', border: '1px dashed var(--shop-pink)' }}>
+                <i className="fas fa-info-circle me-2" style={{ color: 'var(--shop-pink)' }}></i>
                 Custom orders require admin review before pricing. No monetary total will be charged at this step.
             </div>
             <button
                 className="btn w-100 py-3 fw-bold shadow-sm rounded-pill"
-                style={{ background: '#fff', color: '#f39c12', border: '2px solid #f39c12', fontSize: '1.1rem' }}
+                style={{ background: '#fff', color: 'var(--shop-pink)', border: '2px solid var(--shop-pink)', fontSize: '1.1rem' }}
                 onClick={handleBookingSubmit}
             >
                 <i className="fas fa-paper-plane me-2"></i>Submit for Review ({selectedBookingCount})
@@ -359,19 +359,19 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
 
     // ===== SUMMARY HEADER COLORS =====
     const summaryHeaderColor = activeSelectionType === 'product'
-        ? 'var(--shop-success)'
+        ? 'var(--shop-pink)'
         : activeSelectionType === 'customized'
-            ? '#9c27b0'
+            ? 'var(--shop-pink)'
             : activeSelectionType === 'booking'
-                ? '#f39c12'
+                ? 'var(--shop-pink)'
                 : 'var(--shop-pink)';
 
     const summaryTitle = activeSelectionType === 'product'
-        ? '🛒 Product Checkout'
+        ? 'Product Checkout'
         : activeSelectionType === 'customized'
-            ? '🎨 Bouquet Checkout'
+            ? 'Bouquet Checkout'
             : activeSelectionType === 'booking'
-                ? '📅 Event Request'
+                ? 'Event Request'
                 : 'Order Summary';
 
     return (
@@ -398,7 +398,6 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                 style={filter === opt.key ? { background: 'var(--shop-pink)', border: 'none' } : {}}
                                 onClick={() => setFilter(opt.key)}
                             >
-                                <i className={opt.icon}></i>
                                 <span className="fw-semibold">{opt.label}</span>
                                 {opt.count !== undefined && opt.count > 0 && (
                                     <span className="badge rounded-pill ms-1" style={filter === opt.key ? { background: 'rgba(255,255,255,0.3)', color: 'white' } : { background: '#eee', color: '#333' }}>{opt.count}</span>
@@ -433,7 +432,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                     {cartItems.map(item => (
                                         <div key={item.id}
                                             className="card border-0 shadow-sm mb-3 cart-item-card"
-                                            style={{ cursor: isTypeDisabled('product') ? 'not-allowed' : 'pointer', transition: 'box-shadow 0.2s', border: item.selected ? '2px solid #4caf50' : '1px solid transparent' }}
+                                            style={{ cursor: isTypeDisabled('product') ? 'not-allowed' : 'pointer', transition: 'box-shadow 0.2s', border: item.selected ? '2px solid var(--shop-pink)' : '1px solid transparent' }}
                                             onClick={() => !isTypeDisabled('product') && toggleSelect(item.id)}
                                         >
                                             <div className="card-body position-relative">
@@ -445,7 +444,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                                 <div className="row align-items-center g-2">
                                                     <div className="col-12 col-md-5 d-flex align-items-center">
                                                         <div className="form-check me-2 me-md-3 mb-0" onClick={(e) => e.stopPropagation()}>
-                                                            <input className="form-check-input" type="checkbox" checked={item.selected} disabled={isTypeDisabled('product')} onChange={() => toggleSelect(item.id, 'product')} style={{ borderColor: item.selected ? '#4caf50' : '#dee2e6', backgroundColor: item.selected ? '#4caf50' : 'white', cursor: isTypeDisabled('product') ? 'not-allowed' : 'pointer', transform: 'scale(1.2)' }} />
+                                                            <input className="form-check-input" type="checkbox" checked={item.selected} disabled={isTypeDisabled('product')} onChange={() => toggleSelect(item.id, 'product')} style={{ borderColor: item.selected ? 'var(--shop-pink)' : '#dee2e6', backgroundColor: item.selected ? 'var(--shop-pink)' : 'white', cursor: isTypeDisabled('product') ? 'not-allowed' : 'pointer', transform: 'scale(1.2)' }} />
                                                         </div>
                                                         <img src={item.image} alt={item.name} className="rounded flex-shrink-0" style={{ width: '70px', height: '70px', objectFit: 'cover' }} onError={(e) => e.target.src = 'https://via.placeholder.com/80'} />
                                                         <div className="ms-2 ms-md-3 pe-4 pe-md-0 flex-grow-1">
@@ -463,7 +462,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                                             </div>
                                                         </div>
                                                     </div>
-                                                    <div className="col-6 col-md-2 text-end text-md-center fw-bold mt-2 mt-md-0 align-self-end align-self-md-center" style={{ color: '#4caf50', fontSize: '1.1rem' }}>₱{(item.price * item.qty).toLocaleString()}</div>
+                                                    <div className="col-6 col-md-2 text-end text-md-center fw-bold mt-2 mt-md-0 align-self-end align-self-md-center" style={{ color: 'var(--shop-pink)', fontSize: '1.1rem' }}>₱{(item.price * item.qty).toLocaleString()}</div>
                                                     <div className="col-md-1 text-center d-none d-md-block">
                                                         <button className="btn btn-outline-danger btn-sm rounded-circle d-inline-flex align-items-center justify-content-center" style={{ width: '36px', height: '36px' }} onClick={(e) => { e.stopPropagation(); removeItem(item.id, 'product'); }} title="Remove item">
                                                             <i className="fas fa-trash-alt"></i>
@@ -486,7 +485,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                         )}
                                     </div>
                                     {customizedItems.map(item => (
-                                        <div key={item.listId} className="card border-0 shadow-sm mb-3" style={{ cursor: isTypeDisabled('customized') ? 'not-allowed' : 'pointer', transition: 'box-shadow 0.2s', border: item.selected ? '2px solid #9c27b0' : '1px solid transparent' }} onClick={() => !isTypeDisabled('customized') && toggleSelect(item.listId, 'customized')}>
+                                        <div key={item.listId} className="card border-0 shadow-sm mb-3" style={{ cursor: isTypeDisabled('customized') ? 'not-allowed' : 'pointer', transition: 'box-shadow 0.2s', border: item.selected ? '2px solid var(--shop-pink)' : '1px solid transparent' }} onClick={() => !isTypeDisabled('customized') && toggleSelect(item.listId, 'customized')}>
                                             <div className="card-body position-relative">
                                                 <div className="position-absolute top-0 end-0 p-3" style={{ zIndex: 10 }}>
                                                     <button className="btn btn-outline-danger btn-sm rounded-circle d-inline-flex align-items-center justify-content-center" style={{ width: '32px', height: '32px', border: 'none', pointerEvents: 'auto' }} onClick={(e) => { e.stopPropagation(); removeItem(item.listId, 'customized'); }}>
@@ -496,7 +495,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                                 <div className="row align-items-center g-2">
                                                     <div className="col-12 col-md-8 d-flex align-items-center">
                                                         <div className="form-check me-3 mb-0" onClick={(e) => e.stopPropagation()}>
-                                                            <input className="form-check-input" type="checkbox" checked={item.selected} disabled={isTypeDisabled('customized')} onChange={() => toggleSelect(item.listId, 'customized')} style={{ borderColor: item.selected ? '#9c27b0' : '#dee2e6', backgroundColor: item.selected ? '#9c27b0' : 'white', cursor: isTypeDisabled('customized') ? 'not-allowed' : 'pointer', transform: 'scale(1.2)' }} />
+                                                            <input className="form-check-input" type="checkbox" checked={item.selected} disabled={isTypeDisabled('customized')} onChange={() => toggleSelect(item.listId, 'customized')} style={{ borderColor: item.selected ? 'var(--shop-pink)' : '#dee2e6', backgroundColor: item.selected ? 'var(--shop-pink)' : 'white', cursor: isTypeDisabled('customized') ? 'not-allowed' : 'pointer', transform: 'scale(1.2)' }} />
                                                         </div>
                                                         {item.image && (
                                                             <img src={item.image} alt="Custom Bouquet" className="rounded border bg-light flex-shrink-0" style={{ width: '80px', height: '80px', objectFit: 'contain' }} />
@@ -510,7 +509,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                                             </div>
                                                         </div>
                                                     </div>
-                                                    <div className="col-12 col-md-4 text-end fw-bold align-self-end align-self-md-center fs-4" style={{ color: '#9c27b0' }}>
+                                                    <div className="col-12 col-md-4 text-end fw-bold align-self-end align-self-md-center fs-4" style={{ color: 'var(--shop-pink)' }}>
                                                         ₱{(item.price || 0).toLocaleString()}
                                                     </div>
                                                 </div>
@@ -524,13 +523,13 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                             {showBooking && bookingItems.length > 0 && (
                                 <div className="mb-5" style={isTypeDisabled('booking') ? disabledSectionStyle : {}}>
                                     <div className="d-flex align-items-center justify-content-between mb-3 pb-2 border-bottom">
-                                        <h5 className="fw-bold mb-0">Event Booking Requests <span className="badge bg-warning text-dark fs-6 ms-2 align-middle">Pending Quote</span></h5>
+                                        <h5 className="fw-bold mb-0">Event Booking Requests <span className="badge text-white fs-6 ms-2 align-middle" style={{ background: 'var(--shop-pink)' }}>Pending Quote</span></h5>
                                         {isTypeDisabled('booking') && (
                                             <span className="badge bg-light text-muted border small"><i className="fas fa-lock me-1"></i>Deselect current items first</span>
                                         )}
                                     </div>
                                     {bookingItems.map(item => (
-                                        <div key={item.listId} className="card border-0 shadow-sm mb-3" style={{ cursor: isTypeDisabled('booking') ? 'not-allowed' : 'pointer', transition: 'box-shadow 0.2s', border: item.selected ? '2px solid #f39c12' : '1px solid transparent', backgroundColor: '#fffdf6' }} onClick={() => !isTypeDisabled('booking') && toggleSelect(item.listId, 'booking')}>
+                                        <div key={item.listId} className="card border-0 shadow-sm mb-3" style={{ cursor: isTypeDisabled('booking') ? 'not-allowed' : 'pointer', transition: 'box-shadow 0.2s', border: item.selected ? '2px solid var(--shop-pink)' : '1px solid transparent', backgroundColor: '#ffffff' }} onClick={() => !isTypeDisabled('booking') && toggleSelect(item.listId, 'booking')}>
                                             <div className="card-body position-relative">
                                                 <div className="position-absolute top-0 end-0 p-3" style={{ zIndex: 10 }}>
                                                     <button className="btn btn-outline-danger btn-sm rounded-circle d-inline-flex align-items-center justify-content-center" style={{ width: '32px', height: '32px', border: 'none', pointerEvents: 'auto' }} onClick={(e) => { e.stopPropagation(); removeItem(item.listId, 'booking'); }}>
@@ -540,7 +539,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                                 <div className="row align-items-center g-2">
                                                     <div className="col-12 col-md-8 d-flex align-items-center">
                                                         <div className="form-check me-3 mb-0" onClick={(e) => e.stopPropagation()}>
-                                                            <input className="form-check-input" type="checkbox" checked={item.selected} disabled={isTypeDisabled('booking')} onChange={() => toggleSelect(item.listId, 'booking')} style={{ borderColor: item.selected ? '#f39c12' : '#dee2e6', backgroundColor: item.selected ? '#f39c12' : 'white', cursor: isTypeDisabled('booking') ? 'not-allowed' : 'pointer', transform: 'scale(1.2)' }} />
+                                                            <input className="form-check-input" type="checkbox" checked={item.selected} disabled={isTypeDisabled('booking')} onChange={() => toggleSelect(item.listId, 'booking')} style={{ borderColor: item.selected ? 'var(--shop-pink)' : '#dee2e6', backgroundColor: item.selected ? 'var(--shop-pink)' : 'white', cursor: isTypeDisabled('booking') ? 'not-allowed' : 'pointer', transform: 'scale(1.2)' }} />
                                                         </div>
                                                         {item.inspirationImageBase64 ? (
                                                             <img src={item.inspirationImageBase64} alt="Inspiration" className="rounded border bg-light flex-shrink-0" style={{ width: '80px', height: '80px', objectFit: 'cover' }} />
@@ -559,7 +558,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                                         </div>
                                                     </div>
                                                     <div className="col-12 col-md-4 text-end fw-bold align-self-end align-self-md-center">
-                                                        <span className="badge bg-white shadow-sm text-dark border p-2" style={{ color: '#f39c12' }}><i className="fas fa-search-dollar me-1" style={{ color: '#f39c12' }}></i> For Discussion</span>
+                                                        <span className="badge bg-white shadow-sm text-dark border p-2" style={{ color: 'var(--shop-pink)' }}><i className="fas fa-search-dollar me-1" style={{ color: 'var(--shop-pink)' }}></i> For Discussion</span>
                                                     </div>
                                                 </div>
                                             </div>

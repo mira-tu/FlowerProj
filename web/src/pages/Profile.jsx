@@ -1507,6 +1507,7 @@ const Profile = ({ user, logout }) => {
                                 />
                             </div>
                             <div className="form-group">
+                                <label className="form-label">Phone Number</label>
                                 <input
                                     type="tel"
                                     className={`form-control-custom ${formErrors.phone ? 'is-invalid' : ''}`}
