@@ -35,6 +35,25 @@ const CustomizedCheckout = ({ user }) => {
     });
     const [selectedAddressId, setSelectedAddressId] = useState(null);
     const [dynamicShippingFee, setDynamicShippingFee] = useState(100);
+    const [freeShippingThreshold, setFreeShippingThreshold] = useState(2000);
+
+    useEffect(() => {
+        const fetchThreshold = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('app_content')
+                    .select('value')
+                    .eq('key', 'free_shipping_threshold')
+                    .single();
+                if (!error && data && data.value) {
+                    setFreeShippingThreshold(parseFloat(data.value) || 2000);
+                }
+            } catch (err) {
+                console.error("Error fetching free shipping threshold:", err);
+            }
+        };
+        fetchThreshold();
+    }, []);
 
     const showInfoModal = (title, message) => setInfoModal({ show: true, title, message });
 
@@ -79,7 +98,7 @@ const CustomizedCheckout = ({ user }) => {
     }, []);
 
     const subtotal = checkoutItems.reduce((acc, item) => acc + (item.price * (item.qty || 1)), 0);
-    const shippingFee = deliveryMethod === 'pickup' ? 0 : (subtotal >= 2000 ? 0 : dynamicShippingFee);
+    const shippingFee = deliveryMethod === 'pickup' ? 0 : (subtotal >= freeShippingThreshold ? 0 : dynamicShippingFee);
     const total = subtotal + shippingFee;
 
     const handlePaymentChange = (paymentId) => {
@@ -494,7 +513,7 @@ const CustomizedCheckout = ({ user }) => {
                             {shippingFee === 0 && deliveryMethod === 'delivery' && (
                                 <div className="text-success small mb-2">
                                     <i className="fas fa-check-circle me-1"></i>
-                                    Free shipping for orders ₱2,000+
+                                    Free shipping for orders ₱{freeShippingThreshold.toLocaleString()}+
                                 </div>
                             )}
 

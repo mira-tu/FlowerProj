@@ -20,8 +20,13 @@ const DeliveryFeesTab = () => {
     const [deliveryFee, setDeliveryFee] = useState('');
     const [confirmDelete, setConfirmDelete] = useState(false);
 
+    // Free Shipping State
+    const [freeShippingThreshold, setFreeShippingThreshold] = useState('');
+    const [savingThreshold, setSavingThreshold] = useState(false);
+
     useEffect(() => {
         fetchBarangays();
+        fetchSettings();
     }, []);
 
     const fetchBarangays = async () => {
@@ -39,6 +44,41 @@ const DeliveryFeesTab = () => {
             Toast.show({ type: 'error', text1: 'Failed to load delivery fees.' });
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchSettings = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('app_content')
+                .select('value')
+                .eq('key', 'free_shipping_threshold')
+                .single();
+            if (error && error.code !== 'PGRST116') throw error;
+            if (data) setFreeShippingThreshold(data.value);
+        } catch (error) {
+            console.error('Error fetching threshold:', error);
+        }
+    };
+
+    const handleSaveThreshold = async () => {
+        const thresholdNum = parseFloat(freeShippingThreshold);
+        if (isNaN(thresholdNum) || thresholdNum < 0) {
+            Alert.alert('Error', 'Please enter a valid amount.');
+            return;
+        }
+        setSavingThreshold(true);
+        try {
+            const { error } = await supabase
+                .from('app_content')
+                .upsert({ key: 'free_shipping_threshold', value: String(thresholdNum) }, { onConflict: 'key' });
+            if (error) throw error;
+            Toast.show({ type: 'success', text1: 'Promo updated successfully.' });
+        } catch (error) {
+            console.error('Error saving threshold:', error);
+            Toast.show({ type: 'error', text1: 'Failed to update promo.' });
+        } finally {
+            setSavingThreshold(false);
         }
     };
 
@@ -164,6 +204,33 @@ const DeliveryFeesTab = () => {
                         <Ionicons name="close-circle" size={20} color="#ccc" />
                     </TouchableOpacity>
                 )}
+            </View>
+
+            <View style={styles.promoContainer}>
+                <View style={{ flex: 1 }}>
+                    <Text style={styles.promoTitle}>Free Shipping Promo</Text>
+                    <Text style={styles.promoDesc}>Minimum order amount (₱)</Text>
+                </View>
+                <View style={styles.promoInputContainer}>
+                    <TextInput
+                        style={styles.promoInput}
+                        keyboardType="numeric"
+                        value={freeShippingThreshold}
+                        onChangeText={setFreeShippingThreshold}
+                        placeholder="e.g. 2000"
+                    />
+                    <TouchableOpacity
+                        style={styles.promoSaveBtn}
+                        onPress={handleSaveThreshold}
+                        disabled={savingThreshold}
+                    >
+                        {savingThreshold ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                            <Text style={styles.promoSaveBtnText}>Save</Text>
+                        )}
+                    </TouchableOpacity>
+                </View>
             </View>
 
             {loading ? (
@@ -297,6 +364,61 @@ const styles = StyleSheet.create({
         marginLeft: 8,
         fontSize: 16,
         color: '#111827',
+    },
+    promoContainer: {
+        backgroundColor: '#fff',
+        marginHorizontal: 16,
+        marginBottom: 16,
+        padding: 16,
+        borderRadius: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 2,
+        elevation: 2,
+    },
+    promoTitle: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: '#111827',
+        marginBottom: 4,
+    },
+    promoDesc: {
+        fontSize: 13,
+        color: '#6B7280',
+    },
+    promoInputContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    promoInput: {
+        backgroundColor: '#F9FAFB',
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        fontSize: 15,
+        color: '#111827',
+        width: 100,
+        textAlign: 'center',
+    },
+    promoSaveBtn: {
+        backgroundColor: '#ec4899',
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        borderRadius: 8,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    promoSaveBtnText: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 14,
     },
     listContainer: {
         padding: 16,

@@ -8,6 +8,25 @@ const CustomizedCart = ({ user }) => {
     const [cartItems, setCartItems] = useState([]);
     const [shippingFee, setShippingFee] = useState(0);
     const [address, setAddress] = useState(null);
+    const [freeShippingThreshold, setFreeShippingThreshold] = useState(2000);
+
+    useEffect(() => {
+        const fetchThreshold = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('app_content')
+                    .select('value')
+                    .eq('key', 'free_shipping_threshold')
+                    .single();
+                if (!error && data && data.value) {
+                    setFreeShippingThreshold(parseFloat(data.value) || 2000);
+                }
+            } catch (err) {
+                console.error("Error fetching free shipping threshold:", err);
+            }
+        };
+        fetchThreshold();
+    }, []);
 
     useEffect(() => {
         const cartKey = `customizedCart_${user?.id || 'guest'}`;
@@ -69,7 +88,7 @@ const CustomizedCart = ({ user }) => {
                     setShippingFee(100); // Fallback
                 } else if (data && data.length > 0) {
                     const fee = data[0].delivery_fee;
-                    setShippingFee(totalAmount >= 2000 ? 0 : fee);
+                    setShippingFee(totalAmount >= freeShippingThreshold ? 0 : fee);
                 } else {
                     setShippingFee(100); // Fallback
                 }
