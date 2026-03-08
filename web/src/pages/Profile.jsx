@@ -174,6 +174,8 @@ const Profile = ({ user, logout }) => {
         fullName: '',
         phone: '',
         dateOfBirth: '',
+        currentPassword: '',
+        newPassword: '',
     });
     const [profileData, setProfileData] = useState(null); // New state for fetched profile data
     const [status, setStatus] = useState(null);
@@ -1244,6 +1246,23 @@ const Profile = ({ user, logout }) => {
                 throw authError;
             }
 
+            // Update password if a new one is provided
+            if (profileForm.newPassword) {
+                const { error: passwordError } = await supabase.auth.updateUser({
+                    password: profileForm.newPassword
+                });
+                if (passwordError) {
+                    throw passwordError;
+                }
+
+                // Clear password fields from state after successful update
+                setProfileForm(prev => ({
+                    ...prev,
+                    currentPassword: '',
+                    newPassword: ''
+                }));
+            }
+
             setStatus({ type: 'success', message: 'Profile updated successfully!' });
 
         } catch (error) {
@@ -1297,9 +1316,8 @@ const Profile = ({ user, logout }) => {
                             name="phone"
                             value={profileForm.phone}
                             onChange={handleProfileFormChange}
-                            placeholder="09171234567"
+                            placeholder="+639171234567 or 09171234567"
                         />
-                        <div className="form-text">Use format +639171234567 or 09171234567.</div>
                     </div>
                     <div className="col-md-6 mb-3">
                         <label className="form-label">Date of Birth</label>
@@ -1319,11 +1337,25 @@ const Profile = ({ user, logout }) => {
                 <div className="row">
                     <div className="col-md-6 mb-3">
                         <label className="form-label">Current Password</label>
-                        <input type="password" className="form-control" />
+                        <input
+                            type="password"
+                            className="form-control"
+                            name="currentPassword"
+                            value={profileForm.currentPassword}
+                            onChange={handleProfileFormChange}
+                            placeholder="Leave blank to keep current"
+                        />
                     </div>
                     <div className="col-md-6 mb-3">
                         <label className="form-label">New Password</label>
-                        <input type="password" className="form-control" />
+                        <input
+                            type="password"
+                            className="form-control"
+                            name="newPassword"
+                            value={profileForm.newPassword}
+                            onChange={handleProfileFormChange}
+                            placeholder="Enter new password"
+                        />
                     </div>
                 </div>
 

@@ -296,6 +296,23 @@ const Home = ({ addToCart, products, categories, user }) => {
                 </div>
             </section>
 
+            {/* Admin App Download Feature */}
+            <section className="py-5" style={{ backgroundColor: '#fff0f6' }}>
+                <div className="container text-center">
+                    <div className="row justify-content-center">
+                        <div className="col-md-8">
+                            <h2 className="mb-3 fw-bold" style={{ color: 'var(--main-pink)' }}>Manage Your Shop Anywhere</h2>
+                            <p className="text-muted mb-4 fs-5">
+                                Download this for admin mobile app to easily manage orders, products, and site content directly from your phone.
+                            </p>
+                            <a href="#" className="btn btn-hero shadow-sm rounded-pill px-5 py-3 fs-5" style={{ backgroundColor: 'var(--main-pink)', color: 'white', border: 'none' }}>
+                                <i className="fa-brands fa-android me-2"></i> Download Admin App
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <ProductModal
                 product={selectedProduct}
                 onClose={() => setSelectedProduct(null)}

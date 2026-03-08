@@ -270,6 +270,18 @@
     background-color: rgba(240, 123, 150, 0.1);
 }
 
+.dropdown-item:active,
+.dropdown-item:focus {
+    background-color: #f8f9fa;
+    color: var(--text-dark);
+}
+
+.dropdown-item.text-danger:active,
+.dropdown-item.text-danger:focus {
+    background-color: #fef2f2;
+    color: #dc3545;
+}
+
 /* ============================================
    Mobile Responsive Styles
    ============================================ */
