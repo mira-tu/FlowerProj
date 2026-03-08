@@ -312,12 +312,12 @@ const SalesTab = () => {
           </style>
         </head>
         <body>
-          <h1>🌸 Jocery's Flower Shop</h1>
+          <h1>Jocery's Flower Shop</h1>
           <p class="subtitle">Sales Report — ${periodLabel} | Generated: ${dateGenerated}</p>
 
           
           ${summary ? `
-          <h2>📊 Sales Summary</h2>
+          <h2>Sales Summary</h2>
           <div class="summary-grid">
             <div class="summary-card">
               <div class="value">₱${currentSales.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
@@ -339,7 +339,7 @@ const SalesTab = () => {
           ` : ''}
 
           ${showBestSellers && bestSellers.length > 0 ? `
-            <h2>🏆 Best Selling Products</h2>
+            <h2>Best Selling Products</h2>
             <table>
               <thead>
                 <tr>
@@ -356,7 +356,7 @@ const SalesTab = () => {
           ` : ''}
 
           ${showTransactions && transactions.length > 0 ? `
-            <h2>📋 Transaction History</h2>
+            <h2>Transaction History</h2>
             <table>
               <thead>
                 <tr>
@@ -373,9 +373,7 @@ const SalesTab = () => {
             </table>
           ` : ''}
 
-          <div class="footer">
-            Jocery's Flower Shop — Sales Report. This document was auto-generated.
-          </div>
+
         </body>
         </html>
       `;
