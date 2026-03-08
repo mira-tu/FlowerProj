@@ -924,7 +924,7 @@ const Profile = ({ user, logout }) => {
                                                     {item.variant && (
                                                         <div className="order-item-variant">{item.variant}</div>
                                                     )}
-                                                    <div className="order-item-qty">x{item.qty || 1}</div>
+                                                    <div className="order-item-qty">x{item.quantity || item.qty || 1}</div>
                                                 </div>
                                                 {!order.type && (
                                                     <div className="order-item-price">

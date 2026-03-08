@@ -487,7 +487,7 @@ const CatalogueTab = () => {
                 disabled={loading}
               >
                 <Text style={styles.buttonText}>
-                  {loading ? 'Saving...' : 'Add Product'}
+                  {loading ? 'Saving...' : (editingProduct ? 'Update Product' : 'Add Product')}
                 </Text>
               </TouchableOpacity>
             </View>

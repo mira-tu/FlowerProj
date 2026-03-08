@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import '../styles/Shop.css';
+import InfoModal from '../components/InfoModal';
 
 const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
     const navigate = useNavigate();
@@ -9,6 +10,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
     const [customizedItems, setCustomizedItems] = useState([]);
     const [bookingItems, setBookingItems] = useState([]);
     const [filter, setFilter] = useState('all');
+    const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
 
     // Load main products cart
     useEffect(() => {
@@ -201,7 +203,11 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
             if (item.stockQuantity && newQty > item.stockQuantity) {
                 newQty = item.stockQuantity;
                 if (change > 0) {
-                    alert(`Only ${item.stockQuantity} items in stock for ${item.name}`);
+                    setInfoModal({
+                        show: true,
+                        title: 'Stock Limit Reached',
+                        message: `Only ${item.stockQuantity} items in stock for ${item.name}`
+                    });
                 }
             }
             updateCartItem(id, newQty);
@@ -376,6 +382,12 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
 
     return (
         <div className="container py-5 mt-5 bg-light" style={{ minHeight: '80vh', overflowX: 'hidden' }}>
+            <InfoModal
+                show={infoModal.show}
+                onClose={() => setInfoModal({ show: false, title: '', message: '' })}
+                title={infoModal.title}
+                message={infoModal.message}
+            />
             <h2 className="fw-bold mb-4"><i className="fas fa-shopping-cart me-2"></i> Unified Shopping Cart</h2>
 
             {isCartEmpty ? (

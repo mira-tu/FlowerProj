@@ -283,15 +283,15 @@ const AboutTab = () => {
 
       <View style={styles.menuDivider} />
 
-      <Text style={styles.inputLabel}>Event Decorations Description</Text>
+      <Text style={styles.inputLabel}>Custom Order Description</Text>
       <TextInput
         style={[styles.input, { height: 100, textAlignVertical: 'top' }]}
         value={aboutData.eventDecorationsDescription}
         onChangeText={text => setAboutData(prev => ({ ...prev, eventDecorationsDescription: text }))}
-        placeholder="Description for event decorations service..."
+        placeholder="Description for custom order service..."
         multiline
       />
-      <Text style={styles.inputLabel}>Event Decorations Image</Text>
+      <Text style={styles.inputLabel}>Custom Order Image</Text>
       <TouchableOpacity style={styles.imageUploadBox} onPress={() => pickImage('eventDecorationsImage')}>
         {getImageUri(aboutData.eventDecorationsImage) ? (
           <Image source={{ uri: getImageUri(aboutData.eventDecorationsImage) }} style={styles.uploadedImage} />
@@ -302,17 +302,6 @@ const AboutTab = () => {
           </View>
         )}
       </TouchableOpacity>
-
-      <View style={styles.menuDivider} />
-
-      <Text style={styles.inputLabel}>Special Orders Description</Text>
-      <TextInput
-        style={[styles.input, { height: 100, textAlignVertical: 'top' }]}
-        value={aboutData.specialOrdersDescription}
-        onChangeText={text => setAboutData(prev => ({ ...prev, specialOrdersDescription: text }))}
-        placeholder="Description for special orders service..."
-        multiline
-      />
 
       <View style={styles.menuDivider} />
       <Text style={styles.sectionTitle}>Promises</Text>

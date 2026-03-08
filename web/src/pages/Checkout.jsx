@@ -239,6 +239,28 @@ const Checkout = ({ setCart, user }) => {
             return;
         }
 
+        // Deduct stock for each purchased item
+        for (const item of checkoutItems) {
+            try {
+                // Fetch current stock to avoid overwriting with stale frontend data
+                const { data: productData, error: fetchError } = await supabase
+                    .from('products')
+                    .select('stock_quantity')
+                    .eq('id', item.id)
+                    .single();
+
+                if (!fetchError && productData) {
+                    const newStock = Math.max(0, (productData.stock_quantity || 0) - (item.qty || 1));
+                    await supabase
+                        .from('products')
+                        .update({ stock_quantity: newStock })
+                        .eq('id', item.id);
+                }
+            } catch (err) {
+                console.error(`Failed to update stock for product ${item.id}`, err);
+            }
+        }
+
         const notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
         const newNotification = {
             id: `notif-${Date.now()}`,

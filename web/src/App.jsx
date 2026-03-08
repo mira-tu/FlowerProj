@@ -64,6 +64,7 @@ import OrderTracking from './pages/OrderTracking';
 import CustomizedCheckout from './pages/CustomizedCheckout';
 import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
+import InfoModal from './components/InfoModal';
 
 import { supabase } from './config/supabase';
 
@@ -103,6 +104,7 @@ function AppContent() {
   });
   const [isInitializing, setIsInitializing] = useState(true);
   const [hasSpinnerDelayPassed, setHasSpinnerDelayPassed] = useState(false);
+  const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
   const isLoggedIn = !!user;
 
   useEffect(() => {
@@ -290,7 +292,11 @@ function AppContent() {
             // Cap quantity at stock limit
             const finalQty = stockQuantity ? Math.min(newQty, stockQuantity) : newQty;
             if (stockQuantity && newQty > stockQuantity) {
-              alert(`Only ${stockQuantity} items in stock for ${name}`);
+              setInfoModal({
+                show: true,
+                title: 'Stock Limit Reached',
+                message: `Only ${stockQuantity} items in stock for ${name}`
+              });
             }
             return { ...item, qty: finalQty, stockQuantity: stockQuantity || item.stockQuantity };
           }
@@ -359,6 +365,13 @@ function AppContent() {
 
   return (
     <>
+      <InfoModal
+        show={infoModal.show}
+        onClose={() => setInfoModal({ show: false, title: '', message: '' })}
+        title={infoModal.title}
+        message={infoModal.message}
+      />
+
       {showNavbar && (
         <Navbar cartCount={cartCount} user={user} logout={logout} />
       )}

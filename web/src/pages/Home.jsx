@@ -244,7 +244,7 @@ const Home = ({ addToCart, products, categories, user }) => {
                         {filteredProducts.map((product) => (
                             <div key={product.id} className="col-md-3 col-sm-6">
                                 <div
-                                    className={`product-card ${product.is_active === false ? 'product-card-unavailable' : ''}`}
+                                    className={`product-card ${product.is_active === false || product.stock_quantity === 0 ? 'product-card-unavailable' : ''}`}
                                     onClick={() => setSelectedProduct(product)}
                                     role="button"
                                     tabIndex={0}
@@ -258,7 +258,15 @@ const Home = ({ addToCart, products, categories, user }) => {
                                             decoding="async"
                                             height="250"
                                         />
-                                        {product.is_active === false && <div className="unavailable-overlay">Unavailable</div>}
+                                        {product.is_active === false ? (
+                                            <div className="unavailable-overlay">Unavailable</div>
+                                        ) : product.stock_quantity === 0 ? (
+                                            <div className="unavailable-overlay">Out of Stock</div>
+                                        ) : (
+                                            <div style={{ position: 'absolute', top: '10px', left: '10px', background: product.stock_quantity <= 5 ? 'rgba(255, 87, 34, 0.9)' : 'rgba(0, 0, 0, 0.6)', color: 'white', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '600', zIndex: 2 }}>
+                                                {product.stock_quantity} in stock
+                                            </div>
+                                        )}
                                         <button
                                             className={`wishlist-heart-btn ${isInWishlist(product.name) ? 'active' : ''}`}
                                             onClick={(e) => toggleWishlist(product, e)}
@@ -276,9 +284,9 @@ const Home = ({ addToCart, products, categories, user }) => {
                                         <button
                                             className="btn-add-cart"
                                             onClick={(e) => handleAddToCart(product, e)}
-                                            disabled={product.is_active === false}
+                                            disabled={product.is_active === false || product.stock_quantity === 0}
                                         >
-                                            {product.is_active === false ? 'Unavailable' : 'Add to Cart'}
+                                            {product.is_active === false ? 'Unavailable' : (product.stock_quantity === 0 ? 'Out of Stock' : 'Add to Cart')}
                                         </button>
                                     </div>
                                 </div>

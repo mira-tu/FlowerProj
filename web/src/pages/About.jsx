@@ -19,17 +19,20 @@ const About = () => {
         about_description: "We are a local flower shop in Zamboanga City, offering fresh floral arrangements through a simple and convenient online store.",
         promise: "We promise thoughtfully crafted arrangements, reliable service, and flowers that help you celebrate life’s most meaningful moments.",
         ownerQuote: "Where flowers bloom, hope takes root.",
-        ownerImage: "https://via.placeholder.com/150",
-        ourShopImage: "https://via.placeholder.com/600x400",
+        ownerImage: null,
+        ourShopImage: null,
         customBouquetsDescription: "Create your own unique arrangement with your choice of flowers, colors, and wrapping.",
-        customBouquetsImage: "https://via.placeholder.com/400x250",
+        customBouquetsImage: null,
         eventDecorationsDescription: "Beautiful floral arrangements for weddings, parties, and corporate events.",
-        eventDecorationsImage: "https://via.placeholder.com/400x250",
+        eventDecorationsImage: null,
         specialOrdersDescription: "Add chocolates, teddy bears, and personalized gifts to make your surprise extra special.",
-        specialOrdersImage: "https://via.placeholder.com/400x250",
+        specialOrdersImage: null,
         promises_responsibly_sourced_description: "We work with ethical suppliers to ensure our flowers are fresh, sustainable, and responsibly grown.",
+        promises_responsibly_sourced_image: null,
         promises_crafted_by_experts_description: "Each bouquet is arranged by skilled florists who put heart and creativity into every detail.",
+        promises_crafted_by_experts_image: null,
         promises_caring_for_moments_description: "Whether it’s a celebration, a comfort, or a simple thank you, we craft for your emotions.",
+        promises_caring_for_moments_image: null,
     });
 
     useEffect(() => {
@@ -40,12 +43,13 @@ const About = () => {
                     .select('key, value')
                     .in('key', [
                         'about_story', 'about_description', 'about_promise', 'about_owner_quote',
+                        'about_owner_image', 'about_our_shop_img',
                         'about_custom_bouquets_desc', 'about_custom_bouquets_img',
                         'about_event_decorations_desc', 'about_event_decorations_img',
                         'about_special_orders_desc', 'about_special_orders_img',
-                        'promises_responsibly_sourced_description',
-                        'promises_crafted_by_experts_description',
-                        'promises_caring_for_moments_description'
+                        'promises_responsibly_sourced_description', 'promises_responsibly_sourced_image',
+                        'promises_crafted_by_experts_description', 'promises_crafted_by_experts_image',
+                        'promises_caring_for_moments_description', 'promises_caring_for_moments_image'
                     ]);
 
                 if (error) throw error;
@@ -55,6 +59,8 @@ const About = () => {
                     if (item.key === 'about_description') acc.about_description = item.value;
                     if (item.key === 'about_promise') acc.promise = item.value;
                     if (item.key === 'about_owner_quote') acc.ownerQuote = item.value;
+                    if (item.key === 'about_owner_image') acc.ownerImage = item.value;
+                    if (item.key === 'about_our_shop_img') acc.ourShopImage = item.value;
                     if (item.key === 'about_custom_bouquets_desc') acc.customBouquetsDescription = item.value;
                     if (item.key === 'about_custom_bouquets_img') acc.customBouquetsImage = item.value;
                     if (item.key === 'about_event_decorations_desc') acc.eventDecorationsDescription = item.value;
@@ -62,8 +68,11 @@ const About = () => {
                     if (item.key === 'about_special_orders_desc') acc.specialOrdersDescription = item.value;
                     if (item.key === 'about_special_orders_img') acc.specialOrdersImage = item.value;
                     if (item.key === 'promises_responsibly_sourced_description') acc.promises_responsibly_sourced_description = item.value;
+                    if (item.key === 'promises_responsibly_sourced_image') acc.promises_responsibly_sourced_image = item.value;
                     if (item.key === 'promises_crafted_by_experts_description') acc.promises_crafted_by_experts_description = item.value;
+                    if (item.key === 'promises_crafted_by_experts_image') acc.promises_crafted_by_experts_image = item.value;
                     if (item.key === 'promises_caring_for_moments_description') acc.promises_caring_for_moments_description = item.value;
+                    if (item.key === 'promises_caring_for_moments_image') acc.promises_caring_for_moments_image = item.value;
                     return acc;
                 }, aboutData);
 
@@ -85,6 +94,8 @@ const About = () => {
                     if (key === 'about_description') updated.about_description = value;
                     if (key === 'about_promise') updated.promise = value;
                     if (key === 'about_owner_quote') updated.ownerQuote = value;
+                    if (key === 'about_owner_image') updated.ownerImage = value;
+                    if (key === 'about_our_shop_img') updated.ourShopImage = value;
                     if (key === 'about_custom_bouquets_desc') updated.customBouquetsDescription = value;
                     if (key === 'about_custom_bouquets_img') updated.customBouquetsImage = value;
                     if (key === 'about_event_decorations_desc') updated.eventDecorationsDescription = value;
@@ -92,8 +103,11 @@ const About = () => {
                     if (key === 'about_special_orders_desc') updated.specialOrdersDescription = value;
                     if (key === 'about_special_orders_img') updated.specialOrdersImage = value;
                     if (key === 'promises_responsibly_sourced_description') updated.promises_responsibly_sourced_description = value;
+                    if (key === 'promises_responsibly_sourced_image') updated.promises_responsibly_sourced_image = value;
                     if (key === 'promises_crafted_by_experts_description') updated.promises_crafted_by_experts_description = value;
+                    if (key === 'promises_crafted_by_experts_image') updated.promises_crafted_by_experts_image = value;
                     if (key === 'promises_caring_for_moments_description') updated.promises_caring_for_moments_description = value;
+                    if (key === 'promises_caring_for_moments_image') updated.promises_caring_for_moments_image = value;
                     return updated;
                 });
             })
@@ -121,7 +135,7 @@ const About = () => {
                         <div className="col-lg-6">
                             <div className="story-image-wrapper">
                                 <img
-                                    src={shopImg}
+                                    src={aboutData.ourShopImage || shopImg}
                                     alt="Our Shop"
                                     className="story-img shadow-lg"
                                     loading="lazy"
@@ -133,13 +147,13 @@ const About = () => {
                             <div className="story-content">
                                 <h2 className="mb-4 fw-bold">Our Shop</h2>
                                 <p className="text-muted mb-4">
-                                    Jocerry's Flower Shop was born from a love for flowers and a desire to make every occasion feel special.
+                                    {aboutData.story}
                                 </p>
                                 <p className="text-muted mb-4">
-                                    We are a local flower shop in Zamboanga City, offering fresh floral arrangements through a simple and convenient online store.
+                                    {aboutData.about_description}
                                 </p>
                                 <p className="text-muted mb-0">
-                                    We promise thoughtfully crafted arrangements, reliable service, and flowers that help you celebrate life’s most meaningful moments.
+                                    {aboutData.promise}
                                 </p>
                             </div>
                         </div>
@@ -160,7 +174,7 @@ const About = () => {
                                 <div className="img-wrapper" style={{ height: '300px' }}>
                                     <Link to="/customized" className="d-block w-100 h-100">
                                         <img
-                                            src={customBouquetsImg}
+                                            src={aboutData.customBouquetsImage || customBouquetsImg}
                                             className="w-100 h-100 object-fit-cover"
                                             alt="Customized Bouquets"
                                             loading="lazy"
@@ -170,7 +184,7 @@ const About = () => {
                                 </div>
                                 <div className="card-body p-4 text-center d-flex flex-column">
                                     <h3 className="h4 fw-bold mb-3">Customized Bouquets</h3>
-                                    <p className="text-muted mb-4">Create your own unique arrangement with your choice of flowers, colors, and wrapping.</p>
+                                    <p className="text-muted mb-4">{aboutData.customBouquetsDescription}</p>
                                     <div className="mt-auto">
                                         <Link to="/customized" className="btn btn-pink rounded-pill px-4 fw-semibold w-50">Learn More</Link>
                                     </div>
@@ -183,7 +197,7 @@ const About = () => {
                                 <div className="img-wrapper" style={{ height: '300px' }}>
                                     <Link to="/book-event" className="d-block w-100 h-100">
                                         <img
-                                            src={customOrderImg}
+                                            src={aboutData.eventDecorationsImage || customOrderImg}
                                             className="w-100 h-100 object-fit-cover"
                                             alt="Custom Order"
                                             loading="lazy"
@@ -194,7 +208,7 @@ const About = () => {
                                 <div className="card-body p-4 text-center d-flex flex-column">
                                     <h3 className="h4 fw-bold mb-3">Custom Order</h3>
                                     <p className="text-muted mb-4">
-                                        Beautiful floral arrangements for weddings, parties, and corporate events. Add chocolates, teddy bears, and personalized gifts to make your surprise extra special.
+                                        {aboutData.eventDecorationsDescription}
                                     </p>
                                     <div className="mt-auto">
                                         <Link to="/book-event" className="btn btn-pink rounded-pill px-4 fw-semibold w-50">Learn More</Link>
@@ -208,23 +222,23 @@ const About = () => {
                 <div className="row g-4">
                     <div className="col-md-4">
                         <div className="promise-card">
-                            <img src={responsiblySourcedImg} alt="Responsibly Sourced" className="promise-img" loading="lazy" decoding="async" />
+                            <img src={aboutData.promises_responsibly_sourced_image || responsiblySourcedImg} alt="Responsibly Sourced" className="promise-img" loading="lazy" decoding="async" />
                             <h3>Responsibly Sourced</h3>
-                            <p className="text-muted">We work with ethical suppliers to ensure our flowers are fresh, sustainable, and responsibly grown.</p>
+                            <p className="text-muted">{aboutData.promises_responsibly_sourced_description}</p>
                         </div>
                     </div>
                     <div className="col-md-4">
                         <div className="promise-card">
-                            <img src={craftedByExpertsImg} alt="Crafted by Experts" className="promise-img" loading="lazy" decoding="async" />
+                            <img src={aboutData.promises_crafted_by_experts_image || craftedByExpertsImg} alt="Crafted by Experts" className="promise-img" loading="lazy" decoding="async" />
                             <h3>Crafted by Experts</h3>
-                            <p className="text-muted">Each bouquet is arranged by skilled florists who put heart and creativity into every detail.</p>
+                            <p className="text-muted">{aboutData.promises_crafted_by_experts_description}</p>
                         </div>
                     </div>
                     <div className="col-md-4">
                         <div className="promise-card">
-                            <img src={caringForMomentsImg} alt="Caring for Moments" className="promise-img" loading="lazy" decoding="async" />
+                            <img src={aboutData.promises_caring_for_moments_image || caringForMomentsImg} alt="Caring for Moments" className="promise-img" loading="lazy" decoding="async" />
                             <h3>Caring for Moments</h3>
-                            <p className="text-muted">Whether it’s a celebration, a comfort, or a simple thank you, we craft for your emotions.</p>
+                            <p className="text-muted">{aboutData.promises_caring_for_moments_description}</p>
                         </div>
                     </div>
                 </div>
@@ -235,7 +249,7 @@ const About = () => {
                 <div className="container">
                     <h2 className="mb-5 fw-bold">Meet The Owner</h2>
                     <img
-                        src={ownerImg}
+                        src={aboutData.ownerImage || ownerImg}
                         alt="Owner"
                         className="owner-img shadow"
                         loading="lazy"
@@ -244,7 +258,7 @@ const About = () => {
                     <figure className="text-center">
                         <blockquote className="blockquote">
                             <p className="quote">
-                                "Where flowers bloom, hope takes root."
+                                "{aboutData.ownerQuote}"
                             </p>
                         </blockquote>
                         <figcaption className="blockquote-footer mt-3">

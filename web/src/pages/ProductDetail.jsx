@@ -159,6 +159,7 @@ const ProductDetail = ({ addToCart, user }) => {
     };
 
     const handleAddToCart = () => {
+        if (product.is_active === false || product.stock === 0 || product.stock_quantity === 0) return;
         if (!user) {
             setInfoModal({
                 show: true,
@@ -176,6 +177,7 @@ const ProductDetail = ({ addToCart, user }) => {
     };
 
     const handleBuyNow = () => {
+        if (product.is_active === false || product.stock === 0 || product.stock_quantity === 0) return;
         if (!user) {
             setInfoModal({
                 show: true,
@@ -254,14 +256,27 @@ const ProductDetail = ({ addToCart, user }) => {
                                         <input type="text" className="qty-input" value={quantity} readOnly />
                                         <button className="qty-btn" onClick={() => handleQuantityChange(1)}>+</button>
                                     </div>
-                                    <span className="stock-info">{product.stock} pieces available</span>
+                                    <span className="stock-info">
+                                        {product.is_active === false ? 'Unavailable' :
+                                            ((product.stock_quantity || product.stock) === 0 ? 'Out of Stock' :
+                                                ((product.stock_quantity || product.stock) <= 5 ? `Only ${(product.stock_quantity || product.stock)} left!` :
+                                                    `${(product.stock_quantity || product.stock)} pieces available`))}
+                                    </span>
                                 </div>
 
                                 <div className="action-buttons">
-                                    <button className="btn-add-to-cart" onClick={handleAddToCart}>
+                                    <button
+                                        className="btn-add-to-cart"
+                                        onClick={handleAddToCart}
+                                        disabled={product.is_active === false || (product.stock_quantity || product.stock) === 0}
+                                    >
                                         <i className="fas fa-cart-plus me-2"></i>Add to Cart
                                     </button>
-                                    <button className="btn-buy-now" onClick={handleBuyNow}>
+                                    <button
+                                        className="btn-buy-now"
+                                        onClick={handleBuyNow}
+                                        disabled={product.is_active === false || (product.stock_quantity || product.stock) === 0}
+                                    >
                                         Buy Now
                                     </button>
                                 </div>

@@ -85,7 +85,7 @@ const Contact = () => {
                                 <i className="fas fa-phone-alt"></i>
                             </div>
                             <h3>Call Us</h3>
-                            <p>09975607168</p>
+                            <p>{contactData.phone}</p>
                         </div>
                     </div>
                     <div className="col-md-4">
@@ -94,7 +94,7 @@ const Contact = () => {
                                 <i className="fas fa-envelope"></i>
                             </div>
                             <h3>Email Us</h3>
-                            <p>jocerryflowershop@gmail.com</p>
+                            <p>{contactData.email}</p>
                         </div>
                     </div>
                 </div>
