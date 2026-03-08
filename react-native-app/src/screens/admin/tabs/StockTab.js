@@ -15,9 +15,23 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import Toast from 'react-native-toast-message';
-import { adminAPI } from '../../../config/api';
+import { adminAPI, BASE_URL } from '../../../config/api';
 import styles from '../../AdminDashboard.styles';
 import ProductCard from '../components/ProductCard';
+
+const STOCK_CATEGORY_TABS = [
+  { key: 'Wrappers', label: 'Wrappers', icon: 'gift' },
+  { key: 'Ribbons', label: 'Ribbons', icon: 'ribbon' },
+  { key: 'Flowers', label: 'Flowers', icon: 'flower' },
+];
+
+const normalizeStockCategory = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'wrapper' || normalized === 'wrappers') return 'Wrappers';
+  if (normalized === 'ribbon' || normalized === 'ribbons') return 'Ribbons';
+  if (normalized === 'flower' || normalized === 'flowers') return 'Flowers';
+  return String(value || '').trim();
+};
 
 const StockTab = () => {
   const [activeStockTab, setActiveStockTab] = useState('Ribbons');
@@ -258,7 +272,7 @@ const StockTab = () => {
 
         ...stockFormData,
 
-        category: activeStockTab, // Add this line to include the category from activeStockTab
+        category: normalizeStockCategory(activeStockTab),
 
         price: parseFloat(stockFormData.price) || 0,
 
@@ -294,7 +308,7 @@ const StockTab = () => {
   };
 
   const filteredStock = stockItems.filter(item =>
-    item.category === activeStockTab
+    normalizeStockCategory(item.category) === activeStockTab
   );
 
   const renderStockItem = ({ item }) => {
@@ -350,31 +364,31 @@ const StockTab = () => {
 
       <View style={styles.stockTabs}>
 
-        {['Wrappers', 'Ribbons', 'Flowers'].map((tab) => (
+        {STOCK_CATEGORY_TABS.map((tab) => (
 
           <TouchableOpacity
 
-            key={tab}
+            key={tab.key}
 
-            style={[styles.stockTab, activeStockTab === tab && styles.stockTabActive]}
+            style={[styles.stockTab, activeStockTab === tab.key && styles.stockTabActive]}
 
-            onPress={() => setActiveStockTab(tab)}
+            onPress={() => setActiveStockTab(tab.key)}
 
           >
 
             <Ionicons
 
-              name={tab === 'Wrappers' ? 'gift' : tab === 'Ribbons' ? 'ribbon' : 'flower'}
+              name={tab.icon}
 
               size={20}
 
-              color={activeStockTab === tab ? '#ec4899' : '#666'}
+              color={activeStockTab === tab.key ? '#ec4899' : '#666'}
 
             />
 
             <Text style={[styles.stockTabText, activeStockTab === tab && styles.stockTabTextActive]}>
 
-              {tab}
+              {tab.label}
 
             </Text>
 
@@ -652,3 +666,4 @@ const StockTab = () => {
 // Helper component for consistent detail display
 
 export default StockTab;
+

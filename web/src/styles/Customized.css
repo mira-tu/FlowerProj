@@ -201,6 +201,7 @@
 .customize-page .flower-zone {
     width: 320px;
     height: 250px;
+    touch-action: none;
 }
 
 .customize-page .stem-slot {
@@ -217,10 +218,17 @@
     height: 100px;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
+    touch-action: none;
+    pointer-events: auto;
+    cursor: grab;
+    will-change: left, top, transform;
+    transition: filter 0.2s ease;
 }
 
-.customize-page .drag-handle:active {
+.customize-page .drag-handle:active,
+.customize-page .drag-handle.is-dragging {
     cursor: grabbing;
+    filter: drop-shadow(0 12px 18px rgba(0, 0, 0, 0.18));
 }
 
 .customize-page .empty-state {
@@ -466,6 +474,41 @@
     font-weight: 600;
 }
 
+.customize-page .option-stock {
+    margin-top: 0.35rem;
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: #2f855a;
+}
+
+.customize-page .option-stock.warning {
+    color: #b7791f;
+}
+
+.customize-page .option-stock.danger {
+    color: #c53030;
+}
+
+.customize-page .option-card.disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    border-color: #e2e8f0;
+    background: #f8fafc;
+    transform: none;
+    box-shadow: none;
+}
+
+.customize-page .option-card.disabled:hover {
+    border-color: #e2e8f0;
+    transform: none;
+    box-shadow: none;
+}
+
+.customize-page .option-card.disabled .option-img {
+    filter: grayscale(0.25);
+}
+
+
 /* Tablet and below */
 @media (max-width: 900px) {
     .customize-page .editor-layout {
@@ -620,6 +663,11 @@
         width: 160px !important;
         height: 150px !important;
         top: 5% !important;
+    }
+
+    .customize-page .drag-handle {
+        width: 68px;
+        height: 68px;
     }
 
     .customize-page .stem-slot {
@@ -786,6 +834,11 @@
         top: 3% !important;
     }
 
+    .customize-page .drag-handle {
+        width: 56px;
+        height: 56px;
+    }
+
     .customize-page .stem-slot {
         width: 38px !important;
         height: 38px !important;
@@ -881,6 +934,11 @@
     .customize-page .flower-zone {
         width: 110px !important;
         height: 100px !important;
+    }
+
+    .customize-page .drag-handle {
+        width: 50px;
+        height: 50px;
     }
 
     .customize-page .stem-slot {

@@ -48,6 +48,7 @@ const Signup = () => {
                 email: formData.email,
                 password: formData.password,
                 options: {
+                    emailRedirectTo: 'https://flowershop-yess.up.railway.app/login',
                     data: {
                         name: `${formData.firstName} ${formData.lastName}` // Store full name in user metadata
                     }

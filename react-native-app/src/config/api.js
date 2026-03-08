@@ -2,6 +2,327 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 import { decode } from 'base64-arraybuffer';
 
+const ADMIN_WORKFLOW_FUNCTION = 'manage-admin-workflows';
+
+const getFunctionErrorMessage = async (error, fallbackMessage) => {
+    if (!error) return fallbackMessage;
+
+    if (typeof error.message === 'string' && error.message.trim()) {
+        return error.message;
+    }
+
+    if (error.context) {
+        try {
+            const payload = await error.context.json();
+            if (payload?.error) {
+                return payload.error;
+            }
+        } catch (jsonError) {
+            try {
+                const text = await error.context.text();
+                if (text) {
+                    return text;
+                }
+            } catch (textError) {
+                // Fall back to the provided message below.
+            }
+        }
+    }
+
+    return fallbackMessage;
+};
+
+const invokeAdminWorkflow = async (action, payload = {}) => {
+    const { data, error } = await supabase.functions.invoke(ADMIN_WORKFLOW_FUNCTION, {
+        body: {
+            action,
+            ...payload,
+        },
+    });
+
+    if (error) {
+        const message = await getFunctionErrorMessage(error, `Failed to ${action.replace(/_/g, ' ')}.`);
+        throw new Error(message);
+    }
+
+    if (data?.error) {
+        throw new Error(data.error);
+    }
+
+    return data;
+};
+
+const shouldFallbackToDirectWorkflow = (error) => {
+    const message = String(error?.message || '').toLowerCase();
+    return message.includes('failed to send a request to the edge function')
+        || message.includes('network request failed')
+        || message.includes('failed to fetch')
+        || message.includes('fetch');
+};
+
+const parseJsonObject = (value) => {
+    if (!value) return {};
+    if (typeof value === 'string') {
+        try {
+            return JSON.parse(value);
+        } catch (error) {
+            return {};
+        }
+    }
+    return typeof value === 'object' ? value : {};
+};
+
+const withStatusTimestamp = (existingValue, status) => ({
+    ...parseJsonObject(existingValue),
+    [status]: new Date().toISOString(),
+});
+
+const updateOrderStatusDirect = async (id, status) => {
+    const { data: current, error: fetchError } = await supabase
+        .from('orders')
+        .select('status_timestamps')
+        .eq('id', id)
+        .single();
+
+    if (fetchError) {
+        throw fetchError;
+    }
+
+    const { data, error } = await supabase
+        .from('orders')
+        .update({ status, status_timestamps: withStatusTimestamp(current?.status_timestamps, status) })
+        .eq('id', id)
+        .select()
+        .single();
+
+    if (error) {
+        throw error;
+    }
+
+    return { success: true, order: data };
+};
+
+const updateOrderPaymentStatusDirect = async (id, status) => {
+    const { data, error } = await supabase
+        .from('orders')
+        .update({ payment_status: status })
+        .eq('id', id)
+        .select()
+        .single();
+
+    if (error) {
+        throw error;
+    }
+
+    return { success: true, order: data };
+};
+
+const assignOrderRiderDirect = async (orderId, riderId, thirdPartyName = null, thirdPartyInfo = null) => {
+    const updateData = riderId
+        ? {
+            assigned_rider: riderId,
+            third_party_rider_name: null,
+            third_party_rider_info: null,
+        }
+        : {
+            assigned_rider: null,
+            third_party_rider_name: thirdPartyName,
+            third_party_rider_info: thirdPartyInfo,
+        };
+
+    const { data, error } = await supabase
+        .from('orders')
+        .update(updateData)
+        .eq('id', orderId)
+        .select()
+        .single();
+
+    if (error) {
+        throw error;
+    }
+
+    return { success: true, order: data };
+};
+
+const provideQuoteDirect = async (id, price, shippingFee = 0, quoteBreakdown = null) => {
+    const finalItemPrice = parseFloat(price) || 0;
+    const finalShippingFee = parseFloat(shippingFee) || 0;
+
+    const { data: existingRequest, error: fetchError } = await supabase
+        .from('requests')
+        .select('data, user_id, request_number, status_timestamps')
+        .eq('id', id)
+        .single();
+
+    if (fetchError) {
+        throw fetchError;
+    }
+
+    const updatePayload = {
+        final_price: finalItemPrice + finalShippingFee,
+        shipping_fee: finalShippingFee,
+        status: 'quoted',
+        status_timestamps: withStatusTimestamp(existingRequest?.status_timestamps, 'quoted'),
+    };
+
+    if (quoteBreakdown) {
+        updatePayload.data = {
+            ...parseJsonObject(existingRequest?.data),
+            quote_breakdown: quoteBreakdown,
+        };
+    }
+
+    const { data: request, error } = await supabase
+        .from('requests')
+        .update(updatePayload)
+        .eq('id', id)
+        .select()
+        .single();
+
+    if (error) {
+        throw error;
+    }
+
+    if (request?.user_id) {
+        const { error: notificationError } = await supabase
+            .from('notifications')
+            .insert([{
+                user_id: request.user_id,
+                title: 'You have a new quote!',
+                message: `A quote of PHP ${finalItemPrice.toFixed(2)} has been provided for your request #${request.request_number}. Please review and accept it.`,
+                type: 'request_update',
+                link: '/profile',
+            }]);
+
+        if (notificationError) {
+            console.error('Failed to send quote notification:', notificationError);
+        }
+    }
+
+    return { success: true, request };
+};
+
+const updateRequestStatusDirect = async (id, status, options = {}) => {
+    const { data: current, error: fetchError } = await supabase
+        .from('requests')
+        .select('status_timestamps, data, user_id, request_number')
+        .eq('id', id)
+        .single();
+
+    if (fetchError) {
+        throw fetchError;
+    }
+
+    const updatePayload = {
+        status,
+        status_timestamps: withStatusTimestamp(current?.status_timestamps, status),
+    };
+
+    if (options?.dataPatch && typeof options.dataPatch === 'object') {
+        updatePayload.data = {
+            ...parseJsonObject(current?.data),
+            ...options.dataPatch,
+        };
+    }
+
+    const { data, error } = await supabase
+        .from('requests')
+        .update(updatePayload)
+        .eq('id', id)
+        .select()
+        .single();
+
+    if (error) {
+        throw error;
+    }
+
+    if (options?.notification && data?.user_id) {
+        const notificationConfig = options.notification;
+        const { error: notificationError } = await supabase
+            .from('notifications')
+            .insert([{
+                user_id: data.user_id,
+                title: notificationConfig.title || 'Request status updated',
+                message: notificationConfig.message || `Your request #${data.request_number || current?.request_number || id} is now ${status}.`,
+                type: notificationConfig.type || 'request_update',
+                link: notificationConfig.link || '/profile',
+            }]);
+
+        if (notificationError) {
+            console.error('Failed to send request status notification:', notificationError);
+        }
+    }
+
+    return { success: true, request: data };
+};
+
+const updateRequestPaymentStatusDirect = async (requestId, requestType, status) => {
+    const { data: currentRequest, error: fetchError } = await supabase
+        .from('requests')
+        .select('status, status_timestamps, type, data')
+        .eq('id', requestId)
+        .single();
+
+    if (fetchError) {
+        throw fetchError;
+    }
+
+    const resolvedRequestType = requestType || currentRequest?.type || null;
+    const updatePayload = { payment_status: status };
+
+    if (resolvedRequestType === 'customized') {
+        updatePayload.data = {
+            ...parseJsonObject(currentRequest?.data),
+            payment_status: status,
+        };
+    }
+
+    if (status === 'paid' && currentRequest?.status === 'accepted') {
+        updatePayload.status = 'processing';
+        updatePayload.status_timestamps = withStatusTimestamp(currentRequest?.status_timestamps, 'processing');
+    }
+
+    const { data, error } = await supabase
+        .from('requests')
+        .update(updatePayload)
+        .eq('id', requestId)
+        .select()
+        .single();
+
+    if (error) {
+        throw error;
+    }
+
+    return { success: true, request: data };
+};
+
+const assignRequestRiderDirect = async (requestId, riderId, thirdPartyName = null, thirdPartyInfo = null) => {
+    const updateData = riderId
+        ? {
+            assigned_rider: riderId,
+            third_party_rider_name: null,
+            third_party_rider_info: null,
+        }
+        : {
+            assigned_rider: null,
+            third_party_rider_name: thirdPartyName,
+            third_party_rider_info: thirdPartyInfo,
+        };
+
+    const { data, error } = await supabase
+        .from('requests')
+        .update(updateData)
+        .eq('id', requestId)
+        .select()
+        .single();
+
+    if (error) {
+        throw error;
+    }
+
+    return { success: true, request: data };
+};
+
 // Products API
 export const productAPI = {
     getAll: async (params) => {
@@ -312,17 +633,41 @@ export const authAPI = {
         const { user, session } = sessionData;
 
         // 2. Fetch user profile from 'users' table to check role
-        const { data: profile, error: profileError } = await supabase
+        let { data: profile, error: profileError } = await supabase
             .from('users')
-            .select('role, name')
+            .select('role, name, phone')
             .eq('id', user.id)
             .single();
 
         if (profileError) {
             console.error('Error fetching user profile:', profileError);
-            // Sign out the user as we can't verify their role
-            await supabase.auth.signOut();
-            throw new Error('Could not verify user role. Your account might not be set up correctly.');
+
+            const fallbackRole = user.user_metadata?.role;
+            if (fallbackRole === 'admin' || fallbackRole === 'employee') {
+                profile = {
+                    role: fallbackRole,
+                    name: user.user_metadata?.name || user.email,
+                    phone: user.user_metadata?.phone || null,
+                };
+
+                const { error: upsertError } = await supabase
+                    .from('users')
+                    .upsert({
+                        id: user.id,
+                        name: profile.name,
+                        email: user.email,
+                        phone: profile.phone,
+                        role: fallbackRole,
+                    }, { onConflict: 'id' });
+
+                if (upsertError) {
+                    console.warn('Non-blocking: failed to restore missing admin/employee profile row:', upsertError);
+                }
+            } else {
+                // Sign out the user as we can't verify their role
+                await supabase.auth.signOut();
+                throw new Error('Could not verify user role. Your account might not be set up correctly.');
+            }
         }
 
         // 3. Check the role
@@ -467,28 +812,14 @@ export const adminAPI = {
     },
 
     updateOrderStatus: async (id, status) => {
-        // Fetch current timestamps first
-        const { data: current, error: fetchError } = await supabase
-            .from('orders')
-            .select('status_timestamps')
-            .eq('id', id)
-            .single();
-
-        const existingTimestamps = (current && current.status_timestamps) || {};
-        const updatedTimestamps = { ...existingTimestamps, [status]: new Date().toISOString() };
-
-        const { data, error } = await supabase
-            .from('orders')
-            .update({ status: status, status_timestamps: updatedTimestamps })
-            .eq('id', id)
-            .select()
-            .single();
-
-        if (error) {
-            console.error('Error updating order status:', error);
-            throw error;
+        try {
+            const data = await invokeAdminWorkflow('update_order_status', { id, status });
+            return { data };
+        } catch (error) {
+            if (!shouldFallbackToDirectWorkflow(error)) throw error;
+            console.warn('Falling back to direct order status update:', error.message);
+            return { data: await updateOrderStatusDirect(id, status) };
         }
-        return { data: { success: true, order: data } };
     },
 
     updateOrderPaymentMethod: async (id, newPaymentMethod) => {
@@ -507,75 +838,52 @@ export const adminAPI = {
     },
 
     updateOrderPaymentStatus: async (id, status) => {
-        const { data, error } = await supabase
-            .from('orders')
-            .update({ payment_status: status })
-            .eq('id', id)
-            .select()
-            .single();
-
-        if (error) {
-            console.error('Error updating order payment status:', error);
-            throw error;
+        try {
+            const data = await invokeAdminWorkflow('update_order_payment_status', { id, status });
+            return { data };
+        } catch (error) {
+            if (!shouldFallbackToDirectWorkflow(error)) throw error;
+            console.warn('Falling back to direct order payment update:', error.message);
+            return { data: await updateOrderPaymentStatusDirect(id, status) };
         }
-        return { data: { success: true, order: data } };
     },
 
     acceptOrder: async (id, status) => {
-        const { data, error } = await supabase
-            .from('orders')
-            .update({ status: status })
-            .eq('id', id)
-            .select()
-            .single();
-
-        if (error) {
-            console.error('Error accepting order:', error);
-            throw error;
+        try {
+            const data = await invokeAdminWorkflow('accept_order', { id, status });
+            return { data };
+        } catch (error) {
+            if (!shouldFallbackToDirectWorkflow(error)) throw error;
+            console.warn('Falling back to direct order accept:', error.message);
+            return { data: await updateOrderStatusDirect(id, status) };
         }
-        return { data: { success: true, order: data } };
     },
 
     declineOrder: async (id, status) => {
-        const { data, error } = await supabase
-            .from('orders')
-            .update({ status: status })
-            .eq('id', id)
-            .select()
-            .single();
-
-        if (error) {
-            console.error('Error declining order:', error);
-            throw error;
+        try {
+            const data = await invokeAdminWorkflow('decline_order', { id, status });
+            return { data };
+        } catch (error) {
+            if (!shouldFallbackToDirectWorkflow(error)) throw error;
+            console.warn('Falling back to direct order decline:', error.message);
+            return { data: await updateOrderStatusDirect(id, status) };
         }
-        return { data: { success: true, order: data } };
     },
 
     assignRider: async (orderId, riderId, thirdPartyName = null, thirdPartyInfo = null) => {
-        const updateData = {};
-
-        if (riderId) {
-            updateData.assigned_rider = riderId;
-            updateData.third_party_rider_name = null;
-            updateData.third_party_rider_info = null;
-        } else {
-            updateData.assigned_rider = null;
-            updateData.third_party_rider_name = thirdPartyName;
-            updateData.third_party_rider_info = thirdPartyInfo;
+        try {
+            const data = await invokeAdminWorkflow('assign_order_rider', {
+                orderId,
+                riderId,
+                thirdPartyName,
+                thirdPartyInfo,
+            });
+            return { data };
+        } catch (error) {
+            if (!shouldFallbackToDirectWorkflow(error)) throw error;
+            console.warn('Falling back to direct rider assignment:', error.message);
+            return { data: await assignOrderRiderDirect(orderId, riderId, thirdPartyName, thirdPartyInfo) };
         }
-
-        const { data, error } = await supabase
-            .from('orders')
-            .update(updateData)
-            .eq('id', orderId)
-            .select()
-            .single();
-
-        if (error) {
-            console.error('Error assigning rider:', error);
-            throw error;
-        }
-        return { data: { success: true, order: data } };
     },
 
     getStats: async () => {
@@ -882,7 +1190,7 @@ export const adminAPI = {
 
             return {
                 ...req,
-                status: req.status === 'accepted' ? 'processing' : req.status,
+                status: req.status,
                 payment_status: paymentStatusToUse,
                 payment_method: paymentMethodToUse,
                 receipt_url: receiptUrlToUse,
@@ -900,75 +1208,19 @@ export const adminAPI = {
     },
 
     provideQuote: async (id, price, shippingFee = 0, quoteBreakdown = null) => {
-        const finalItemPrice = parseFloat(price) || 0;
-        const finalShippingFee = parseFloat(shippingFee) || 0;
-
-        const updatePayload = {
-            final_price: finalItemPrice + finalShippingFee,
-            shipping_fee: finalShippingFee,
-            status: 'quoted'
-        };
-
-        if (quoteBreakdown) {
-            const { data: existingRequest, error: fetchError } = await supabase
-                .from('requests')
-                .select('data')
-                .eq('id', id)
-                .single();
-
-            if (fetchError) {
-                console.error('Error fetching request data before storing quote breakdown:', fetchError);
-                throw fetchError;
-            }
-
-            let requestData = existingRequest?.data || {};
-            if (typeof requestData === 'string') {
-                try {
-                    requestData = JSON.parse(requestData);
-                } catch (error) {
-                    requestData = {};
-                }
-            }
-
-            updatePayload.data = {
-                ...requestData,
-                quote_breakdown: quoteBreakdown,
-            };
+        try {
+            const data = await invokeAdminWorkflow('provide_request_quote', {
+                id,
+                price,
+                shippingFee,
+                quoteBreakdown,
+            });
+            return { data };
+        } catch (error) {
+            if (!shouldFallbackToDirectWorkflow(error)) throw error;
+            console.warn('Falling back to direct quote update:', error.message);
+            return { data: await provideQuoteDirect(id, price, shippingFee, quoteBreakdown) };
         }
-
-        const { data: request, error } = await supabase
-            .from('requests')
-            .update(updatePayload)
-            .eq('id', id)
-            .select()
-            .single();
-
-        if (error) {
-            console.error('Error providing quote:', error);
-            throw error;
-        }
-
-        // Send notification to the user who made the request
-        if (request && request.user_id) {
-            const notification = {
-                user_id: request.user_id,
-                title: `You have a new quote!`,
-                message: `A quote of PHP ${finalItemPrice.toFixed(2)} has been provided for your request #${request.request_number}. Please review and accept it.`,
-                type: 'request_update',
-                link: '/profile' // Changed to '/profile' as requested
-            };
-
-            const { error: notificationError } = await supabase
-                .from('notifications')
-                .insert([notification]);
-
-            if (notificationError) {
-                // Log the error but don't fail the whole operation
-                console.error("Failed to send quote notification:", notificationError);
-            }
-        }
-
-        return { data: { success: true, request: request } };
     },
 
     acceptRequest: async (id) => {
@@ -982,153 +1234,50 @@ export const adminAPI = {
     },
 
     updateRequestStatus: async (id, status, options = {}) => {
-        const { data: current, error: fetchError } = await supabase
-            .from('requests')
-            .select('status_timestamps, data, user_id, request_number')
-            .eq('id', id)
-            .single();
-
-        if (fetchError) {
-            console.error('Error fetching current request before status update:', fetchError);
-            throw fetchError;
+        try {
+            const data = await invokeAdminWorkflow('update_request_status', {
+                id,
+                status,
+                options,
+            });
+            return { data };
+        } catch (error) {
+            if (!shouldFallbackToDirectWorkflow(error)) throw error;
+            console.warn('Falling back to direct request status update:', error.message);
+            return { data: await updateRequestStatusDirect(id, status, options) };
         }
-
-        const existingTimestamps = (current && current.status_timestamps) || {};
-        const updatedTimestamps = { ...existingTimestamps, [status]: new Date().toISOString() };
-
-        const updatePayload = { status: status, status_timestamps: updatedTimestamps };
-
-        if (options?.dataPatch && typeof options.dataPatch === 'object') {
-            let currentData = current?.data || {};
-            if (typeof currentData === 'string') {
-                try {
-                    currentData = JSON.parse(currentData);
-                } catch (error) {
-                    currentData = {};
-                }
-            }
-
-            updatePayload.data = {
-                ...currentData,
-                ...options.dataPatch,
-            };
-        }
-
-        const { data, error } = await supabase
-            .from('requests')
-            .update(updatePayload)
-            .eq('id', id)
-            .select()
-            .single();
-
-        if (error) {
-            console.error('Error updating request status:', error);
-            throw error;
-        }
-
-        const notificationConfig = options?.notification;
-        if (notificationConfig && data?.user_id) {
-            const { error: notificationError } = await supabase
-                .from('notifications')
-                .insert([{
-                    user_id: data.user_id,
-                    title: notificationConfig.title || 'Request status updated',
-                    message: notificationConfig.message || `Your request #${data.request_number || current?.request_number || id} is now ${status}.`,
-                    type: notificationConfig.type || 'request_update',
-                    link: notificationConfig.link || '/profile',
-                }]);
-
-            if (notificationError) {
-                console.error('Failed to send request status notification:', notificationError);
-            }
-        }
-
-        return { data: { success: true, request: data } };
     },
     updateRequestPaymentStatus: async (requestToUpdate, newStatus) => {
-        const requestId = requestToUpdate.id;
-        const requestType = requestToUpdate.type;
-
-        if (requestType === 'customized') {
-            const { data: currentRequest, error: fetchError } = await supabase
-                .from('requests')
-                .select('data')
-                .eq('id', requestId)
-                .single();
-
-            if (fetchError) {
-                console.error('Error fetching request for payment status update:', fetchError);
-                throw fetchError;
-            }
-
-            let requestData = currentRequest.data;
-            if (typeof requestData === 'string') {
-                try {
-                    requestData = JSON.parse(requestData);
-                } catch (e) {
-                    console.error("Failed to parse request.data during payment status update:", e);
-                    requestData = {};
-                }
-            }
-
-            const updatedData = {
-                ...requestData,
-                payment_status: newStatus,
-            };
-
-            const { data, error } = await supabase
-                .from('requests')
-                .update({ data: updatedData })
-                .eq('id', requestId)
-                .select()
-                .single();
-
-            if (error) {
-                console.error('Error updating request payment status:', error);
-                throw error;
-            }
-            return { data: { success: true, request: data } };
-        } else {
-            const { data, error } = await supabase
-                .from('requests')
-                .update({ payment_status: newStatus })
-                .eq('id', requestId)
-                .select()
-                .single();
-
-            if (error) {
-                console.error('Error updating top-level payment status:', error);
-                throw error;
-            }
-            return { data: { success: true, request: data } };
+        const requestId = typeof requestToUpdate === 'object' ? requestToUpdate?.id : requestToUpdate;
+        const requestType = typeof requestToUpdate === 'object' ? requestToUpdate?.type : null;
+        try {
+            const data = await invokeAdminWorkflow('update_request_payment_status', {
+                requestId,
+                requestType,
+                status: newStatus,
+            });
+            return { data };
+        } catch (error) {
+            if (!shouldFallbackToDirectWorkflow(error)) throw error;
+            console.warn('Falling back to direct request payment update:', error.message);
+            return { data: await updateRequestPaymentStatusDirect(requestId, requestType, newStatus) };
         }
     },
 
     assignRiderToRequest: async (requestId, riderId, thirdPartyName = null, thirdPartyInfo = null) => {
-        const updateData = {};
-
-        if (riderId) {
-            updateData.assigned_rider = riderId;
-            updateData.third_party_rider_name = null;
-            updateData.third_party_rider_info = null;
-        } else {
-            updateData.assigned_rider = null;
-            updateData.third_party_rider_name = thirdPartyName;
-            updateData.third_party_rider_info = thirdPartyInfo;
+        try {
+            const data = await invokeAdminWorkflow('assign_request_rider', {
+                requestId,
+                riderId,
+                thirdPartyName,
+                thirdPartyInfo,
+            });
+            return { data };
+        } catch (error) {
+            if (!shouldFallbackToDirectWorkflow(error)) throw error;
+            console.warn('Falling back to direct request rider assignment:', error.message);
+            return { data: await assignRequestRiderDirect(requestId, riderId, thirdPartyName, thirdPartyInfo) };
         }
-
-        const { data, error } = await supabase
-            .from('requests')
-            .update(updateData)
-            .eq('id', requestId)
-            .select()
-            .single();
-
-        if (error) {
-            console.error('Error assigning rider to request:', error);
-            throw error;
-        }
-        return { data: { success: true, request: data } };
     },
 
     getAllStock: async () => {

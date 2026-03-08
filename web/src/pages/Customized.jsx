@@ -1,6 +1,5 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import Draggable from 'react-draggable';
 import { FaChevronLeft, FaArrowRotateLeft, FaScroll, FaRibbon, FaSeedling } from 'react-icons/fa6';
 import html2canvas from 'html2canvas';
 import RequestSuccessModal from '../components/RequestSuccessModal';
@@ -20,31 +19,56 @@ const steps = [
   { id: 3, icon: <FaSeedling />, label: 'Flowers' }
 ];
 
-const getInitialPositions = (count) => {
-  const positions = [];
-  // Positions are now relative to the flower-zone container
-  if (count === 3) {
-    positions.push({ x: 40, y: 20, rotate: -15, zIndex: 1 });
-    positions.push({ x: 80, y: 10, rotate: 0, zIndex: 2 });
-    positions.push({ x: 120, y: 20, rotate: 15, zIndex: 1 });
-  } else if (count === 6) {
-    positions.push({ x: 30, y: 30, rotate: -20, zIndex: 1 });
-    positions.push({ x: 70, y: 20, rotate: -5, zIndex: 2 });
-    positions.push({ x: 110, y: 30, rotate: 10, zIndex: 1 });
-    positions.push({ x: 50, y: 50, rotate: -10, zIndex: 3 });
-    positions.push({ x: 90, y: 50, rotate: 10, zIndex: 3 });
-    positions.push({ x: 70, y: 70, rotate: 0, zIndex: 4 });
-  } else if (count > 0) {
-    for (let i = 0; i < count; i += 1) {
-      positions.push({
-        x: Math.random() * 150,
-        y: Math.random() * 100,
-        rotate: (Math.random() * 30) - 15,
-        zIndex: i
-      });
-    }
+const normalizeStockCategory = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'flower' || normalized === 'flowers') return 'Flowers';
+  if (normalized === 'wrapper' || normalized === 'wrappers') return 'Wrappers';
+  if (normalized === 'ribbon' || normalized === 'ribbons') return 'Ribbons';
+  return String(value || '').trim();
+};
+
+const getOptionStockLabel = (item) => {
+  if (item.is_available === false) return 'Unavailable';
+  if ((item.quantity || 0) <= 0) return 'Out of Stock';
+  if ((item.quantity || 0) <= 5) return `Only ${item.quantity} left!`;
+  return `${item.quantity} pieces available`;
+};
+
+const isOptionSelectable = (item) => item.is_available !== false && (item.quantity || 0) > 0;
+
+const BASE_PRESET_POSITIONS = {
+  3: [
+    { x: 40, y: 20, rotate: -15, zIndex: 1 },
+    { x: 80, y: 10, rotate: 0, zIndex: 2 },
+    { x: 120, y: 20, rotate: 15, zIndex: 1 },
+  ],
+  6: [
+    { x: 30, y: 30, rotate: -20, zIndex: 1 },
+    { x: 70, y: 20, rotate: -5, zIndex: 2 },
+    { x: 110, y: 30, rotate: 10, zIndex: 1 },
+    { x: 50, y: 50, rotate: -10, zIndex: 3 },
+    { x: 90, y: 50, rotate: 10, zIndex: 3 },
+    { x: 70, y: 70, rotate: 0, zIndex: 4 },
+  ],
+};
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const getStemPosition = (index, count) => {
+  const preset = BASE_PRESET_POSITIONS[count];
+  if (preset?.[index]) {
+    return { ...preset[index] };
   }
-  return positions;
+
+  const angle = index * 0.82;
+  const radius = 18 + Math.sqrt(index + 1) * 18;
+
+  return {
+    x: clamp(70 + Math.cos(angle) * radius, 0, 220),
+    y: clamp(45 + Math.sin(angle) * radius * 0.62, 0, 150),
+    rotate: Math.sin(index * 1.35) * 18,
+    zIndex: index + 1,
+  };
 };
 
 const Customized = ({ addToCart }) => {
@@ -59,12 +83,17 @@ const Customized = ({ addToCart }) => {
   const [customBundleSizeInput, setCustomBundleSizeInput] = useState('');
   const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null }); // State for InfoModal
   const previewRef = useRef(null);
+  const flowerZoneRef = useRef(null);
+  const dragStateRef = useRef(null);
+  const stemIdRef = useRef(0);
 
   // New state for dynamic customization data
   const [flowers, setFlowers] = useState([]);
   const [wrappers, setWrappers] = useState([]);
   const [ribbons, setRibbons] = useState([]);
   const [loadingCustomizationData, setLoadingCustomizationData] = useState(true);
+  const [stemLayouts, setStemLayouts] = useState([]);
+  const [draggingStemId, setDraggingStemId] = useState(null);
 
   useEffect(() => {
     const fetchCustomizationData = async () => {
@@ -73,7 +102,7 @@ const Customized = ({ addToCart }) => {
         const allStockItems = response.data || [];
 
         const processedFlowers = allStockItems
-          .filter(item => item.category === 'Flowers')
+          .filter(item => normalizeStockCategory(item.category) === 'Flowers')
           .map(item => ({
             id: item.id,
             name: item.name,
@@ -82,10 +111,11 @@ const Customized = ({ addToCart }) => {
             layerImg: item.layerImg,
             stemImg: item.stemImg,
             quantity: item.quantity || 0,
+            is_available: item.is_available !== false,
           }));
 
         const processedWrappers = allStockItems
-          .filter(item => item.category === 'Wrappers')
+          .filter(item => normalizeStockCategory(item.category) === 'Wrappers')
           .map(item => ({
             id: item.id,
             name: item.name,
@@ -93,10 +123,11 @@ const Customized = ({ addToCart }) => {
             img: item.img,
             layerImg: item.layerImg,
             quantity: item.quantity || 0,
+            is_available: item.is_available !== false,
           }));
 
         const processedRibbons = allStockItems
-          .filter(item => item.category === 'Ribbons')
+          .filter(item => normalizeStockCategory(item.category) === 'Ribbons')
           .map(item => ({
             id: item.id,
             name: item.name,
@@ -104,6 +135,7 @@ const Customized = ({ addToCart }) => {
             img: item.img,
             layerImg: item.layerImg,
             quantity: item.quantity || 0,
+            is_available: item.is_available !== false,
           }));
 
         setFlowers(processedFlowers);
@@ -180,35 +212,38 @@ const Customized = ({ addToCart }) => {
 
   const handleOptionSelect = (type, id) => {
     if (type === 'flowers') {
+      const item = flowers.find((entry) => entry.id === id);
+      if (!item) return;
+      if (!isOptionSelectable(item)) {
+        setInfoModal({ show: true, title: 'Unavailable', message: `${item.name} is currently unavailable for customized orders.` });
+        return;
+      }
+
       setSelection(prev => {
         const alreadySelected = prev.flowers.find(f => f.id === id);
         let newFlowers;
         if (alreadySelected) {
-          // Deselect
           newFlowers = prev.flowers.filter(f => f.id !== id);
         } else {
-          // Select, but with limit
           if (prev.flowers.length >= 2) {
             setInfoModal({
               show: true,
               title: 'Flower Limit Reached',
               message: 'You can select up to 2 types of flowers.'
             });
-            return prev; // No change
+            return prev;
           }
-          const item = flowers.find(f => f.id === id);
           newFlowers = [...prev.flowers, item];
         }
 
         const next = { ...prev, flowers: newFlowers };
         if (newFlowers.length > 0 && prev.bundleSize === 0) {
-          next.bundleSize = 3; // Keep default bundle size logic
+          next.bundleSize = 3;
         }
         if (newFlowers.length === 0) {
           next.bundleSize = 0;
         }
 
-        // Dynamically enforce stock reduction if the new flower combination is too restrictive
         if (newFlowers.length > 0 && next.bundleSize > 0) {
           const maxAllowed = getMaxAllowedBundleSize(newFlowers);
           if (next.bundleSize > maxAllowed) {
@@ -220,18 +255,22 @@ const Customized = ({ addToCart }) => {
 
         return next;
       });
-    } else {
-      let item = null;
-      if (type === 'wrappers') {
-        item = wrappers.find((entry) => entry.id === id);
-      } else if (type === 'ribbons') {
-        item = ribbons.find((entry) => entry.id === id);
-      }
-      if (!item) return;
-      setSelection((prev) => ({ ...prev, [type === 'wrappers' ? 'wrapper' : 'ribbon']: item }));
+      return;
     }
-  };
 
+    let item = null;
+    if (type === 'wrappers') {
+      item = wrappers.find((entry) => entry.id === id);
+    } else if (type === 'ribbons') {
+      item = ribbons.find((entry) => entry.id === id);
+    }
+    if (!item) return;
+    if (!isOptionSelectable(item)) {
+      setInfoModal({ show: true, title: 'Unavailable', message: `${item.name} is currently unavailable for customized orders.` });
+      return;
+    }
+    setSelection((prev) => ({ ...prev, [type === 'wrappers' ? 'wrapper' : 'ribbon']: item }));
+  };
   const handleReset = () => {
     setSelection({ flowers: [], bundleSize: 0, wrapper: null, ribbon: null });
     setActiveStep(1);
@@ -253,10 +292,8 @@ const Customized = ({ addToCart }) => {
   }, [selection]);
 
   const stemScale = useMemo(() => {
-    if (selection.bundleSize <= 3) return 1;
-    if (selection.bundleSize <= 6) return 0.8;
-    if (selection.bundleSize <= 12) return 0.6;
-    return Math.max(0.4, 1 - (selection.bundleSize - 3) * 0.05);
+    if (selection.bundleSize <= 1) return 1;
+    return Math.max(0.52, 1 - Math.min(selection.bundleSize - 1, 24) * 0.02);
   }, [selection.bundleSize]);
 
   const handleAddToCart = async () => {
@@ -335,14 +372,92 @@ const Customized = ({ addToCart }) => {
     }
   };
 
-  const stemSlots = selection.flowers.length > 0 && selection.bundleSize ? getInitialPositions(selection.bundleSize) : [];
-  const stemRefs = useMemo(
-    () => Array.from({ length: stemSlots.length }, () => React.createRef()),
-    [stemSlots.length]
-  );
+  useEffect(() => {
+    if (selection.flowers.length === 0 || !selection.bundleSize) {
+      setStemLayouts([]);
+      setDraggingStemId(null);
+      dragStateRef.current = null;
+      return;
+    }
+
+    setStemLayouts((previousLayouts) => {
+      const nextLayouts = previousLayouts
+        .slice(0, selection.bundleSize)
+        .map((layout, index) => ({
+          ...layout,
+          zIndex: index + 1,
+        }));
+
+      for (let index = nextLayouts.length; index < selection.bundleSize; index += 1) {
+        nextLayouts.push({
+          id: `stem-${stemIdRef.current += 1}`,
+          ...getStemPosition(index, selection.bundleSize),
+        });
+      }
+
+      return nextLayouts;
+    });
+  }, [selection.bundleSize, selection.flowers.length]);
+
   const isEmpty = selection.flowers.length === 0 && !selection.wrapper && !selection.ribbon;
 
-  const formatPrice = (value) => `₱${value.toLocaleString('en-PH')}`;
+  const formatPrice = (value) => `PHP ${value.toLocaleString('en-PH')}`;
+
+  const releaseDraggedStem = (event) => {
+    if (dragStateRef.current?.pointerId === event.pointerId) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+      dragStateRef.current = null;
+      setDraggingStemId(null);
+    }
+  };
+
+  const handleStemPointerDown = (stemId, index) => (event) => {
+    if (!flowerZoneRef.current) return;
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+
+    const zoneRect = flowerZoneRef.current.getBoundingClientRect();
+    const targetRect = event.currentTarget.getBoundingClientRect();
+    const layout = stemLayouts[index];
+
+    if (!layout) return;
+
+    dragStateRef.current = {
+      index,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: layout.x,
+      originY: layout.y,
+      maxX: Math.max(zoneRect.width - targetRect.width, 0),
+      maxY: Math.max(zoneRect.height - targetRect.height, 0),
+    };
+
+    setDraggingStemId(stemId);
+    setStemLayouts((previousLayouts) => previousLayouts.map((stemLayout, layoutIndex) => (
+      layoutIndex === index
+        ? { ...stemLayout, zIndex: previousLayouts.length + 1 }
+        : stemLayout
+    )));
+
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  };
+
+  const handleStemPointerMove = (index) => (event) => {
+    const dragState = dragStateRef.current;
+    if (!dragState || dragState.index !== index) return;
+
+    const nextX = clamp(dragState.originX + (event.clientX - dragState.startX), 0, dragState.maxX);
+    const nextY = clamp(dragState.originY + (event.clientY - dragState.startY), 0, dragState.maxY);
+
+    setStemLayouts((previousLayouts) => previousLayouts.map((layout, layoutIndex) => (
+      layoutIndex === index
+        ? { ...layout, x: nextX, y: nextY }
+        : layout
+    )));
+
+    event.preventDefault();
+  };
 
   const renderOptions = (groupKey, selectedIds) => {
     let options = [];
@@ -365,22 +480,30 @@ const Customized = ({ addToCart }) => {
 
     return (
       <div className="grid-options" id={`${groupKey}Options`}>
-        {options.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={`option-card ${isMultiSelect ? (selectedIds.includes(item.id) ? 'selected' : '') : (selectedIds === item.id ? 'selected' : '')}`}
-            onClick={() => handleOptionSelect(groupKey, item.id)}
-          >
-            <img src={item.img || placeholderImg} alt={item.name} className="option-img" />
-            <div className="option-name">{item.name}</div>
-            <div className="option-price">+{formatPrice(item.price)}{groupKey === 'flowers' ? '/pc' : ''}</div>
-          </button>
-        ))}
+        {options.map((item) => {
+          const isSelected = isMultiSelect ? selectedIds.includes(item.id) : selectedIds === item.id;
+          const isSelectable = isOptionSelectable(item);
+          const stockLabel = getOptionStockLabel(item);
+
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={`option-card ${isSelected ? "selected" : ""} ${!isSelectable ? "disabled" : ""}`}
+              onClick={() => handleOptionSelect(groupKey, item.id)}
+              disabled={!isSelectable}
+              aria-disabled={!isSelectable}
+            >
+              <img src={item.img || placeholderImg} alt={item.name} className="option-img" />
+              <div className="option-name">{item.name}</div>
+              <div className="option-price">+{formatPrice(item.price)}{groupKey === "flowers" ? "/pc" : ""}</div>
+              <div className={`option-stock ${!isSelectable ? "danger" : (item.quantity <= 5 ? "warning" : "")}`}>{stockLabel}</div>
+            </button>
+          );
+        })}
       </div>
     );
   };
-
   return (
     <div className="customize-page">
       <header className="app-header">
@@ -436,6 +559,7 @@ const Customized = ({ addToCart }) => {
 
               {/* Flower Zone - Constrained Area */}
               <div
+                ref={flowerZoneRef}
                 className="flower-zone"
                 style={{
                   position: 'absolute',
@@ -446,36 +570,33 @@ const Customized = ({ addToCart }) => {
                   touchAction: 'none'
                 }}
               >
-                {stemSlots.map((slot, index) => {
+                {stemLayouts.map((slot, index) => {
                   const flowerIndex = index % selection.flowers.length;
                   const flower = selection.flowers[flowerIndex];
                   const stemImage = flower?.stemImg || flower?.layerImg || placeholderStemImg;
 
                   return (
-                    <Draggable
-                      key={`stem-${index}`}
-                      bounds="parent"
-                      defaultPosition={{ x: slot.x, y: slot.y }}
-                      nodeRef={stemRefs[index]}
-                      handle=".drag-handle"
+                    <div
+                      key={slot.id}
+                      className={`drag-handle ${draggingStemId === slot.id ? 'is-dragging' : ''}`}
+                      style={{
+                        position: 'absolute',
+                        left: slot.x,
+                        top: slot.y,
+                        zIndex: slot.zIndex,
+                        transform: `scale(${stemScale})`,
+                        transformOrigin: 'center center'
+                      }}
+                      onPointerDown={handleStemPointerDown(slot.id, index)}
+                      onPointerMove={handleStemPointerMove(index)}
+                      onPointerUp={releaseDraggedStem}
+                      onPointerCancel={releaseDraggedStem}
+                      onLostPointerCapture={releaseDraggedStem}
                     >
-                      <div
-                        ref={stemRefs[index]}
-                        className="drag-handle"
-                        style={{
-                          position: 'absolute',
-                          zIndex: slot.zIndex,
-                          cursor: 'grab',
-                          touchAction: 'none',
-                          transform: `scale(${stemScale})`,
-                          transformOrigin: 'center center'
-                        }}
-                      >
-                        <div style={{ transform: `rotate(${slot.rotate}deg)`, width: '100%', height: '100%' }}>
-                          <img src={stemImage} alt="Selected stem" className="stem-slot" draggable="false" />
-                        </div>
+                      <div style={{ transform: `rotate(${slot.rotate}deg)`, width: '100%', height: '100%' }}>
+                        <img src={stemImage} alt="Selected stem" className="stem-slot" draggable="false" />
                       </div>
-                    </Draggable>
+                    </div>
                   );
                 })}
               </div>

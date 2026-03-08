@@ -115,6 +115,10 @@ const OrderCustomizedTracking = () => {
                 };
             }
 
+            const trackingStatus = foundRequest.status === 'accepted' && foundRequest.payment_status === 'paid'
+                ? 'processing'
+                : foundRequest.status;
+
             const transformedRequest = {
                 ...foundRequest,
                 rider: riderDetails,
@@ -126,6 +130,7 @@ const OrderCustomizedTracking = () => {
                 requestData: foundRequest.data,
                 imageUrl: foundRequest.data?.items?.[0]?.image_url || foundRequest.image_url,
                 finalPrice: foundRequest.final_price,
+                trackingStatus,
             };
             setRequest(transformedRequest);
 
@@ -133,20 +138,20 @@ const OrderCustomizedTracking = () => {
             const steps = generateTrackingSteps(transformedRequest);
             const finalRequestStatuses = ['completed', 'claimed', 'declined', 'cancelled'];
 
-            if (finalRequestStatuses.includes(transformedRequest.status)) {
-                if (transformedRequest.status === 'completed' || transformedRequest.status === 'claimed') {
+            if (finalRequestStatuses.includes(transformedRequest.trackingStatus)) {
+                if (transformedRequest.trackingStatus === 'completed' || transformedRequest.trackingStatus === 'claimed') {
                     setCurrentStep(steps.length + 1);
                 } else {
                     setCurrentStep(-1);
                 }
             } else {
                 let currentStepKey;
-                if (transformedRequest.status === 'pending') {
+                if (transformedRequest.trackingStatus === 'pending') {
                     currentStepKey = 'submitted';
-                } else if (transformedRequest.status === 'accepted') {
+                } else if (transformedRequest.trackingStatus === 'accepted') {
                     currentStepKey = 'payment';
                 } else {
-                    currentStepKey = transformedRequest.status;
+                    currentStepKey = transformedRequest.trackingStatus;
                 }
 
                 let stepIndex = steps.findIndex(step => step.key === currentStepKey);

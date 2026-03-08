@@ -1,0 +1,7 @@
+project_id = "luzcecstkebntjnfonwv"
+
+[functions.create-employee]
+verify_jwt = false
+
+[functions.manage-admin-workflows]
+verify_jwt = false

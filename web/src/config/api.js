@@ -41,7 +41,8 @@ export const stockAPI = {
             const { data, error } = await supabase
                 .from('stock_products') // Assuming your table name is 'stock_products'
                 .select('*')
-                .eq('is_available', true); // Assuming you only want available stock items
+                .order('category', { ascending: true })
+                .order('name', { ascending: true });
 
             if (error) throw error;
 

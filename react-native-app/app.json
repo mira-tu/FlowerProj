@@ -23,7 +23,8 @@
     "android": {
       "package": "com.flowerforge.admin",
       "adaptiveIcon": {
-        "backgroundColor": "#ec4899"
+        "backgroundColor": "#ec4899",
+        "foregroundImage": "./assets/adaptive-icon.png"
       },
       "permissions": [
         "android.permission.CAMERA",
@@ -57,6 +58,7 @@
         "projectId": "dfb3bfbd-931d-414a-9513-5ddb7fc84750"
       }
     },
-    "owner": "neneth"
+    "owner": "neneth",
+    "icon": "./assets/icon.png"
   }
 }

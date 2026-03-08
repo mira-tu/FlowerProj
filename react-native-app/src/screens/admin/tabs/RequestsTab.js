@@ -894,13 +894,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     setLoading(true);
     try {
       const response = await adminAPI.getAllRequests();
-      const requests = (response.data.requests || []).map(req => {
-        return {
-          ...req,
-          status: req.status === 'accepted' ? 'processing' : req.status, // Keep this transformation
-        }
-      });
-      setRequests(requests);
+      setRequests(response.data.requests || []);
     } catch (error) {
       console.error('Error loading requests:', error);
       Alert.alert('Error', 'Failed to load requests');
@@ -917,13 +911,14 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   };
 
   const getNextRequestStatus = (currentStatus, deliveryMethod, type) => {
-    // In this component, 'accepted' is often transformed to 'processing'
-    const status = currentStatus === 'accepted' ? 'processing' : currentStatus;
+    const status = currentStatus;
 
     switch (status) {
       case 'pending':
         if (type === 'customized') return 'processing';
         return null; // booking/special need quote
+      case 'accepted':
+        return 'processing';
       case 'processing':
         return deliveryMethod === 'pickup' ? 'ready_for_pickup' : 'out_for_delivery';
       case 'out_for_delivery':
@@ -1283,16 +1278,19 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
         ? amount
         : (requestToRecordPayment.amount_received || 0) + amount;
       const newStatus = newTotalReceived >= total ? 'paid' : 'partial';
+      const shouldAdvanceToProcessing = newStatus === 'paid' && requestToRecordPayment.status === 'accepted';
 
       const { error } = await supabase
         .from('requests')
         .update({
           amount_received: newTotalReceived,
-          payment_status: newStatus
+          payment_status: newStatus,
         })
         .eq('id', requestToRecordPayment.id);
 
       if (error) throw error;
+
+      await adminAPI.updateRequestPaymentStatus(requestToRecordPayment, newStatus);
 
       Toast.show({ type: 'success', text1: isEditPaymentMode ? 'Amount Updated' : 'Payment Recorded' });
       setPaymentModalVisible(false);
@@ -1301,7 +1299,8 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
         setSelectedRequest({
           ...selectedRequest,
           amount_received: newTotalReceived,
-          payment_status: newStatus
+          payment_status: newStatus,
+          status: shouldAdvanceToProcessing ? 'processing' : selectedRequest.status,
         });
       }
 
@@ -1850,7 +1849,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                               <Text style={quoteStyles.quoteBreakdownTitle}>{selection.arrangementLabel}</Text>
                               <Text style={quoteStyles.quoteBreakdownMeta}>
                                 {selection.quantity} arrangement{selection.quantity > 1 ? 's' : ''}
-                                {selection.flowersPerArrangement > 0 ? ' · ' + selection.flowersPerArrangement + ' flowers each' : ''}
+                                {selection.flowersPerArrangement > 0 ? ' ? ' + selection.flowersPerArrangement + ' flowers each' : ''}
                               </Text>
                             </View>
                           </View>

@@ -45,7 +45,9 @@ const LoginScreen = () => {
       let errMsg = 'Could not connect to server.';
 
       // Check for specific Supabase error messages or custom errors from authAPI
-      if (error.message.includes('AuthApiError')) {
+      if (error.message.toLowerCase().includes('email not confirmed')) {
+        errMsg = 'Please confirm your email address before logging in.';
+      } else if (error.message.includes('AuthApiError')) {
         // Supabase authentication errors
         errMsg = error.message.replace('AuthApiError: ', '');
       } else if (error.message.includes('Access Denied')) {

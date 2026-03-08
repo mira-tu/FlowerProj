@@ -29,10 +29,12 @@ const Login = ({ onLogin }) => {
             });
 
             if (error || !data?.user) {
-                // Normalize all auth failures to the same user-facing message
-                // so tests and users consistently see clear feedback.
                 console.error('Login error:', error || 'Unknown authentication error');
-                setError('Invalid email or password');
+                if (error && error.message && error.message.toLowerCase().includes('email not confirmed')) {
+                    setError('Please confirm your email address before logging in.');
+                } else {
+                    setError('Invalid email or password');
+                }
                 return;
             }
 
@@ -77,7 +79,7 @@ const Login = ({ onLogin }) => {
 
         try {
             const { error: resetError } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-                redirectTo: `${window.location.origin}/reset-password`,
+                redirectTo: 'https://flowershop-yess.up.railway.app/reset-password',
             });
 
             if (resetError) {
