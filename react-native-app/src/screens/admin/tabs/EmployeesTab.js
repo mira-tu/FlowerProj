@@ -63,49 +63,35 @@ const EmployeesTab = () => {
 
     setLoading(true);
     try {
-      // 1. Create the user in Supabase Auth
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
-        options: {
-          data: {
-            name: formData.name,
-            role: 'employee', // Assign role in metadata
-            phone: formData.phone,
-          },
-        },
-      });
+      // Get the current user session token
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
 
-      if (authError) {
-        throw authError;
+      if (sessionError || !sessionData.session) {
+        throw new Error('Not authenticated');
       }
 
-      if (!authData.user) {
-        throw new Error("User was not created in authentication system.");
-      }
-
-      // 2. Insert the user into the public.users table
-      const { error: insertError } = await supabase
-        .from('users')
-        .insert({
-          id: authData.user.id,
+      // Call the secure edge function to create the employee
+      const { data, error } = await supabase.functions.invoke('create-employee', {
+        body: {
           name: formData.name,
           email: formData.email,
-          role: 'employee', // Explicitly set role in the table
+          password: formData.password,
           phone: formData.phone,
-        });
+        },
+        headers: {
+          Authorization: `Bearer ${sessionData.session.access_token}`
+        }
+      });
 
-      if (insertError) {
-        // If insert fails, we should ideally delete the auth user to avoid orphans
-        await supabase.auth.admin.deleteUser(authData.user.id);
-        throw insertError;
+      if (error) {
+        throw error;
       }
 
-      let successMessage = 'Employee added successfully.';
-      if (authData.user && !authData.session) {
-        successMessage = 'Employee added successfully! Please check the employee\'s email to confirm their account.';
+      if (data && data.error) {
+        throw new Error(data.error);
       }
-      Alert.alert('Success', successMessage);
+
+      Alert.alert('Success', 'Employee added successfully!');
       setModalVisible(false);
       setFormData({ name: '', email: '', password: '', phone: '' });
       loadData();
@@ -193,7 +179,7 @@ const EmployeesTab = () => {
 
       <Modal visible={modalVisible} animationType="slide" transparent>
         <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { maxHeight: '80%' }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Add Employee</Text>
               <TouchableOpacity onPress={() => setModalVisible(false)}>
@@ -201,7 +187,7 @@ const EmployeesTab = () => {
               </TouchableOpacity>
             </View>
 
-            <ScrollView>
+            <ScrollView style={{ marginTop: 10 }}>
               <Text style={styles.inputLabel}>Name</Text>
               <TextInput
                 style={styles.input}
@@ -238,7 +224,7 @@ const EmployeesTab = () => {
               />
             </ScrollView>
 
-            <View style={styles.modalButtons}>
+            <View style={[styles.modalButtons, { marginTop: 20 }]}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelButton]}
                 onPress={() => setModalVisible(false)}
