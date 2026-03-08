@@ -361,9 +361,9 @@ const MyOrders = () => {
 
             // Create cancellation notification
             const notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
-            const orderTypeLabel = orderToCancel.isFromBooking ? 'Event Booking' :
+            const orderTypeLabel = orderToCancel.isFromBooking ? 'Custom Order' :
                 orderToCancel.type
-                    ? (orderToCancel.type === 'booking' ? 'Event Booking'
+                    ? (orderToCancel.type === 'booking' ? 'Custom Order'
                         : orderToCancel.type === 'special_order' ? 'Special Order'
                             : orderToCancel.type === 'customized' ? 'Customized Bouquet'
                                 : 'Request')
@@ -397,7 +397,7 @@ const MyOrders = () => {
 
     const getOrderTypeLabel = (type) => {
         const labels = {
-            booking: 'Event Booking',
+            booking: 'Custom Order',
             special_order: 'Special Order',
             customized: 'Customized Bouquet',
             regular: 'Regular Order'
@@ -533,7 +533,7 @@ const MyOrders = () => {
         // Create notification for admin
         const notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
         const orderType = selectedOrderForChat.type
-            ? (selectedOrderForChat.type === 'booking' ? 'Event Booking'
+            ? (selectedOrderForChat.type === 'booking' ? 'Custom Order'
                 : selectedOrderForChat.type === 'special_order' ? 'Special Order'
                     : selectedOrderForChat.type === 'customized' ? 'Customized Bouquet'
                         : 'Request')
@@ -702,8 +702,8 @@ const MyOrders = () => {
                                     <div className="d-flex align-items-center gap-3">
                                         <div className="order-id">
                                             {order.isFromRequest && order.order_number && `Order #${order.order_number}`}
-                                            {order.isFromRequest && !order.order_number && (order.type === 'inquiry' ? 'Inquiry' : order.type === 'booking' ? 'Event Booking' : 'Request')}
-                                            {order.type === 'booking' && !order.isFromRequest && 'Event Booking'}
+                                            {order.isFromRequest && !order.order_number && (order.type === 'inquiry' ? 'Inquiry' : order.type === 'booking' ? 'Custom Order' : 'Request')}
+                                            {order.type === 'booking' && !order.isFromRequest && 'Custom Order'}
                                             {order.type === 'special_order' && 'Special Order'}
                                             {order.type === 'customized' && 'Customized Bouquet'}
                                             {order.type === 'inquiry' && 'Inquiry'}
@@ -798,7 +798,7 @@ const MyOrders = () => {
                                                         <>{(order.data?.eventType || order.eventType || order.data?.otherEventType)} Event</>
                                                     )}
                                                     {order.type === 'booking' && !order.data?.eventType && !order.eventType && !order.data?.otherEventType && (
-                                                        <>Event Booking</>
+                                                        <>Custom Order</>
                                                     )}
                                                     {order.type === 'special_order' && (
                                                         <>Special Order Request</>
@@ -821,6 +821,21 @@ const MyOrders = () => {
                                                     <div className="order-item-variant">
                                                         <i className="fas fa-calendar me-1"></i>
                                                         {new Date(order.data?.eventDate || order.eventDate).toLocaleDateString()}
+                                                    </div>
+                                                )}
+                                                {order.type === 'booking' && (order.data?.eventTime || order.eventTime) && (
+                                                    <div className="order-item-variant">
+                                                        <i className="fas fa-clock me-1"></i>
+                                                        {(() => {
+                                                            try {
+                                                                const t = order.data?.eventTime || order.eventTime;
+                                                                const [hStr, mStr] = t.split(':');
+                                                                let h = parseInt(hStr, 10);
+                                                                const ampm = h >= 12 ? 'PM' : 'AM';
+                                                                h = h % 12 || 12;
+                                                                return `${h}:${mStr} ${ampm}`;
+                                                            } catch (e) { return order.data?.eventTime || order.eventTime; }
+                                                        })()}
                                                     </div>
                                                 )}
                                                 {order.type === 'booking' && (order.data?.details || order.notes) && (
@@ -1253,7 +1268,7 @@ const MyOrders = () => {
                             <div>
                                 <h5 className="mb-0">Chat about your order</h5>
                                 <small className="text-muted">
-                                    {selectedOrderForChat.type === 'booking' && 'Event Booking'}
+                                    {selectedOrderForChat.type === 'booking' && 'Custom Order'}
                                     {selectedOrderForChat.type === 'special_order' && 'Special Order'}
                                     {selectedOrderForChat.type === 'customized' && 'Customized Bouquet'}
                                     {!selectedOrderForChat.type && `Order #${selectedOrderForChat.id}`}

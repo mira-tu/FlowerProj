@@ -303,10 +303,17 @@ const BookingCheckout = ({ user }) => {
                                         </div>
 
                                         <p className="mb-1"><strong>Customer:</strong> {item.customerName}</p>
-                                        <p className="mb-1"><strong>Event Date:</strong> {item.eventDate}</p>
-                                        <p className="mb-1"><strong>Location:</strong> {item.venue}</p>
-                                        {item.flowers && <p className="mb-1"><strong>Flowers:</strong> {item.flowers}</p>}
-                                        {item.specialInstructions && <p className="mb-1"><strong>Details:</strong> {item.specialInstructions}</p>}
+                                        {item.recipientName && <p className="mb-1"><strong>Recipient:</strong> {item.recipientName}</p>}
+                                        <p className="mb-1">
+                                            <strong>Event Date:</strong> {item.eventDate}
+                                            {item.eventTime && ` at ${item.eventTime}`}
+                                        </p>
+                                        <p className="mb-1"><strong>Location/Venue:</strong> {item.venue}</p>
+                                        <p className="mb-1"><strong>Quantity:</strong> {item.arrangementQuantity || 1}</p>
+                                        {item.flowerQuantity && <p className="mb-1"><strong>No. of Flower Pieces:</strong> {item.flowerQuantity}</p>}
+                                        {item.flowers && <p className="mb-1"><strong>Preferred Flowers:</strong> {item.flowers}</p>}
+                                        {item.colorPreference && <p className="mb-1"><strong>Color Theme:</strong> {item.colorPreference}</p>}
+                                        {item.specialInstructions && <p className="mb-1 mt-2"><strong>Details:</strong> {item.specialInstructions}</p>}
                                     </div>
                                 ))}
                             </div>

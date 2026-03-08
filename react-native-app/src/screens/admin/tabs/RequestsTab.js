@@ -34,6 +34,163 @@ const DetailSection = ({ label, value }) => {
   );
 };
 
+const parseCurrencyNumber = (value) => {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const getArrangementFlowerCount = (arrangementType = '') => {
+  if (!arrangementType) return 0;
+  const match = arrangementType.match(/(\d+)\s*flowers?/i);
+  if (!match) return 0;
+  const parsed = Number.parseInt(match[1], 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const toPositiveInt = (value, fallback = 0) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const normalizeFlowerNames = (value) => {
+  if (!value) return [];
+
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => {
+        if (!entry) return '';
+        if (typeof entry === 'string') return entry.trim();
+        return (entry.label || entry.name || entry.value || '').trim();
+      })
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => entry.replace(/\s*\([^)]*\)\s*$/, '').trim());
+  }
+
+  return [];
+};
+
+const buildFlowerPricingContext = (request) => {
+  let requestData = request?.data || {};
+  if (typeof requestData === 'string') {
+    try {
+      requestData = JSON.parse(requestData);
+    } catch (error) {
+      requestData = {};
+    }
+  }
+
+  const arrangementType =
+    requestData.arrangementType ||
+    requestData.arrangement_type ||
+    requestData.arrangement ||
+    'N/A';
+
+  const arrangementQuantity = toPositiveInt(
+    requestData.arrangementQuantity || requestData.arrangement_quantity,
+    1
+  );
+
+  let totalFlowers = toPositiveInt(
+    requestData.totalFlowers ||
+    requestData.total_flower_count ||
+    requestData.flowerQuantity ||
+    requestData.flower_quantity,
+    0
+  );
+
+  const flowersPerArrangement = getArrangementFlowerCount(arrangementType);
+  if (!totalFlowers && flowersPerArrangement) {
+    totalFlowers = flowersPerArrangement * arrangementQuantity;
+  }
+
+  const flowerTypes = normalizeFlowerNames(
+    requestData.selectedFlowers?.length ? requestData.selectedFlowers : requestData.flowers
+  );
+
+  const explicitFlowerQuantities = {};
+  const quantitySources = [requestData.flowerQuantities, requestData.flower_quantities, requestData.flowerBreakdown];
+
+  quantitySources.forEach((source) => {
+    if (source && typeof source === 'object' && !Array.isArray(source)) {
+      Object.entries(source).forEach(([name, qty]) => {
+        const trimmedName = String(name || '').trim();
+        if (!trimmedName) return;
+        explicitFlowerQuantities[trimmedName] = toPositiveInt(qty, 0);
+      });
+    }
+  });
+
+  const normalizedFlowerTypes = flowerTypes.length
+    ? flowerTypes
+    : Object.keys(explicitFlowerQuantities);
+
+  if (!normalizedFlowerTypes.length && requestData.flower?.name) {
+    normalizedFlowerTypes.push(requestData.flower.name);
+  }
+
+  const flowerQuantities = {};
+  normalizedFlowerTypes.forEach((flowerName) => {
+    flowerQuantities[flowerName] = explicitFlowerQuantities[flowerName] || 0;
+  });
+
+  const explicitQuantityTotal = normalizedFlowerTypes.reduce(
+    (sum, flowerName) => sum + (flowerQuantities[flowerName] || 0),
+    0
+  );
+
+  if (!totalFlowers && explicitQuantityTotal > 0) {
+    totalFlowers = explicitQuantityTotal;
+  }
+
+  if (totalFlowers > 0 && explicitQuantityTotal === 0 && normalizedFlowerTypes.length > 0) {
+    const base = Math.floor(totalFlowers / normalizedFlowerTypes.length);
+    let remainder = totalFlowers % normalizedFlowerTypes.length;
+
+    normalizedFlowerTypes.forEach((flowerName) => {
+      flowerQuantities[flowerName] = base + (remainder > 0 ? 1 : 0);
+      if (remainder > 0) remainder -= 1;
+    });
+  }
+
+  return {
+    arrangementType,
+    arrangementQuantity,
+    totalFlowers,
+    flowerTypes: normalizedFlowerTypes,
+    flowerQuantities,
+  };
+};
+
+const normalizeRequestData = (request) => {
+  const rawData = request?.data;
+  if (!rawData) return {};
+  if (typeof rawData === 'string') {
+    try {
+      const parsed = JSON.parse(rawData);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (error) {
+      return {};
+    }
+  }
+  return typeof rawData === 'object' ? rawData : {};
+};
+
+const firstNonEmpty = (...values) => {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    const text = String(value).trim();
+    if (text) return value;
+  }
+  return null;
+};
+
 const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const getCustomerInitials = (name) => {
     if (!name) return '??';
@@ -73,6 +230,8 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const [requestToQuote, setRequestToQuote] = useState(null);
   const [quoteAmount, setQuoteAmount] = useState('');
   const [quoteShippingFee, setQuoteShippingFee] = useState('');
+  const [quoteFlowerContext, setQuoteFlowerContext] = useState(null);
+  const [quoteFlowerPrices, setQuoteFlowerPrices] = useState({});
   const [receiptModalVisible, setReceiptModalVisible] = useState(false);
   const [selectedReceiptUrl, setSelectedReceiptUrl] = useState(null);
 
@@ -193,24 +352,64 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
 
   const renderPickupTimeSection = (request) => {
-    if (request.delivery_method !== 'pickup' || !request.pickup_time) return null;
-    return <DetailSection label="Pickup Time:" value={request.pickup_time} />;
+    if (request.delivery_method !== 'pickup') return null;
+    return (
+      <>
+        <DetailSection label="Pickup Location:" value="Jocerry's Flower Shop, 63 San Jose Road, Zamboanga City" />
+        {request.pickup_time && <DetailSection label="Pickup Time:" value={request.pickup_time} />}
+      </>
+    );
   };
 
-  const renderBookingDetails = (request) => (
-    <>
-      <DetailSection label="Request Number:" value={request.request_number} />
-      <DetailSection label="Customer Name:" value={request.user_name} />
-      <DetailSection label="Customer Email:" value={request.user_email} />
-      <DetailSection label="Contact Number:" value={request.contact_number} />
-      <DetailSection label="Recipient Name:" value={request.data?.recipient_name} />
-      <DetailSection label="Occasion:" value={request.data?.occasion} />
-      <DetailSection label="Event Date:" value={request.data?.event_date} />
-      <DetailSection label="Venue:" value={request.data?.venue} />
-      <DetailSection label="Additional Notes:" value={request.notes} />
-      {renderPickupTimeSection(request)}
-    </>
-  );
+  const renderBookingDetails = (request) => {
+    const requestData = normalizeRequestData(request);
+
+    const recipientName = firstNonEmpty(requestData.recipientName, requestData.recipient_name);
+    const occasion = firstNonEmpty(requestData.occasion, requestData.otherOccasion);
+    const venue = firstNonEmpty(
+      requestData.venue,
+      typeof requestData.deliveryAddress === 'string' ? requestData.deliveryAddress : null,
+      requestData.delivery_address
+    );
+    const eventDate = firstNonEmpty(requestData.eventDate, requestData.event_date);
+    const eventTime = firstNonEmpty(requestData.eventTime, requestData.event_time);
+    const arrangementType = firstNonEmpty(requestData.arrangementType, requestData.arrangement_type);
+    const arrangementQuantity = firstNonEmpty(requestData.arrangementQuantity, requestData.arrangement_quantity);
+    const colorTheme = firstNonEmpty(requestData.colorPreference, requestData.color_preference);
+    const specialInstructions = firstNonEmpty(requestData.specialInstructions, request.notes);
+
+    const preferredFlowers = firstNonEmpty(
+      Array.isArray(requestData.selectedFlowers)
+        ? requestData.selectedFlowers
+          .map((flower) => flower?.label || flower?.name || flower?.value || flower)
+          .filter(Boolean)
+          .join(', ')
+        : null,
+      requestData.flowers
+    );
+
+    return (
+      <>
+        <DetailSection label="Occasion:" value={occasion} />
+        <DetailSection label="Venue:" value={venue} />
+        <DetailSection label="Type:" value={getStatusLabel(request.type)} />
+        <DetailSection label="Submitted:" value={formatTimestamp(request.created_at)} />
+        <DetailSection label="Request Number:" value={request.request_number} />
+        <DetailSection label="Customer Name:" value={request.user_name} />
+        <DetailSection label="Customer Email:" value={request.user_email} />
+        <DetailSection label="Contact Number:" value={request.contact_number} />
+        <DetailSection label="Recipient:" value={recipientName} />
+        <DetailSection label="Event Date:" value={eventDate} />
+        <DetailSection label="Event Time:" value={eventTime} />
+        <DetailSection label="Arrangement:" value={arrangementType} />
+        <DetailSection label="Quantity:" value={arrangementQuantity ? String(arrangementQuantity) : null} />
+        <DetailSection label="Preferred Flowers:" value={preferredFlowers} />
+        <DetailSection label="Color Theme:" value={colorTheme} />
+        <DetailSection label="Special Instructions:" value={specialInstructions} />
+        {renderPickupTimeSection(request)}
+      </>
+    );
+  };
 
   const renderSpecialOrderDetails = (request) => (
     <>
@@ -301,7 +500,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
         {request.final_price && (
           <>
             <Text style={styles.inputLabel}>Final Price</Text>
-            <TextInput style={styles.input} value={`₱${request.final_price.toFixed(2)}`} editable={false} />
+            <TextInput style={styles.input} value={`PHP ${request.final_price.toFixed(2)}`} editable={false} />
           </>
         )}
         {renderPickupTimeSection(request)}
@@ -356,6 +555,18 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const handleProceedRequestStatus = async (request) => {
     const nextStatus = getNextRequestStatus(request.status, request.delivery_method, request.type);
     if (!nextStatus) return;
+
+    // Rider enforcement: If moving to out_for_delivery, must have a rider assigned
+    if (nextStatus === 'out_for_delivery') {
+      const hasRider = request.rider || request.assigned_rider || request.third_party_rider_name;
+      if (!hasRider) {
+        Alert.alert(
+          "Rider Required",
+          "Please assign a rider before moving this request to Out for Delivery."
+        );
+        return;
+      }
+    }
 
     try {
       await adminAPI.updateRequestStatus(request.id, nextStatus);
@@ -417,9 +628,20 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const confirmRequestStatusChange = async () => {
     if (!requestToUpdate || !selectedRequestStatus) return;
     const requestId = requestToUpdate.id;
-    setRequestStatusModalVisible(false); // Close modal immediately
 
     try {
+      // Rider enforcement: If moving to out_for_delivery, must have a rider assigned
+      if (selectedRequestStatus === 'out_for_delivery') {
+        const hasRider = requestToUpdate.rider || requestToUpdate.assigned_rider || requestToUpdate.third_party_rider_name;
+        if (!hasRider) {
+          Alert.alert(
+            "Rider Required",
+            "Please assign a rider before moving this request to Out for Delivery."
+          );
+          return;
+        }
+      }
+
       // Payment enforcement: If moving to Out for Delivery or Ready for Pickup/Completed, status must be paid if not COD
       const isMovingToDelivery = ['out_for_delivery', 'ready_for_pickup', 'ready_for_pick_up', 'completed'].includes(selectedRequestStatus);
       const isNotPaid = requestToUpdate.payment_status !== 'paid';
@@ -432,6 +654,8 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
         );
         return;
       }
+
+      setRequestStatusModalVisible(false); // Close modal after validation passes
 
       await adminAPI.updateRequestStatus(requestId, selectedRequestStatus);
 
@@ -461,36 +685,141 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     }
   };
 
+  const isCustomOrderQuote = requestToQuote?.type === 'booking';
+
+  const quoteBreakdownRows = React.useMemo(() => {
+    if (!quoteFlowerContext?.flowerTypes?.length) return [];
+
+    return quoteFlowerContext.flowerTypes.map((flowerName) => {
+      const quantity = quoteFlowerContext.flowerQuantities[flowerName] || 0;
+      const unitPrice = parseCurrencyNumber(quoteFlowerPrices[flowerName]);
+
+      return {
+        flowerName,
+        quantity,
+        unitPrice,
+        lineTotal: quantity * unitPrice,
+      };
+    });
+  }, [quoteFlowerContext, quoteFlowerPrices]);
+
+  const quoteFlowerSubtotal = React.useMemo(
+    () => quoteBreakdownRows.reduce((sum, row) => sum + row.lineTotal, 0),
+    [quoteBreakdownRows]
+  );
+
+  const quoteShippingValue = parseCurrencyNumber(quoteShippingFee);
+  const quoteTotalToPay = quoteFlowerSubtotal + quoteShippingValue;
+
+  const closeQuoteModal = () => {
+    setQuoteModalVisible(false);
+    setRequestToQuote(null);
+    setQuoteFlowerContext(null);
+    setQuoteFlowerPrices({});
+  };
+
+  const updateQuoteFlowerPrice = (flowerName, value) => {
+    const sanitized = value.replace(/[^0-9.]/g, '');
+    setQuoteFlowerPrices((prev) => ({
+      ...prev,
+      [flowerName]: sanitized,
+    }));
+  };
+
   const openQuoteModal = (request) => {
     setRequestToQuote(request);
 
-    // If we already have a final price but no explicit shipping fee recorded yet
-    const initialShipping = request.shipping_fee ? String(request.shipping_fee) : '';
+    const initialShipping = request.shipping_fee !== null && request.shipping_fee !== undefined
+      ? String(request.shipping_fee)
+      : (request.delivery_method === 'pickup' ? '0' : '500');
+
     const initialPrice = request.final_price && request.shipping_fee
       ? String(request.final_price - request.shipping_fee)
       : (request.final_price ? String(request.final_price) : '');
 
+    const flowerContext = buildFlowerPricingContext(request);
+    const storedQuoteBreakdown = request.data?.quote_breakdown;
+    const storedPriceMap = storedQuoteBreakdown?.price_per_flower || {};
+
+    const initialFlowerPrices = {};
+    flowerContext.flowerTypes.forEach((flowerName) => {
+      const existingPrice = storedPriceMap[flowerName];
+      initialFlowerPrices[flowerName] = existingPrice !== undefined && existingPrice !== null
+        ? String(existingPrice)
+        : '';
+    });
+
     setQuoteAmount(initialPrice);
     setQuoteShippingFee(initialShipping);
+    setQuoteFlowerContext(flowerContext);
+    setQuoteFlowerPrices(initialFlowerPrices);
     setQuoteModalVisible(true);
   };
 
   const handleProvideQuote = async () => {
-    if (!requestToQuote || !quoteAmount || isNaN(parseFloat(quoteAmount))) {
-      Alert.alert('Invalid Input', 'Please enter a valid item price.');
-      return;
-    }
+    if (!requestToQuote) return;
 
-    const parsedItemPrice = parseFloat(quoteAmount);
-    const parsedShippingFee = quoteShippingFee ? parseFloat(quoteShippingFee) : 0;
+    const parsedShippingFee = quoteShippingFee ? parseCurrencyNumber(quoteShippingFee) : 0;
 
-    if (isNaN(parsedShippingFee)) {
+    if (parsedShippingFee < 0) {
       Alert.alert('Invalid Input', 'Please enter a valid shipping fee.');
       return;
     }
 
+    let parsedItemPrice = 0;
+    let quoteBreakdownPayload = null;
+
+    if (isCustomOrderQuote) {
+      if (!quoteFlowerContext?.flowerTypes?.length) {
+        Alert.alert('Missing Details', 'No flower types were found in this custom order.');
+        return;
+      }
+
+      const hasInvalidFlowerPrice = quoteFlowerContext.flowerTypes.some((flowerName) => {
+        const value = quoteFlowerPrices[flowerName];
+        const parsed = Number.parseFloat(value);
+        return value === '' || !Number.isFinite(parsed) || parsed < 0;
+      });
+
+      if (hasInvalidFlowerPrice) {
+        Alert.alert('Invalid Input', 'Please enter a valid price per flower for all selected flower types.');
+        return;
+      }
+
+      const quantityPerFlower = {};
+      const pricePerFlower = {};
+
+      quoteBreakdownRows.forEach((row) => {
+        quantityPerFlower[row.flowerName] = row.quantity;
+        pricePerFlower[row.flowerName] = row.unitPrice;
+      });
+
+      parsedItemPrice = quoteFlowerSubtotal;
+      quoteBreakdownPayload = {
+        arrangement_type: quoteFlowerContext.arrangementType,
+        arrangement_quantity: quoteFlowerContext.arrangementQuantity,
+        total_flowers: quoteFlowerContext.totalFlowers,
+        quantity_per_flower: quantityPerFlower,
+        price_per_flower: pricePerFlower,
+        computed_subtotal: quoteFlowerSubtotal,
+        shipping_fee: parsedShippingFee,
+        computed_total: quoteFlowerSubtotal + parsedShippingFee,
+      };
+    } else {
+      if (!quoteAmount || isNaN(parseFloat(quoteAmount))) {
+        Alert.alert('Invalid Input', 'Please enter a valid item price.');
+        return;
+      }
+      parsedItemPrice = parseFloat(quoteAmount);
+    }
+
     try {
-      const { data: { request: updatedRequest } } = await adminAPI.provideQuote(requestToQuote.id, parsedItemPrice, parsedShippingFee);
+      const { data: { request: updatedRequest } } = await adminAPI.provideQuote(
+        requestToQuote.id,
+        parsedItemPrice,
+        parsedShippingFee,
+        quoteBreakdownPayload
+      );
 
       // Create notification for the user
       if (updatedRequest) {
@@ -498,7 +827,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
           user_id: updatedRequest.user_id,
           type: 'quote',
           title: `Price Quote for Your Request`,
-          message: `We've provided a quote of ₱${updatedRequest.final_price.toFixed(2)} for your request #${updatedRequest.request_number}. Please review and take action.`,
+          message: `We've provided a quote of PHP ${updatedRequest.final_price.toFixed(2)} for your request #${updatedRequest.request_number}. Please review and take action.`,
           link: `/profile` // Link to profile where they can see the request
         };
         await supabase.from('notifications').insert([notificationData]);
@@ -507,9 +836,9 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       Toast.show({
         type: 'success',
         text1: 'Quote Provided',
-        text2: `A quote of ₱${quoteAmount} has been sent for request #${requestToQuote.request_number}.`
+        text2: `A quote of PHP ${(parsedItemPrice + parsedShippingFee).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} has been sent for request #${requestToQuote.request_number}.`
       });
-      setQuoteModalVisible(false);
+      closeQuoteModal();
       setModalVisible(false); // Close the main details modal too
       loadRequests(); // Refresh the list
     } catch (error) {
@@ -689,7 +1018,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
             <Text style={styles.eoDetailText}>Request Number:</Text>
             <Text style={styles.eoInfoTextBold}>#{item.request_number}</Text>
           </View>
-          {item.notes && (
+          {false && (
             <View style={styles.eoInstructions}>
               <Text style={styles.eoInstructionsTitle}>Notes:</Text>
               <Text style={styles.eoInstructionsText}>{item.notes}</Text>
@@ -740,7 +1069,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
           </View>
         ) : null}
 
-        {/* Payment Details — Only shown after customer accepted (i.e. status != pending) */}
+        {/* Payment Details - Only shown after customer accepted (i.e. status != pending) */}
         {item.status !== 'pending' && (item.payment_status || item.final_price) && (
           <PaymentDetailsSection
             item={item}
@@ -770,7 +1099,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
             <Text style={styles.eoMainBtnText}>View Details</Text>
           </TouchableOpacity>
 
-          {/* Phase 1: Pending — admin is yet to provide price */}
+          {/* Phase 1: Pending - admin is yet to provide price */}
           {item.status === 'pending' && (item.type === 'booking' || item.type === 'special_order') && (
             <TouchableOpacity
               style={[styles.eoMainBtn, { backgroundColor: '#F59E0B', marginTop: 10 }]}
@@ -781,7 +1110,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
             </TouchableOpacity>
           )}
 
-          {/* Phase 2+: Accepted or beyond — customer has agreed to price */}
+          {/* Phase 2+: Accepted or beyond - customer has agreed to price */}
           {!['pending', 'completed', 'cancelled', 'declined'].includes(item.status) && (
             <TouchableOpacity
               style={[
@@ -819,7 +1148,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
   return (
     <View style={styles.tabContent}>
-      <Text style={styles.tabTitle}>Booking & Custom Requests</Text>
+      <Text style={styles.tabTitle}>Custom Order Requests</Text>
 
       {/* Scrollable Status Filters */}
       <View style={{ marginBottom: 15 }}>
@@ -881,14 +1210,18 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
             </View>
             {selectedRequest && (
               <ScrollView showsVerticalScrollIndicator={false}>
-                <View style={styles.detailSection}>
-                  <Text style={styles.detailLabel}>Type:</Text>
-                  <Text style={styles.detailValue}>{getStatusLabel(selectedRequest.type)}</Text>
-                </View>
-                <View style={styles.detailSection}>
-                  <Text style={styles.detailLabel}>Submitted:</Text>
-                  <Text style={styles.detailValue}>{formatTimestamp(selectedRequest.created_at)}</Text>
-                </View>
+                {selectedRequest.type !== 'booking' && (
+                  <>
+                    <View style={styles.detailSection}>
+                      <Text style={styles.detailLabel}>Type:</Text>
+                      <Text style={styles.detailValue}>{getStatusLabel(selectedRequest.type)}</Text>
+                    </View>
+                    <View style={styles.detailSection}>
+                      <Text style={styles.detailLabel}>Submitted:</Text>
+                      <Text style={styles.detailValue}>{formatTimestamp(selectedRequest.created_at)}</Text>
+                    </View>
+                  </>
+                )}
 
                 {/* Use helper functions to render details based on type */}
                 {selectedRequest.type === 'booking' && renderBookingDetails(selectedRequest)}
@@ -950,29 +1283,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                     </>
                   )}
 
-                  {/* Assign Rider in Modal: only when processing + delivery */}
-                  {selectedRequest.delivery_method === 'delivery' && selectedRequest.status === 'processing' && (
-                    <TouchableOpacity
-                      style={[styles.actionButton, { backgroundColor: '#10B981', flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }]}
-                      onPress={() => {
-                        setModalVisible(false);
-                        handleAssignRider(selectedRequest);
-                      }}
-                    >
-                      <Ionicons name="person-add-outline" size={16} color="#fff" />
-                      <Text style={styles.buttonText}> Assign Rider</Text>
-                    </TouchableOpacity>
-                  )}
 
-                  {/* Change Status for requests not in a final state */}
-                  {['processing', 'ready_for_pickup', 'out_for_delivery'].includes(selectedRequest.status) && (
-                    <TouchableOpacity
-                      style={[styles.actionButton, styles.changeStatusButton]}
-                      onPress={() => openRequestStatusModal(selectedRequest)}
-                    >
-                      <Text style={styles.buttonText}>Change Status</Text>
-                    </TouchableOpacity>
-                  )}
                 </View>
               </ScrollView >
             )}
@@ -990,27 +1301,9 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
             <ScrollView contentContainerStyle={styles.timelineScrollView}>
 
-              {/* Delivery/Pickup Toggle */}
-              <View style={styles.timelinePathSelector}>
-                <TouchableOpacity
-                  style={[styles.timelinePathButton, deliveryOrPickup === 'delivery' && styles.timelinePathButtonActive]}
-                  onPress={() => setDeliveryOrPickup('delivery')}
-                >
-                  <Ionicons name="rocket-outline" size={16} color={deliveryOrPickup === 'delivery' ? '#fff' : '#3B82F6'} />
-                  <Text style={[styles.timelinePathText, deliveryOrPickup === 'delivery' && styles.timelinePathTextActive]}>Delivery</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.timelinePathButton, deliveryOrPickup === 'pickup' && [styles.timelinePathButtonActive, { backgroundColor: '#10B981' }]]}
-                  onPress={() => setDeliveryOrPickup('pickup')}
-                >
-                  <Ionicons name="storefront-outline" size={16} color={deliveryOrPickup === 'pickup' ? '#fff' : '#10B981'} />
-                  <Text style={[styles.timelinePathText, deliveryOrPickup === 'pickup' && styles.timelinePathTextActive]}>Pick-up</Text>
-                </TouchableOpacity>
-              </View>
-
               {(() => {
                 if (!requestToUpdate) return null;
-                const stepperStatuses = deliveryOrPickup === 'delivery' ? requestDeliveryStepperStatuses : requestPickupStepperStatuses;
+                const stepperStatuses = requestToUpdate.delivery_method === 'pickup' ? requestPickupStepperStatuses : requestDeliveryStepperStatuses;
                 const getStepperIndex = (status) => stepperStatuses.findIndex(s => s.id === status);
                 const selectedIndex = getStepperIndex(selectedRequestStatus);
                 const currentStatusIndex = getStepperIndex(requestToUpdate.status);
@@ -1103,44 +1396,113 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       {/* Provide Quote Modal */}
       < Modal visible={quoteModalVisible} animationType="fade" transparent >
         <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { maxHeight: '90%' }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Provide Price</Text>
-              <TouchableOpacity onPress={() => setQuoteModalVisible(false)}>
+              <TouchableOpacity onPress={closeQuoteModal}>
                 <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
             <Text style={[styles.modalSubtitle, { textAlign: 'left', paddingHorizontal: 20 }]}>Request #{requestToQuote?.request_number}</Text>
 
-            <Text style={styles.inputLabel}>Item Price (₱)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter price for the items"
-              keyboardType="numeric"
-              value={quoteAmount}
-              onChangeText={setQuoteAmount}
-            />
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {isCustomOrderQuote ? (
+                <>
+                  <View style={{ marginTop: 10, padding: 12, backgroundColor: '#fff7ed', borderRadius: 8, borderWidth: 1, borderColor: '#fed7aa' }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <Text style={{ color: '#9a3412' }}>Arrangement Type:</Text>
+                      <Text style={{ color: '#9a3412', fontWeight: '700', flex: 1, textAlign: 'right' }}>{quoteFlowerContext?.arrangementType || 'N/A'}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <Text style={{ color: '#9a3412' }}>Arrangement Quantity:</Text>
+                      <Text style={{ color: '#9a3412', fontWeight: '700' }}>{quoteFlowerContext?.arrangementQuantity || 1}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={{ color: '#9a3412' }}>Total Flowers:</Text>
+                      <Text style={{ color: '#9a3412', fontWeight: '700' }}>{quoteFlowerContext?.totalFlowers || 0}</Text>
+                    </View>
+                  </View>
 
+                  <Text style={[styles.inputLabel, { marginTop: 12 }]}>Flower Pricing</Text>
+                  {quoteFlowerContext?.flowerTypes?.length ? (
+                    quoteFlowerContext.flowerTypes.map((flowerName) => (
+                      <View key={flowerName} style={{ marginBottom: 10 }}>
+                        <Text style={[styles.inputLabel, { marginBottom: 6 }]}>{flowerName} (PHP per flower)</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder={`Enter ${flowerName} price`}
+                          keyboardType="numeric"
+                          value={quoteFlowerPrices[flowerName] || ''}
+                          onChangeText={(value) => updateQuoteFlowerPrice(flowerName, value)}
+                        />
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={{ color: '#7f1d1d', marginTop: 8 }}>No flower types found in this request.</Text>
+                  )}
 
-            <View style={{ marginTop: 10, padding: 15, backgroundColor: '#fdf2f8', borderRadius: 8, borderWidth: 1, borderColor: '#fbcfe8' }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
-                <Text style={{ color: '#831843' }}>Item Price:</Text>
-                <Text style={{ color: '#831843', fontWeight: 'bold' }}>₱{parseFloat(quoteAmount || 0).toLocaleString()}</Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
-                <Text style={{ color: '#831843' }}>Shipping Fee:</Text>
-                <Text style={{ color: '#831843', fontWeight: 'bold' }}>₱{parseFloat(quoteShippingFee || 0).toLocaleString()}</Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f9a8d4' }}>
-                <Text style={{ color: '#be185d', fontWeight: 'bold', fontSize: 16 }}>Total Price to Pay:</Text>
-                <Text style={{ color: '#be185d', fontWeight: 'bold', fontSize: 16 }}>₱{(parseFloat(quoteAmount || 0) + parseFloat(quoteShippingFee || 0)).toLocaleString()}</Text>
-              </View>
-            </View>
+                  <View style={{ marginTop: 10, padding: 15, backgroundColor: '#fdf2f8', borderRadius: 8, borderWidth: 1, borderColor: '#fbcfe8' }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                      <Text style={{ color: '#831843' }}>Arrangement Type:</Text>
+                      <Text style={{ color: '#831843', fontWeight: 'bold', flex: 1, textAlign: 'right' }}>{quoteFlowerContext?.arrangementType || 'N/A'}</Text>
+                    </View>
+
+                    {quoteBreakdownRows.map((row) => (
+                      <View key={row.flowerName} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                        <Text style={{ color: '#831843', flex: 1 }}>{row.flowerName} ({row.quantity} x PHP {row.unitPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</Text>
+                        <Text style={{ color: '#831843', fontWeight: 'bold' }}>PHP {row.lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                      </View>
+                    ))}
+
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 5, marginBottom: 5, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#f9a8d4' }}>
+                      <Text style={{ color: '#831843', fontWeight: '700' }}>Flower Subtotal:</Text>
+                      <Text style={{ color: '#831843', fontWeight: '700' }}>PHP {quoteFlowerSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                    </View>
+
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                      <Text style={{ color: '#831843' }}>Shipping Fee:</Text>
+                      <Text style={{ color: '#831843', fontWeight: 'bold' }}>PHP {quoteShippingValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                    </View>
+
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f9a8d4' }}>
+                      <Text style={{ color: '#be185d', fontWeight: 'bold', fontSize: 16 }}>Total Price to Pay:</Text>
+                      <Text style={{ color: '#be185d', fontWeight: 'bold', fontSize: 16 }}>PHP {quoteTotalToPay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                    </View>
+                  </View>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.inputLabel}>Item Price (PHP)</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter price for the items"
+                    keyboardType="numeric"
+                    value={quoteAmount}
+                    onChangeText={(value) => setQuoteAmount(value.replace(/[^0-9.]/g, ''))}
+                  />
+
+                  <View style={{ marginTop: 10, padding: 15, backgroundColor: '#fdf2f8', borderRadius: 8, borderWidth: 1, borderColor: '#fbcfe8' }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                      <Text style={{ color: '#831843' }}>Item Price:</Text>
+                      <Text style={{ color: '#831843', fontWeight: 'bold' }}>PHP {parseCurrencyNumber(quoteAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                      <Text style={{ color: '#831843' }}>Shipping Fee:</Text>
+                      <Text style={{ color: '#831843', fontWeight: 'bold' }}>PHP {quoteShippingValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f9a8d4' }}>
+                      <Text style={{ color: '#be185d', fontWeight: 'bold', fontSize: 16 }}>Total Price to Pay:</Text>
+                      <Text style={{ color: '#be185d', fontWeight: 'bold', fontSize: 16 }}>PHP {(parseCurrencyNumber(quoteAmount) + quoteShippingValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                    </View>
+                  </View>
+                </>
+              )}
+            </ScrollView>
 
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => setQuoteModalVisible(false)}
+                onPress={closeQuoteModal}
               >
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>
@@ -1267,10 +1629,10 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{isEditPaymentMode ? 'Edit Amount Received' : 'Record GCash Payment'}</Text>
             <View style={{ marginBottom: 15 }}>
-              <Text style={{ marginBottom: 5 }}>Currently Received: ₱{requestToRecordPayment?.amount_received || 0}</Text>
-              <Text style={{ marginBottom: 5 }}>Total Amount: ₱{requestToRecordPayment?.final_price || 0}</Text>
+              <Text style={{ marginBottom: 5 }}>Currently Received: PHP {requestToRecordPayment?.amount_received || 0}</Text>
+              <Text style={{ marginBottom: 5 }}>Total Amount: PHP {requestToRecordPayment?.final_price || 0}</Text>
               <Text style={{ marginBottom: 10, fontWeight: 'bold', color: '#EF4444' }}>
-                Balance: ₱{(requestToRecordPayment?.final_price || 0) - (requestToRecordPayment?.amount_received || 0)}
+                Balance: PHP {(requestToRecordPayment?.final_price || 0) - (requestToRecordPayment?.amount_received || 0)}
               </Text>
             </View>
             <Text style={{ marginBottom: 5, fontWeight: '500' }}>
@@ -1295,7 +1657,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
         </View>
       </Modal>
 
-    </View>
+    </View >
   );
 };
 

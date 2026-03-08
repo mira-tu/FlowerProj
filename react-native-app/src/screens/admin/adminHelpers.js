@@ -48,6 +48,7 @@ const formatMessageTimestamp = (dateString) => {
 
 const getStatusLabel = (status) => {
   if (!status) return '';
+  if (status.toLowerCase() === 'booking') return 'Custom Order';
   return status.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
 };
 

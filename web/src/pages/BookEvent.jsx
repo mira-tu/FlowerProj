@@ -18,6 +18,42 @@ const flowerOptions = [
     { value: 'Others', label: 'Others' }
 ];
 
+const arrangementOptions = [
+    {
+        label: 'Funeral',
+        options: [
+            { value: 'Funeral Wreath (Large, 100 flowers)', label: 'Funeral Wreath (Large, 100 flowers)' },
+            { value: 'Funeral Wreath (Medium, 50 flowers)', label: 'Funeral Wreath (Medium, 50 flowers)' },
+            { value: 'Funeral Flower Stand (Large, 100 flowers)', label: 'Funeral Flower Stand (Large, 100 flowers)' },
+            { value: 'Funeral Flower Stand (Medium, 50 flowers)', label: 'Funeral Flower Stand (Medium, 50 flowers)' },
+            { value: 'Heart-Shaped Funeral Wreath (Large, 100 flowers)', label: 'Heart-Shaped Funeral Wreath (Large, 100 flowers)' },
+            { value: 'Heart-Shaped Funeral Wreath (Medium, 50 flowers)', label: 'Heart-Shaped Funeral Wreath (Medium, 50 flowers)' },
+        ]
+    },
+    {
+        label: 'Bridal / Wedding',
+        options: [
+            { value: 'Bridal Bouquet (20 flowers)', label: 'Bridal Bouquet (20 flowers)' },
+            { value: 'Bridesmaid Bouquet (10 flowers)', label: 'Bridesmaid Bouquet (10 flowers)' },
+            { value: 'Corsage (3 flowers)', label: 'Corsage (3 flowers)' },
+        ]
+    },
+    {
+        label: 'General',
+        options: [
+            { value: 'Table Centerpiece (12 flowers)', label: 'Table Centerpiece (12 flowers)' },
+            { value: 'Flower Box (Medium, 9 flowers)', label: 'Flower Box (Medium, 9 flowers)' },
+            { value: 'Flower Box (Large, 15 flowers)', label: 'Flower Box (Large, 15 flowers)' },
+        ]
+    },
+    {
+        label: 'Custom',
+        options: [
+            { value: 'Other', label: 'Others (Specify below)' },
+        ]
+    }
+];
+
 const colorOptions = [
     { value: 'Pastel Pinks and Whites', label: 'Pastel Pinks and Whites', colors: ['#ffc0cb', '#ffffff'] },
     { value: 'Rustic Autumn Colors', label: 'Rustic Autumn Colors', colors: ['#d2691e', '#8b4513', '#cd853f'] },
@@ -68,6 +104,8 @@ const BookEvent = ({ user }) => {
         venue: '',
         selectedFlowers: [],
         arrangementType: '',
+        arrangementQuantity: '1',
+        flowerQuantity: '',
         specialInstructions: '',
         inspirationFile: null
     });
@@ -75,12 +113,14 @@ const BookEvent = ({ user }) => {
     const [imagePreview, setImagePreview] = useState(null);
     const [fileSizeError, setFileSizeError] = useState('');
     const [showConfirmModal, setShowConfirmModal] = useState(false);
+    const [showImageZoom, setShowImageZoom] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null });
     const [dateError, setDateError] = useState('');
     const [timeError, setTimeError] = useState('');
     const [deliveryAddress, setDeliveryAddress] = useState(null);
     const [selectedAddressId, setSelectedAddressId] = useState(null);
+    const [validated, setValidated] = useState(false);
 
     // Sync selected address to venue field
     useEffect(() => {
@@ -137,6 +177,10 @@ const BookEvent = ({ user }) => {
 
     const handleFlowerSelect = (selectedOptions) => {
         setFormData(prev => ({ ...prev, selectedFlowers: selectedOptions || [] }));
+    };
+
+    const handleArrangementSelect = (selectedOption) => {
+        setFormData(prev => ({ ...prev, arrangementType: selectedOption ? selectedOption.value : '' }));
     };
 
     const handleColorSelect = (selectedOption) => {
@@ -201,6 +245,30 @@ const BookEvent = ({ user }) => {
 
     const triggerValidation = (e) => {
         e.preventDefault();
+        const form = e.currentTarget;
+
+        if (form.checkValidity() === false) {
+            e.stopPropagation();
+            setValidated(true);
+
+            // Find the first invalid element and scroll to it
+            setTimeout(() => {
+                const firstInvalid = form.querySelector(':invalid');
+                if (firstInvalid) {
+                    firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    // Optional: add focus for accessibility
+                    firstInvalid.focus({ preventScroll: true });
+                }
+            }, 100);
+
+            // Generic missing fields warning
+            setInfoModal({
+                show: true,
+                title: 'Missing Required Fields',
+                message: 'Please fill in all highlighted required fields.'
+            });
+            return;
+        }
 
         if (!user) {
             setInfoModal({
@@ -213,16 +281,8 @@ const BookEvent = ({ user }) => {
             return;
         }
 
-        // Basic required checks (HTML5 usually catches these but good to be safe)
-        if (!formData.customerName || !formData.contactNumber || !formData.occasion || !formData.eventDate || (!formData.venue && !deliveryAddress) || !formData.arrangementType || !formData.recipientName) {
-            setInfoModal({
-                show: true,
-                title: 'Missing Required Fields',
-                message: 'Please fill in all required fields marked with *'
-            });
-            return;
-        }
-
+        // Custom validation logic passed, clear validated state if any
+        setValidated(true); // Keep it true so greens show
         setShowConfirmModal(true);
     };
 
@@ -244,6 +304,8 @@ const BookEvent = ({ user }) => {
             address_id: selectedAddressId || null,
             deliveryAddress: deliveryAddress || null,
             arrangementType: formData.arrangementType === 'Other' ? formData.otherArrangementType : formData.arrangementType,
+            arrangementQuantity: formData.arrangementQuantity || 1,
+            flowerQuantity: formData.arrangementType === 'Other' ? (formData.flowerQuantity || null) : null,
             flowers: formData.selectedFlowers.map(f => f.label).join(', ') + (formData.otherFlowersText ? ` (${formData.otherFlowersText})` : ''),
             colorPreference: formData.colorPreference === 'Others' ? formData.otherColorPreference : formData.colorPreference,
             specialInstructions: formData.specialInstructions,
@@ -284,6 +346,16 @@ const BookEvent = ({ user }) => {
 
     return (
         <div style={{ backgroundColor: '#fcfaf8', minHeight: '100vh', paddingTop: '80px', paddingBottom: '60px' }}>
+            <style>
+                {`
+                .hide-valid-indicators.was-validated .form-control:valid, 
+                .hide-valid-indicators.was-validated .form-select:valid {
+                    border-color: #dee2e6 !important;
+                    padding-right: .75rem !important;
+                    background-image: none !important;
+                }
+                `}
+            </style>
             <InfoModal
                 show={infoModal.show}
                 onClose={() => setInfoModal({ show: false, title: '', message: '' })}
@@ -297,7 +369,7 @@ const BookEvent = ({ user }) => {
 
                 {/* Header Section */}
                 <div className="text-center mb-5 mt-4">
-                    <h1 className="display-4 fw-bold font-playfair text-dark">Custom Floral & Event Booking</h1>
+                    <h1 className="display-4 fw-bold font-playfair text-dark">Custom Floral & Custom Order</h1>
                     <p className="lead text-muted mx-auto" style={{ maxWidth: '700px' }}>
                         Whether it's a personalized bouquet or full event styling, let us bring your floral vision to life. Fill out the details below to request a quote.
                     </p>
@@ -308,7 +380,7 @@ const BookEvent = ({ user }) => {
                         <div className="card border-0 shadow-lg" style={{ borderRadius: '20px', overflow: 'hidden' }}>
                             <div className="card-body p-4 p-md-5 bg-white">
 
-                                <form onSubmit={triggerValidation}>
+                                <form noValidate className={`hide-valid-indicators ${validated ? 'was-validated' : ''}`} onSubmit={triggerValidation}>
 
                                     {/* SECTION 1: Personal Details */}
                                     <h4 className="fw-bold mb-4 d-flex align-items-center" style={{ color: 'var(--shop-pink)' }}>
@@ -362,7 +434,7 @@ const BookEvent = ({ user }) => {
                                         </div>
 
                                         <div className="col-12">
-                                            <label className="form-label fw-semibold">Venue / Full Delivery Address <span className="text-danger">*</span></label>
+                                            <label className="form-label fw-semibold">Venue / Delivery Address <span className="text-danger">*</span></label>
                                             {user ? (
                                                 <CheckoutAddressSelection
                                                     user={user}
@@ -445,79 +517,148 @@ const BookEvent = ({ user }) => {
                                     </h4>
 
                                     <div className="row g-4 mb-4">
-                                        <div className="col-md-6">
-                                            <label className="form-label fw-semibold">Arrangement Type <span className="text-danger">*</span></label>
-                                            <select name="arrangementType" className="form-select bg-light border-0 py-3" value={formData.arrangementType} onChange={handleChange} required>
-                                                <option value="" disabled>Select Type</option>
-                                                <option value="Funeral Wreath (Large, 100 flowers)">Funeral Wreath (Large, 100 flowers)</option>
-                                                <option value="Funeral Wreath (Medium, 50 flowers)">Funeral Wreath (Medium, 50 flowers)</option>
-                                                <option value="Funeral Flower Stand (Large, 100 flowers)">Funeral Flower Stand (Large, 100 flowers)</option>
-                                                <option value="Funeral Flower Stand (Medium, 50 flowers)">Funeral Flower Stand (Medium, 50 flowers)</option>
-                                                <option value="Bridal Bouquet (20 flowers)">Bridal Bouquet (20 flowers)</option>
-                                                <option value="Table Centerpiece (12 flowers)">Table Centerpiece (12 flowers)</option>
-                                                <option value="Corsage (3 flowers)">Corsage (3 flowers)</option>
-                                                <option value="Bridesmaid Bouquet (10 flowers)">Bridesmaid Bouquet (10 flowers)</option>
-                                                <option value="Flower Box (Medium, 9 flowers)">Flower Box (Medium, 9 flowers)</option>
-                                                <option value="Flower Box (Large, 15 flowers)">Flower Box (Large, 15 flowers)</option>
-                                                <option value="Heart-Shaped Funeral Wreath (Large, 100 flowers)">Heart-Shaped Funeral Wreath (Large, 100 flowers)</option>
-                                                <option value="Heart-Shaped Funeral Wreath (Medium, 50 flowers)">Heart-Shaped Funeral Wreath (Medium, 50 flowers)</option>
-                                                <option value="Other">Others</option>
-                                            </select>
-                                            {formData.arrangementType === 'Other' && (
-                                                <input type="text" name="otherArrangementType" className="form-control bg-light border-0 py-3 mt-2" placeholder="Please specify arrangement type" value={formData.otherArrangementType} onChange={handleChange} required />
-                                            )}
+                                        <div className="col-12">
+                                            <div className="row g-3">
+                                                <div className="col-md-8 position-relative">
+                                                    <label className="form-label fw-semibold">Arrangement Type <span className="text-danger">*</span></label>
+                                                    <Select
+                                                        options={arrangementOptions}
+                                                        placeholder="Search or select type..."
+                                                        onChange={handleArrangementSelect}
+                                                        value={arrangementOptions.flatMap(g => g.options).find(o => o.value === formData.arrangementType) || null}
+                                                        isClearable
+                                                        styles={{
+                                                            control: (base) => ({
+                                                                ...base,
+                                                                border: (validated && !formData.arrangementType) ? '1px solid #dc3545' : '0',
+                                                                backgroundColor: '#f8f9fa',
+                                                                padding: '6px',
+                                                                borderRadius: '8px',
+                                                                minHeight: '50px',
+                                                                boxShadow: 'none'
+                                                            }),
+                                                            groupHeading: (base) => ({
+                                                                ...base,
+                                                                fontWeight: 700,
+                                                                color: '#333',
+                                                                fontSize: '0.85rem',
+                                                                textTransform: 'none'
+                                                            })
+                                                        }}
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        tabIndex={-1}
+                                                        style={{ opacity: 0, height: 0, position: 'absolute', bottom: 10, left: 20 }}
+                                                        value={formData.arrangementType || ''}
+                                                        onChange={() => { }}
+                                                        required
+                                                    />
+                                                    {validated && !formData.arrangementType && (
+                                                        <div className="text-danger small mt-1">Please select an arrangement type.</div>
+                                                    )}
+                                                    {formData.arrangementType === 'Other' && (
+                                                        <>
+                                                            <input type="text" name="otherArrangementType" className="form-control bg-light border-0 py-3 mt-2" placeholder="Describe your custom arrangement" value={formData.otherArrangementType} onChange={handleChange} required />
+                                                            <div className="mt-3">
+                                                                <label className="form-label fw-semibold">Number of Flower Pieces</label>
+                                                                <input type="number" name="flowerQuantity" className="form-control bg-light border-0 py-3" placeholder="e.g., 50" min="1" value={formData.flowerQuantity} onChange={handleChange} />
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </div>
+
+                                                <div className="col-md-4">
+                                                    <label className="form-label fw-semibold">Quantity</label>
+                                                    <input
+                                                        type="number"
+                                                        name="arrangementQuantity"
+                                                        className="form-control bg-light border-0 py-3"
+                                                        min="1"
+                                                        value={formData.arrangementQuantity}
+                                                        onChange={handleChange}
+                                                        disabled={!formData.arrangementType}
+                                                        placeholder={!formData.arrangementType ? "Disabled" : "1"}
+                                                    />
+                                                    <div className="form-text small mt-1">How many of this arrangement?</div>
+                                                </div>
+                                            </div>
                                         </div>
 
-                                        <div className="col-md-6">
-                                            <label className="form-label fw-semibold">Preferred Flowers</label>
+                                        <div className="col-12 mt-3 position-relative">
+                                            <label className="form-label fw-semibold">Preferred Flowers <span className="text-danger">*</span></label>
                                             <Select
                                                 isMulti
                                                 options={flowerOptions}
-                                                placeholder="Select flowers (Optional)"
+                                                placeholder="Select flowers..."
                                                 onChange={handleFlowerSelect}
                                                 value={formData.selectedFlowers}
                                                 styles={{
                                                     control: (base) => ({
                                                         ...base,
-                                                        border: '0',
+                                                        border: (validated && (!formData.selectedFlowers || formData.selectedFlowers.length === 0)) ? '1px solid #dc3545' : '0',
                                                         backgroundColor: '#f8f9fa',
                                                         padding: '6px',
-                                                        borderRadius: '8px'
+                                                        borderRadius: '8px',
+                                                        boxShadow: 'none'
                                                     })
                                                 }}
                                             />
+                                            <input
+                                                type="text"
+                                                tabIndex={-1}
+                                                style={{ opacity: 0, height: 0, position: 'absolute', bottom: 10, left: 20 }}
+                                                value={formData.selectedFlowers.length > 0 ? 'selected' : ''}
+                                                onChange={() => { }}
+                                                required
+                                            />
+                                            {validated && (!formData.selectedFlowers || formData.selectedFlowers.length === 0) && (
+                                                <div className="text-danger small mt-1">Please select at least one preferred flower.</div>
+                                            )}
                                             {formData.selectedFlowers.some(f => f.value === 'Others') && (
                                                 <input type="text" name="otherFlowersText" className="form-control bg-light border-0 py-3 mt-2" placeholder="Please specify flowers (e.g., Peonies, Baby's Breath)" value={formData.otherFlowersText} onChange={handleChange} required />
                                             )}
                                         </div>
 
-                                        <div className="col-12 mt-3">
-                                            <label className="form-label fw-semibold">Color Palette & Theme Preference</label>
+                                        <div className="col-12 mt-3 position-relative">
+                                            <label className="form-label fw-semibold">Color Palette & Theme Preference <span className="text-danger">*</span></label>
                                             <Select
                                                 options={colorOptions}
                                                 formatOptionLabel={customColorOptionLabel}
-                                                placeholder="Select Color Theme (Optional)"
+                                                placeholder="Select Color Theme..."
                                                 onChange={handleColorSelect}
                                                 value={colorOptions.find(option => option.value === formData.colorPreference) || null}
                                                 isClearable
                                                 styles={{
                                                     control: (base) => ({
                                                         ...base,
-                                                        border: '0',
+                                                        border: (validated && !formData.colorPreference) ? '1px solid #dc3545' : '0',
                                                         backgroundColor: '#f8f9fa',
                                                         padding: '6px',
-                                                        borderRadius: '8px'
+                                                        borderRadius: '8px',
+                                                        boxShadow: 'none'
                                                     })
                                                 }}
                                             />
+                                            <input
+                                                type="text"
+                                                tabIndex={-1}
+                                                style={{ opacity: 0, height: 0, position: 'absolute', bottom: 10, left: 20 }}
+                                                value={formData.colorPreference || ''}
+                                                onChange={() => { }}
+                                                required
+                                            />
+                                            {validated && !formData.colorPreference && (
+                                                <div className="text-danger small mt-1">Please select a color theme.</div>
+                                            )}
                                             {formData.colorPreference === 'Others' && (
                                                 <input type="text" name="otherColorPreference" className="form-control bg-light border-0 py-3 mt-2" placeholder="Please specify your color preference" value={formData.otherColorPreference} onChange={handleChange} required />
                                             )}
                                         </div>
 
                                         <div className="col-12 mt-4">
-                                            <label className="form-label fw-semibold">Special Instructions</label>
-                                            <textarea name="specialInstructions" className="form-control bg-light border-0 py-3" rows="5" placeholder="Include any specific directions, themes, budgets, or other details you'd like us to know..." value={formData.specialInstructions} onChange={handleChange}></textarea>
+                                            <label className="form-label fw-semibold">Special Instructions <span className="text-danger">*</span></label>
+                                            <textarea name="specialInstructions" className="form-control bg-light border-0 py-3" rows="5" placeholder="Include any specific directions, themes, budgets, or other details you'd like us to know..." value={formData.specialInstructions} onChange={handleChange} required></textarea>
                                         </div>
 
                                         <div className="col-12 mt-4">
@@ -559,17 +700,14 @@ const BookEvent = ({ user }) => {
 
             {/* Confirmation Modal */}
             {showConfirmModal && (
-                <div className="modal-overlay" style={{ zIndex: 1060 }}>
-                    <div className="modal-content-custom bg-white p-4" style={{ maxWidth: '500px' }}>
+                <div className="modal-overlay" style={{ zIndex: 1060 }} onClick={(e) => { if (e.target === e.currentTarget) setShowConfirmModal(false); }}>
+                    <div className="modal-content-custom bg-white p-4" style={{ maxWidth: '500px', maxHeight: '90vh', overflowY: 'auto' }}>
                         <div className="text-center mb-4">
-                            <div className="bg-light rounded-circle d-inline-flex align-items-center justify-content-center mb-3" style={{ width: '80px', height: '80px' }}>
-                                <i className="fas fa-clipboard-check text-pink fs-1"></i>
-                            </div>
                             <h3 className="fw-bold font-playfair">Confirm Your Request</h3>
                             <p className="text-muted">Please verify your details before submitting.</p>
                         </div>
 
-                        <div className="bg-light rounded p-3 mb-4 small" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                        <div className="bg-light rounded p-3 mb-4 small">
                             <div className="d-flex justify-content-between mb-2">
                                 <span className="text-muted">Your Name:</span>
                                 <span className="fw-semibold text-end">{formData.customerName}</span>
@@ -610,6 +748,16 @@ const BookEvent = ({ user }) => {
                                 <span className="text-muted">Arrangement:</span>
                                 <span className="fw-semibold text-end">{formData.arrangementType === 'Other' ? formData.otherArrangementType : formData.arrangementType}</span>
                             </div>
+                            <div className="d-flex justify-content-between mb-2">
+                                <span className="text-muted">Quantity:</span>
+                                <span className="fw-semibold text-end">{formData.arrangementQuantity || 1}</span>
+                            </div>
+                            {formData.arrangementType === 'Other' && formData.flowerQuantity && (
+                                <div className="d-flex justify-content-between mb-2">
+                                    <span className="text-muted">No. of Flower Pieces:</span>
+                                    <span className="fw-semibold text-end">{formData.flowerQuantity}</span>
+                                </div>
+                            )}
                             {formData.selectedFlowers.length > 0 && (
                                 <div className="d-flex justify-content-between mb-2">
                                     <span className="text-muted">Flowers:</span>
@@ -636,7 +784,15 @@ const BookEvent = ({ user }) => {
                             {imagePreview && (
                                 <div className="mt-2 text-center">
                                     <span className="text-muted d-block mb-1">Inspiration Photo:</span>
-                                    <img src={imagePreview} alt="Inspiration" className="rounded-3 border" style={{ maxHeight: '120px', maxWidth: '100%', objectFit: 'cover' }} />
+                                    <img
+                                        src={imagePreview}
+                                        alt="Inspiration"
+                                        className="rounded-3 border"
+                                        style={{ maxHeight: '120px', maxWidth: '100%', objectFit: 'cover', cursor: 'pointer' }}
+                                        onClick={() => setShowImageZoom(true)}
+                                        title="Click to zoom"
+                                    />
+                                    <p className="text-muted small mt-1 mb-0"><i className="fas fa-search-plus me-1"></i>Click image to zoom</p>
                                 </div>
                             )}
                         </div>
@@ -648,6 +804,23 @@ const BookEvent = ({ user }) => {
                                 Submit Request
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Image Zoom Modal */}
+            {showImageZoom && imagePreview && (
+                <div
+                    className="modal-overlay"
+                    style={{ zIndex: 1070, cursor: 'pointer' }}
+                    onClick={() => setShowImageZoom(false)}
+                >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', padding: '20px' }}>
+                        <img
+                            src={imagePreview}
+                            alt="Zoomed Inspiration"
+                            style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}
+                        />
                     </div>
                 </div>
             )}

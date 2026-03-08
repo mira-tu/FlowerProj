@@ -290,6 +290,18 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     const nextStatus = getNextStatus(order.status, order.delivery_method);
     if (!nextStatus) return;
 
+    // Rider enforcement: If moving to out_for_delivery, must have a rider assigned
+    if (nextStatus === 'out_for_delivery') {
+      const hasRider = order.rider || order.assigned_rider || order.third_party_rider_name;
+      if (!hasRider) {
+        Alert.alert(
+          "Rider Required",
+          "Please assign a rider before moving this order to Out for Delivery."
+        );
+        return;
+      }
+    }
+
     try {
       await adminAPI.updateOrderStatus(order.id, nextStatus);
 
@@ -321,6 +333,18 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     const orderId = orderToUpdate.id;
 
     try {
+      // Rider enforcement: If moving to out_for_delivery, must have a rider assigned
+      if (selectedStatus === 'out_for_delivery') {
+        const hasRider = orderToUpdate.rider || orderToUpdate.assigned_rider || orderToUpdate.third_party_rider_name;
+        if (!hasRider) {
+          Alert.alert(
+            "Rider Required",
+            "Please assign a rider before moving this order to Out for Delivery."
+          );
+          return;
+        }
+      }
+
       // Payment enforcement: If moving to Out for Delivery or Ready for Pickup, status must be paid if not COD
       const isMovingToDelivery = ['out_for_delivery', 'ready_for_pick_up', 'ready_for_pickup', 'completed', 'claimed'].includes(selectedStatus);
       const isNotPaid = orderToUpdate.payment_status !== 'paid';

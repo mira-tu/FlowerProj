@@ -644,7 +644,7 @@ const Profile = ({ user, logout }) => {
 
     const getOrderTypeLabel = (type) => {
         const labels = {
-            booking: 'Event Booking',
+            booking: 'Custom Order',
             special_order: 'Special Order',
             customized: 'Customized Bouquet',
             regular: 'Regular Order'
@@ -733,7 +733,7 @@ const Profile = ({ user, logout }) => {
             // Create cancellation notification (this still uses localStorage for now, as per original code)
             const notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
             const orderTypeLabel = orderToCancel.type
-                ? (orderToCancel.type === 'booking' ? 'Event Booking'
+                ? (orderToCancel.type === 'booking' ? 'Custom Order'
                     : orderToCancel.type === 'special_order' ? 'Special Order'
                         : orderToCancel.type === 'customized' ? 'Customized Bouquet'
                             : 'Request')
@@ -861,7 +861,7 @@ const Profile = ({ user, logout }) => {
                             <div className="order-card-header">
                                 <div className="d-flex align-items-center gap-3">
                                     <div className="order-id">
-                                        {order.type === 'booking' && 'Event Booking'}
+                                        {order.type === 'booking' && 'Custom Order'}
                                         {order.type === 'special_order' && 'Special Order'}
                                         {order.type === 'customized' && 'Customized Bouquet'}
                                         {!order.type && `Order #${order.order_number || order.id}`}
@@ -962,8 +962,16 @@ const Profile = ({ user, logout }) => {
                                                     <div className="order-item-name">{order.eventType} Event</div>
                                                     {order.recipientName && <div className="order-item-variant"><strong>Recipient:</strong> {order.recipientName}</div>}
                                                     {order.eventDate && <div className="order-item-variant"><strong>Event Date:</strong> {new Date(order.eventDate).toLocaleDateString()}</div>}
-                                                    {order.venue && <div className="order-item-variant"><strong>Venue:</strong> {order.venue}</div>}
-                                                    {order.notes && <div className="order-item-variant"><strong>Notes:</strong> {order.notes}</div>}
+                                                    {(order.eventTime || order.data?.eventTime) && <div className="order-item-variant"><strong>Event Time:</strong> {(() => {
+                                                        try {
+                                                            const t = order.eventTime || order.data?.eventTime;
+                                                            const [hStr, mStr] = t.split(':');
+                                                            let h = parseInt(hStr, 10);
+                                                            const ampm = h >= 12 ? 'PM' : 'AM';
+                                                            h = h % 12 || 12;
+                                                            return `${h}:${mStr} ${ampm}`;
+                                                        } catch (e) { return order.eventTime || order.data?.eventTime; }
+                                                    })()}</div>}
                                                 </>
                                             )}
                                             {order.type === 'special_order' && (

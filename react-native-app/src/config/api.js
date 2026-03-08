@@ -231,7 +231,7 @@ export const categoryAPI = {
             .toLowerCase()
             .trim()
             .replace(/[^a-z0-9\s-]/g, '')  // remove special chars
-            .replace(/\s+/g, '-')           // spaces → hyphens
+            .replace(/\s+/g, '-')           // spaces Ã¢â€ â€™ hyphens
             .replace(/-+/g, '-');           // collapse multiple hyphens
 
         const { data, error } = await supabase
@@ -899,14 +899,46 @@ export const adminAPI = {
         return { data: { requests: formattedRequests } };
     },
 
-    provideQuote: async (id, price, shippingFee = 0) => {
+    provideQuote: async (id, price, shippingFee = 0, quoteBreakdown = null) => {
+        const finalItemPrice = parseFloat(price) || 0;
+        const finalShippingFee = parseFloat(shippingFee) || 0;
+
+        const updatePayload = {
+            final_price: finalItemPrice + finalShippingFee,
+            shipping_fee: finalShippingFee,
+            status: 'quoted'
+        };
+
+        if (quoteBreakdown) {
+            const { data: existingRequest, error: fetchError } = await supabase
+                .from('requests')
+                .select('data')
+                .eq('id', id)
+                .single();
+
+            if (fetchError) {
+                console.error('Error fetching request data before storing quote breakdown:', fetchError);
+                throw fetchError;
+            }
+
+            let requestData = existingRequest?.data || {};
+            if (typeof requestData === 'string') {
+                try {
+                    requestData = JSON.parse(requestData);
+                } catch (error) {
+                    requestData = {};
+                }
+            }
+
+            updatePayload.data = {
+                ...requestData,
+                quote_breakdown: quoteBreakdown,
+            };
+        }
+
         const { data: request, error } = await supabase
             .from('requests')
-            .update({
-                final_price: price + shippingFee,
-                shipping_fee: shippingFee,
-                status: 'quoted'
-            })
+            .update(updatePayload)
             .eq('id', id)
             .select()
             .single();
@@ -921,7 +953,7 @@ export const adminAPI = {
             const notification = {
                 user_id: request.user_id,
                 title: `You have a new quote!`,
-                message: `A quote of ₱${parseFloat(price).toFixed(2)} has been provided for your request #${request.request_number}. Please review and accept it.`,
+                message: `A quote of PHP ${finalItemPrice.toFixed(2)} has been provided for your request #${request.request_number}. Please review and accept it.`,
                 type: 'request_update',
                 link: '/profile' // Changed to '/profile' as requested
             };

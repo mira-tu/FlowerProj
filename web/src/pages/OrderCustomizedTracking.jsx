@@ -13,7 +13,7 @@ const requestDeliverySteps = [
     { id: 3, key: 'processing', title: 'Processing', description: 'Your payment is confirmed and our florists are preparing your request.', icon: 'fa-seedling' },
     { id: 4, key: 'ready_for_delivery', title: 'Ready for Delivery', description: 'Your request is ready to be shipped.', icon: 'fa-box' },
     { id: 5, key: 'out_for_delivery', title: 'Out for Delivery', description: 'Your request is on its way.', icon: 'fa-truck' },
-    { id: 6, key: 'completed', title: 'Delivered', description: 'Your request has been delivered successfully.', icon: 'fa-truck' },
+    { id: 6, key: 'completed', title: 'Delivered', description: 'Your request has been delivered successfully.', icon: 'fa-check-circle' },
 ];
 
 // Timeline steps for Pickup Requests

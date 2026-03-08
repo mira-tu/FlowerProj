@@ -14,7 +14,7 @@ const requestDeliverySteps = [
     { id: 4, status: 'processing', title: 'Processing', description: 'Our florists are preparing your request', icon: 'fa-seedling' },
     { id: 5, status: 'ready_for_delivery', title: 'Ready for Delivery', description: 'Your request is ready to be shipped', icon: 'fa-box' },
     { id: 6, status: 'out_for_delivery', title: 'Out for Delivery', description: 'Your request is on its way', icon: 'fa-truck' },
-    { id: 7, status: 'completed', title: 'Delivered', description: 'Your request has been delivered successfully', icon: 'fa-truck' },
+    { id: 7, status: 'completed', title: 'Delivered', description: 'Your request has been delivered successfully', icon: 'fa-check-circle' },
 ];
 
 // Timeline steps for Pickup Requests
@@ -124,7 +124,7 @@ const OrderBookingTracking = () => {
                 const statusMap = {
                     'pending': 'pending',
                     'quoted': 'quoted',
-                    'accepted': 'accepted',
+                    'accepted': 'processing',
                     'processing': 'processing',
                     'ready_for_delivery': 'ready_for_delivery',
                     'out_for_delivery': 'out_for_delivery',
@@ -274,7 +274,7 @@ const OrderBookingTracking = () => {
     const getRequestTypeLabel = () => {
         if (!request) return '';
         const typeMap = {
-            'booking': 'Event Booking',
+            'booking': 'Custom Order',
             'special_order': 'Special Order',
             'customized': 'Customized Bouquet',
         };
@@ -539,6 +539,10 @@ const OrderBookingTracking = () => {
                             ) : (
                                 <>
                                     <div className="delivery-info-row">
+                                        <div className="delivery-label">Occasion</div>
+                                        <div className="delivery-value">{request.requestData?.occasion || 'N/A'}</div>
+                                    </div>
+                                    <div className="delivery-info-row">
                                         <div className="delivery-label">Recipient</div>
                                         <div className="delivery-value">{request.address?.name || request.requestData?.recipient_name || request.requestData?.fullName}</div>
                                     </div>
@@ -585,15 +589,50 @@ const OrderBookingTracking = () => {
                             </div>
 
                             <div className="d-flex flex-column gap-3 mb-4">
-                                {request.type === 'booking' && (
-                                    <>
-                                        <div className="d-flex flex-column"><span className="text-muted small fw-medium">Recipient</span><span className="fw-bold text-dark">{request.requestData?.recipient_name}</span></div>
-                                        <div className="d-flex flex-column"><span className="text-muted small fw-medium">Occasion</span><span className="fw-bold text-dark">{request.requestData?.occasion}</span></div>
-                                        <div className="d-flex flex-column"><span className="text-muted small fw-medium">Event Date</span><span className="fw-bold text-dark">{request.requestData?.event_date}</span></div>
-                                        <div className="d-flex flex-column"><span className="text-muted small fw-medium">Venue</span><span className="fw-bold text-dark">{request.requestData?.venue}</span></div>
-                                        {request.notes && <div className="d-flex flex-column mt-2"><span className="text-muted small fw-medium">Notes</span><span className="text-dark bg-light p-3 rounded-3 mt-1 fs-6">{request.notes}</span></div>}
-                                    </>
-                                )}
+                                {request.type === 'booking' && (() => {
+                                    let reqData = request.requestData || {};
+                                    if (typeof reqData === 'string') {
+                                        try { reqData = JSON.parse(reqData); } catch (e) { reqData = {}; }
+                                    }
+
+                                    const arrangement = reqData.arrangementType === 'Other' ? reqData.otherArrangementType : reqData.arrangementType;
+                                    let flowerPieces = null;
+                                    if (reqData.arrangementType === 'Other' && reqData.flowerQuantity) {
+                                        flowerPieces = ` (${reqData.flowerQuantity} pieces)`;
+                                    }
+                                    const finalArrangement = arrangement ? `${arrangement}${flowerPieces || ''}` : null;
+
+                                    let flowers = '';
+                                    if (reqData.selectedFlowers && Array.isArray(reqData.selectedFlowers)) {
+                                        flowers = reqData.selectedFlowers.map(f => f.label || f.value || f).join(', ');
+                                        if (flowers.includes('Others') && reqData.otherFlowersText) {
+                                            flowers = flowers.replace('Others', reqData.otherFlowersText);
+                                        }
+                                    } else if (reqData.selectedFlowers) {
+                                        flowers = String(reqData.selectedFlowers);
+                                    } else if (reqData.flowers) {
+                                        flowers = String(reqData.flowers);
+                                    }
+
+                                    const colorTheme = reqData.colorPreference === 'Others' ? reqData.otherColorPreference : reqData.colorPreference;
+
+                                    return (
+                                        <>
+                                            {(reqData.recipientName || reqData.recipient_name) && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Recipient</span><span className="fw-bold text-dark">{reqData.recipientName || reqData.recipient_name}</span></div>}
+                                            {reqData.occasion && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Occasion</span><span className="fw-bold text-dark">{reqData.occasion === 'Other' ? reqData.otherOccasion : reqData.occasion}</span></div>}
+                                            {request.delivery_method !== 'pickup' && (reqData.eventDate || reqData.event_date) && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Event Date</span><span className="fw-bold text-dark">{reqData.eventDate || reqData.event_date}</span></div>}
+                                            {request.delivery_method !== 'pickup' && reqData.eventTime && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Event Time</span><span className="fw-bold text-dark">{reqData.eventTime}</span></div>}
+                                            {request.delivery_method !== 'pickup' && reqData.venue && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Venue</span><span className="fw-bold text-dark">{reqData.venue}</span></div>}
+                                            {request.delivery_method === 'pickup' && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Pickup Location</span><span className="fw-bold text-dark">Jocerry's Flower Shop, 63 San Jose Road, Zamboanga City</span></div>}
+                                            {request.delivery_method === 'pickup' && request.pickupTime && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Pickup Time</span><span className="fw-bold text-dark">{request.pickupTime}</span></div>}
+                                            {finalArrangement && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Arrangement</span><span className="fw-bold text-dark">{finalArrangement}</span></div>}
+                                            {reqData.arrangementQuantity && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Quantity</span><span className="fw-bold text-dark">{reqData.arrangementQuantity}</span></div>}
+                                            {flowers && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Preferred Flowers</span><span className="fw-bold text-dark">{flowers}</span></div>}
+                                            {colorTheme && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Color Theme</span><span className="fw-bold text-dark">{colorTheme}</span></div>}
+                                            {(reqData.specialInstructions || request.notes) && <div className="d-flex flex-column mt-2"><span className="text-muted small fw-medium">Special Instructions</span><span className="text-dark bg-light p-3 rounded-3 mt-1 fs-6">{reqData.specialInstructions || request.notes}</span></div>}
+                                        </>
+                                    );
+                                })()}
                                 {request.type === 'special_order' && (
                                     <>
                                         <div className="d-flex flex-column"><span className="text-muted small fw-medium">Recipient</span><span className="fw-bold text-dark">{request.requestData?.recipient_name}</span></div>
