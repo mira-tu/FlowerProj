@@ -561,7 +561,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                                             </div>
                                                         )}
                                                         <div className="ms-3 pe-4 flex-grow-1">
-                                                            <h6 className="mb-1 fw-bold text-dark">{item.arrangementType} Event Request</h6>
+                                                            <h6 className="mb-1 fw-bold text-dark">{(item.arrangementSummary || item.arrangementType || (Array.isArray(item.arrangementTypes) ? item.arrangementTypes.join(', ') : 'Custom Arrangement'))} Event Request</h6>
                                                             <div className="text-muted small">
                                                                 <div><strong>Occasion:</strong> {item.occasion}</div>
                                                                 <div><strong>Date:</strong> {new Date(item.eventDate).toLocaleDateString()}</div>
@@ -602,3 +602,4 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
 };
 
 export default Cart;
+

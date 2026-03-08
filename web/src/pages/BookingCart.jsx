@@ -81,7 +81,7 @@ const BookingCart = ({ user }) => {
                                             style={{ width: '80px', height: '80px', objectFit: 'cover' }}
                                         />
                                         <div className="ms-3">
-                                            <h6 className="mb-0 fw-bold">{item.occasion} - {item.arrangementType}</h6>
+                                            <h6 className="mb-0 fw-bold">{item.occasion} - {(item.arrangementSummary || item.arrangementType || (Array.isArray(item.arrangementTypes) ? item.arrangementTypes.join(', ') : 'Custom Arrangement'))}</h6>
                                             <small className="text-muted">
                                                 {item.serviceType}
                                             </small>
@@ -93,7 +93,7 @@ const BookingCart = ({ user }) => {
                                     </div>
                                     <div className="col-md-2 text-center mb-2 mb-md-0">
                                         <span className="d-md-none text-muted small me-2">Quantity:</span>
-                                        1
+                                        {item.arrangementQuantity || 1}
                                     </div>
                                     <div className="col-md-2 text-center fw-bold mb-2 mb-md-0" style={{ color: '#d63384' }}>
                                         <span className="d-md-none text-muted small me-2">Total:</span>
@@ -147,3 +147,4 @@ const BookingCart = ({ user }) => {
 };
 
 export default BookingCart;
+

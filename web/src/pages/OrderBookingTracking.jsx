@@ -97,6 +97,15 @@ const OrderBookingTracking = () => {
             }
 
             // Step 3: Combine data and set state
+            let normalizedRequestData = foundRequest.data;
+            if (typeof normalizedRequestData === 'string') {
+                try {
+                    normalizedRequestData = JSON.parse(normalizedRequestData);
+                } catch (error) {
+                    normalizedRequestData = {};
+                }
+            }
+
             const transformedRequest = {
                 ...foundRequest,
                 rider: riderDetails,
@@ -105,7 +114,7 @@ const OrderBookingTracking = () => {
                 pickupTime: foundRequest.pickup_time,         // Changed from foundRequest.data?.pickup_time
                 address: finalAddress, // Attach the fetched address
                 type: foundRequest.type,
-                requestData: foundRequest.data,
+                requestData: normalizedRequestData,
                 imageUrl: foundRequest.image_url,
                 finalPrice: foundRequest.final_price,
             };
@@ -413,7 +422,11 @@ const OrderBookingTracking = () => {
                                         `Expected resolution by: ${getExpectedResolutionDate()}`
                                 )}
 
-                                {isDeclinedOrCancelled && (request.status === 'declined' ? 'Request not fulfilled.' : 'Request cancelled by user.')}
+                                {isDeclinedOrCancelled && (request.status === 'declined'
+                                    ? ((request.requestData?.decline_feedback || request.requestData?.declineFeedback)
+                                        ? `Declined: ${request.requestData?.decline_feedback || request.requestData?.declineFeedback}`
+                                        : 'Request not fulfilled.')
+                                    : 'Request cancelled by user.')}
                             </div>
                         </div>
                     </div>
@@ -509,6 +522,9 @@ const OrderBookingTracking = () => {
                                             <div className="timeline-content">
                                                 <h5>Request {request.status === 'declined' ? 'Declined' : 'Cancelled'}</h5>
                                                 <p>{request.status === 'declined' ? 'Your request could not be fulfilled.' : 'You have cancelled this request.'}</p>
+                                                {request.status === 'declined' && (request.requestData?.decline_feedback || request.requestData?.declineFeedback) && (
+                                                    <p className="mb-1"><strong>Reason:</strong> {request.requestData?.decline_feedback || request.requestData?.declineFeedback}</p>
+                                                )}
                                                 <div className="timeline-date">{new Date(request.date).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
                                             </div>
                                         </div>
@@ -595,12 +611,21 @@ const OrderBookingTracking = () => {
                                         try { reqData = JSON.parse(reqData); } catch (e) { reqData = {}; }
                                     }
 
-                                    const arrangement = reqData.arrangementType === 'Other' ? reqData.otherArrangementType : reqData.arrangementType;
-                                    let flowerPieces = null;
-                                    if (reqData.arrangementType === 'Other' && reqData.flowerQuantity) {
-                                        flowerPieces = ` (${reqData.flowerQuantity} pieces)`;
-                                    }
-                                    const finalArrangement = arrangement ? `${arrangement}${flowerPieces || ''}` : null;
+                                    const arrangementSelections = Array.isArray(reqData.arrangementSelections) ? reqData.arrangementSelections : [];
+                                    const arrangement = reqData.arrangementSummary || (
+                                        arrangementSelections.length
+                                            ? arrangementSelections.map((selection) => {
+                                                const label = selection?.arrangement_label || selection?.arrangementLabel || selection?.arrangement_type || selection?.arrangementType;
+                                                const quantity = Number(selection?.quantity || selection?.arrangement_quantity || 1);
+                                                return label ? `${label} x${quantity}` : null;
+                                            }).filter(Boolean).join(', ')
+                                            : (reqData.arrangementType === 'Other' ? reqData.otherArrangementType : reqData.arrangementType)
+                                    );
+                                    const totalArrangementQuantity = reqData.arrangementQuantity || (
+                                        arrangementSelections.length
+                                            ? arrangementSelections.reduce((sum, selection) => sum + Number(selection?.quantity || 1), 0)
+                                            : null
+                                    );
 
                                     let flowers = '';
                                     if (reqData.selectedFlowers && Array.isArray(reqData.selectedFlowers)) {
@@ -625,8 +650,8 @@ const OrderBookingTracking = () => {
                                             {request.delivery_method !== 'pickup' && reqData.venue && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Venue</span><span className="fw-bold text-dark">{reqData.venue}</span></div>}
                                             {request.delivery_method === 'pickup' && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Pickup Location</span><span className="fw-bold text-dark">Jocerry's Flower Shop, 63 San Jose Road, Zamboanga City</span></div>}
                                             {request.delivery_method === 'pickup' && request.pickupTime && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Pickup Time</span><span className="fw-bold text-dark">{request.pickupTime}</span></div>}
-                                            {finalArrangement && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Arrangement</span><span className="fw-bold text-dark">{finalArrangement}</span></div>}
-                                            {reqData.arrangementQuantity && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Quantity</span><span className="fw-bold text-dark">{reqData.arrangementQuantity}</span></div>}
+                                            {arrangement && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Arrangement</span><span className="fw-bold text-dark">{arrangement}</span></div>}
+                                            {totalArrangementQuantity && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Quantity</span><span className="fw-bold text-dark">{totalArrangementQuantity}</span></div>}
                                             {flowers && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Preferred Flowers</span><span className="fw-bold text-dark">{flowers}</span></div>}
                                             {colorTheme && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Color Theme</span><span className="fw-bold text-dark">{colorTheme}</span></div>}
                                             {(reqData.specialInstructions || request.notes) && <div className="d-flex flex-column mt-2"><span className="text-muted small fw-medium">Special Instructions</span><span className="text-dark bg-light p-3 rounded-3 mt-1 fs-6">{reqData.specialInstructions || request.notes}</span></div>}
@@ -653,6 +678,49 @@ const OrderBookingTracking = () => {
                                     </>
                                 )}
                             </div>
+
+                            {request.status === 'quoted' && request.requestData?.quote_breakdown && (() => {
+                                const breakdown = request.requestData.quote_breakdown;
+                                const quantityMap = breakdown?.quantity_per_flower || {};
+                                const priceMap = breakdown?.price_per_flower || {};
+                                const lineItems = Object.keys(quantityMap).map((flowerName) => {
+                                    const quantity = Number(quantityMap[flowerName]) || 0;
+                                    const unitPrice = Number(priceMap[flowerName]) || 0;
+                                    return {
+                                        flowerName,
+                                        quantity,
+                                        unitPrice,
+                                        total: quantity * unitPrice,
+                                    };
+                                });
+                                const subtotal = Number(breakdown?.computed_subtotal ?? lineItems.reduce((sum, item) => sum + item.total, 0));
+                                const shipping = Number(breakdown?.shipping_fee ?? request.shipping_fee ?? 0);
+                                const total = Number(breakdown?.computed_total ?? (subtotal + shipping));
+
+                                return (
+                                    <div className="mt-2 mb-3 p-3 rounded-3" style={{ background: '#fff5f8', border: '1px solid #fbcfe8' }}>
+                                        <div className="text-muted small fw-medium mb-2">Quote Price Breakdown</div>
+                                        {lineItems.map((item) => (
+                                            <div key={item.flowerName} className="d-flex justify-content-between small mb-1">
+                                                <span>{item.flowerName} ({item.quantity} x ₱{item.unitPrice.toLocaleString()})</span>
+                                                <span className="fw-semibold">₱{item.total.toLocaleString()}</span>
+                                            </div>
+                                        ))}
+                                        <div className="d-flex justify-content-between small border-top pt-2 mt-2">
+                                            <span>Subtotal</span>
+                                            <span className="fw-semibold">₱{subtotal.toLocaleString()}</span>
+                                        </div>
+                                        <div className="d-flex justify-content-between small">
+                                            <span>Shipping Fee</span>
+                                            <span className="fw-semibold">₱{shipping.toLocaleString()}</span>
+                                        </div>
+                                        <div className="d-flex justify-content-between fw-bold mt-1" style={{ color: 'var(--shop-pink)' }}>
+                                            <span>Total</span>
+                                            <span>₱{total.toLocaleString()}</span>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
 
                             <div className="mt-4 pt-4 border-top">
                                 <div className="d-flex justify-content-between align-items-center">
@@ -692,3 +760,6 @@ const OrderBookingTracking = () => {
 };
 
 export default OrderBookingTracking;
+
+
+

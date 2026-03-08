@@ -981,20 +981,42 @@ export const adminAPI = {
         return { data: { success: true } };
     },
 
-    updateRequestStatus: async (id, status) => {
-        // Fetch current timestamps first
+    updateRequestStatus: async (id, status, options = {}) => {
         const { data: current, error: fetchError } = await supabase
             .from('requests')
-            .select('status_timestamps')
+            .select('status_timestamps, data, user_id, request_number')
             .eq('id', id)
             .single();
+
+        if (fetchError) {
+            console.error('Error fetching current request before status update:', fetchError);
+            throw fetchError;
+        }
 
         const existingTimestamps = (current && current.status_timestamps) || {};
         const updatedTimestamps = { ...existingTimestamps, [status]: new Date().toISOString() };
 
+        const updatePayload = { status: status, status_timestamps: updatedTimestamps };
+
+        if (options?.dataPatch && typeof options.dataPatch === 'object') {
+            let currentData = current?.data || {};
+            if (typeof currentData === 'string') {
+                try {
+                    currentData = JSON.parse(currentData);
+                } catch (error) {
+                    currentData = {};
+                }
+            }
+
+            updatePayload.data = {
+                ...currentData,
+                ...options.dataPatch,
+            };
+        }
+
         const { data, error } = await supabase
             .from('requests')
-            .update({ status: status, status_timestamps: updatedTimestamps })
+            .update(updatePayload)
             .eq('id', id)
             .select()
             .single();
@@ -1003,9 +1025,26 @@ export const adminAPI = {
             console.error('Error updating request status:', error);
             throw error;
         }
+
+        const notificationConfig = options?.notification;
+        if (notificationConfig && data?.user_id) {
+            const { error: notificationError } = await supabase
+                .from('notifications')
+                .insert([{
+                    user_id: data.user_id,
+                    title: notificationConfig.title || 'Request status updated',
+                    message: notificationConfig.message || `Your request #${data.request_number || current?.request_number || id} is now ${status}.`,
+                    type: notificationConfig.type || 'request_update',
+                    link: notificationConfig.link || '/profile',
+                }]);
+
+            if (notificationError) {
+                console.error('Failed to send request status notification:', notificationError);
+            }
+        }
+
         return { data: { success: true, request: data } };
     },
-
     updateRequestPaymentStatus: async (requestToUpdate, newStatus) => {
         const requestId = requestToUpdate.id;
         const requestType = requestToUpdate.type;
@@ -1320,3 +1359,4 @@ export default {
     uploadAPI,
     BASE_URL
 };
+

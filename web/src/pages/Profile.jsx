@@ -401,6 +401,9 @@ const Profile = ({ user, logout }) => {
                     total: parseFloat(request.final_price || request.estimated_price || 0),
                     notes: request.notes || requestData.notes,
                     data: requestData,
+                    quoteBreakdown: requestData?.quote_breakdown || null,
+                    declineFeedback: requestData?.decline_feedback || requestData?.declineFeedback || null,
+                    shipping_fee: parseFloat(request.shipping_fee || requestData?.quote_breakdown?.shipping_fee || 0),
                     image_url: request.image_url,
                     isRequest: true,
                     address: address, // Attach the fetched address
@@ -656,7 +659,7 @@ const Profile = ({ user, logout }) => {
 
     const filteredOrders = activeOrderTab === 'all'
         ? orders
-        : orders.filter(o => o.status === activeOrderTab);
+        : orders.filter(o => activeOrderTab === 'cancelled' ? ['cancelled', 'declined'].includes(o.status) : o.status === activeOrderTab);
 
     const getStatusBadgeClass = (status) => {
         const classes = {
@@ -667,7 +670,8 @@ const Profile = ({ user, logout }) => {
             out_for_delivery: 'shipped',
             claimed: 'shipped',
             completed: 'delivered',
-            cancelled: 'cancelled'
+            cancelled: 'cancelled',
+            declined: 'cancelled'
         };
         return classes[status] || 'pending';
     };
@@ -681,7 +685,8 @@ const Profile = ({ user, logout }) => {
             out_for_delivery: 'Out for Delivery',
             claimed: 'Claimed',
             completed: 'Completed',
-            cancelled: 'Cancelled'
+            cancelled: 'Cancelled',
+            declined: 'Declined'
         };
         return labels[status] || status;
     };
@@ -1004,6 +1009,61 @@ const Profile = ({ user, logout }) => {
                                         </div>
                                     </div>
                                 )}
+
+                                {order.status === 'declined' && (order.declineFeedback || order.data?.decline_feedback || order.data?.declineFeedback) && (
+                                    <div className="mt-3 p-3 rounded" style={{ background: '#fff1f2', border: '1px solid #fecdd3' }}>
+                                        <div className="small fw-bold text-danger mb-1">Decline Feedback</div>
+                                        <div className="small text-dark">{order.declineFeedback || order.data?.decline_feedback || order.data?.declineFeedback}</div>
+                                    </div>
+                                )}
+
+                                {order.type === 'booking' && order.status === 'quoted' && (order.quoteBreakdown || order.data?.quote_breakdown) && (() => {
+                                    const breakdown = order.quoteBreakdown || order.data?.quote_breakdown;
+                                    const quantityMap = breakdown?.quantity_per_flower || {};
+                                    const priceMap = breakdown?.price_per_flower || {};
+                                    const lineItems = Object.keys(quantityMap).map((flowerName) => {
+                                        const quantity = Number(quantityMap[flowerName]) || 0;
+                                        const unitPrice = Number(priceMap[flowerName]) || 0;
+                                        return {
+                                            flowerName,
+                                            quantity,
+                                            unitPrice,
+                                            total: quantity * unitPrice,
+                                        };
+                                    });
+
+                                    const subtotal = Number(breakdown?.computed_subtotal ?? lineItems.reduce((sum, item) => sum + item.total, 0));
+                                    const shipping = Number(breakdown?.shipping_fee ?? order.shipping_fee ?? 0);
+                                    const total = Number(breakdown?.computed_total ?? (subtotal + shipping));
+
+                                    return (
+                                        <div className="mt-3 pt-3 border-top">
+                                            <div className="small fw-bold mb-2" style={{ color: 'var(--shop-pink)' }}>Price Breakdown</div>
+                                            {lineItems.length > 0 ? (
+                                                lineItems.map((item) => (
+                                                    <div key={item.flowerName} className="d-flex justify-content-between small mb-1">
+                                                        <span>{item.flowerName} ({item.quantity} x ₱{item.unitPrice.toLocaleString()})</span>
+                                                        <span className="fw-semibold">₱{item.total.toLocaleString()}</span>
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <div className="small text-muted mb-1">No per-flower lines available.</div>
+                                            )}
+                                            <div className="d-flex justify-content-between small border-top pt-2 mt-2">
+                                                <span>Subtotal</span>
+                                                <span className="fw-semibold">₱{subtotal.toLocaleString()}</span>
+                                            </div>
+                                            <div className="d-flex justify-content-between small">
+                                                <span>Shipping Fee</span>
+                                                <span className="fw-semibold">₱{shipping.toLocaleString()}</span>
+                                            </div>
+                                            <div className="d-flex justify-content-between small fw-bold mt-1" style={{ color: 'var(--shop-pink)' }}>
+                                                <span>Total</span>
+                                                <span>₱{total.toLocaleString()}</span>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
 
                                 {/* Payment Method Information */}
                                 {order.payment && (
@@ -1887,3 +1947,4 @@ const Profile = ({ user, logout }) => {
 };
 
 export default Profile;
+

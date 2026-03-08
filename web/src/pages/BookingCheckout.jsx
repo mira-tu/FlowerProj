@@ -295,7 +295,7 @@ const BookingCheckout = ({ user }) => {
                                                 style={{ width: '60px', height: '60px', objectFit: 'cover' }}
                                             />
                                             <div>
-                                                <h6 className="mb-0 fw-bold">{item.occasion} - {item.arrangementType}</h6>
+                                                <h6 className="mb-0 fw-bold">{item.occasion} - {(item.arrangementSummary || item.arrangementType || (Array.isArray(item.arrangementTypes) ? item.arrangementTypes.join(', ') : 'Custom Arrangement'))}</h6>
                                                 <small className="text-muted d-block">
                                                     {item.serviceType}
                                                 </small>
@@ -309,7 +309,7 @@ const BookingCheckout = ({ user }) => {
                                             {item.eventTime && ` at ${item.eventTime}`}
                                         </p>
                                         <p className="mb-1"><strong>Location/Venue:</strong> {item.venue}</p>
-                                        <p className="mb-1"><strong>Quantity:</strong> {item.arrangementQuantity || 1}</p>
+                                        <p className="mb-1"><strong>Total Quantity:</strong> {item.arrangementQuantity || 1}</p>
                                         {item.flowerQuantity && <p className="mb-1"><strong>No. of Flower Pieces:</strong> {item.flowerQuantity}</p>}
                                         {item.flowers && <p className="mb-1"><strong>Preferred Flowers:</strong> {item.flowers}</p>}
                                         {item.colorPreference && <p className="mb-1"><strong>Color Theme:</strong> {item.colorPreference}</p>}
@@ -360,3 +360,4 @@ const BookingCheckout = ({ user }) => {
 };
 
 export default BookingCheckout;
+

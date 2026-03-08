@@ -5,6 +5,7 @@ import {
   FlatList,
   Image,
   Modal,
+  Platform,
   Switch,
   RefreshControl,
   ScrollView,
@@ -23,6 +24,7 @@ import styles from '../../AdminDashboard.styles';
 
 const SalesTab = () => {
   const { width } = useWindowDimensions();
+  const isWeb = Platform.OS === 'web';
   const [salesData, setSalesData] = useState({
     totalSales: 0,
     todaySales: 0,
@@ -504,6 +506,7 @@ const SalesTab = () => {
               yLabelsOffset: 40,
             }}
             bezier
+            withDots={!isWeb}
           />
         </View>
 
@@ -807,3 +810,4 @@ const SalesTab = () => {
 };
 
 export default SalesTab;
+

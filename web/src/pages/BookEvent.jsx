@@ -54,6 +54,16 @@ const arrangementOptions = [
     }
 ];
 
+const flattenedArrangementOptions = arrangementOptions.flatMap((group) => group.options);
+
+const extractFlowersPerArrangement = (arrangementLabel = '') => {
+    if (!arrangementLabel) return 0;
+    const match = arrangementLabel.match(/(\d+)\s*flowers?/i);
+    if (!match) return 0;
+    const parsed = Number.parseInt(match[1], 10);
+    return Number.isFinite(parsed) ? parsed : 0;
+};
+
 const colorOptions = [
     { value: 'Pastel Pinks and Whites', label: 'Pastel Pinks and Whites', colors: ['#ffc0cb', '#ffffff'] },
     { value: 'Rustic Autumn Colors', label: 'Rustic Autumn Colors', colors: ['#d2691e', '#8b4513', '#cd853f'] },
@@ -87,6 +97,93 @@ const customColorOptionLabel = ({ label, colors }) => (
     </div>
 );
 
+const buildMultiSelectStyles = (hasError) => ({
+    control: (base, state) => ({
+        ...base,
+        border: hasError ? '1px solid #dc3545' : '1px solid rgba(240, 123, 150, 0.14)',
+        backgroundColor: '#fffaf8',
+        padding: '8px 10px',
+        borderRadius: '18px',
+        minHeight: '60px',
+        boxShadow: state.isFocused ? '0 0 0 4px rgba(240, 123, 150, 0.12)' : 'none',
+        transition: 'all 0.2s ease',
+        '&:hover': {
+            borderColor: hasError ? '#dc3545' : 'rgba(240, 123, 150, 0.4)'
+        }
+    }),
+    valueContainer: (base) => ({
+        ...base,
+        gap: '6px',
+        padding: 0
+    }),
+    placeholder: (base) => ({
+        ...base,
+        color: '#8f7f86'
+    }),
+    multiValue: (base) => ({
+        ...base,
+        backgroundColor: 'rgba(240, 123, 150, 0.14)',
+        borderRadius: '999px',
+        padding: '3px 6px'
+    }),
+    multiValueLabel: (base) => ({
+        ...base,
+        color: '#7a2444',
+        fontWeight: 600,
+        paddingRight: '6px'
+    }),
+    multiValueRemove: (base) => ({
+        ...base,
+        color: '#7a2444',
+        borderRadius: '999px',
+        ':hover': {
+            backgroundColor: 'rgba(122, 36, 68, 0.12)',
+            color: '#7a2444'
+        }
+    }),
+    clearIndicator: (base) => ({
+        ...base,
+        color: '#b9a7af',
+        ':hover': {
+            color: '#7a2444'
+        }
+    }),
+    dropdownIndicator: (base, state) => ({
+        ...base,
+        color: state.isFocused ? '#f07b96' : '#b9a7af',
+        ':hover': {
+            color: '#f07b96'
+        }
+    }),
+    indicatorSeparator: () => ({
+        display: 'none'
+    }),
+    menu: (base) => ({
+        ...base,
+        borderRadius: '18px',
+        overflow: 'hidden',
+        boxShadow: '0 18px 40px rgba(65, 35, 46, 0.12)'
+    }),
+    option: (base, state) => ({
+        ...base,
+        backgroundColor: state.isSelected
+            ? 'rgba(240, 123, 150, 0.16)'
+            : state.isFocused
+                ? '#fff2f5'
+                : '#fff',
+        color: '#41232e',
+        cursor: 'pointer'
+    }),
+    groupHeading: (base) => ({
+        ...base,
+        fontWeight: 700,
+        color: '#6c4b57',
+        fontSize: '0.8rem',
+        textTransform: 'uppercase',
+        letterSpacing: '0.08em'
+    })
+});
+
 const BookEvent = ({ user }) => {
     const [formData, setFormData] = useState({
         customerName: user?.user_metadata?.full_name || '',
@@ -103,8 +200,8 @@ const BookEvent = ({ user }) => {
         eventTime: '',
         venue: '',
         selectedFlowers: [],
-        arrangementType: '',
-        arrangementQuantity: '1',
+        arrangementTypes: [],
+        arrangementQuantities: {},
         flowerQuantity: '',
         specialInstructions: '',
         inspirationFile: null
@@ -179,8 +276,98 @@ const BookEvent = ({ user }) => {
         setFormData(prev => ({ ...prev, selectedFlowers: selectedOptions || [] }));
     };
 
-    const handleArrangementSelect = (selectedOption) => {
-        setFormData(prev => ({ ...prev, arrangementType: selectedOption ? selectedOption.value : '' }));
+    const selectedArrangementOptions = useMemo(
+        () => flattenedArrangementOptions.filter((option) => formData.arrangementTypes.includes(option.value)),
+        [formData.arrangementTypes]
+    );
+
+    const hasOtherArrangement = formData.arrangementTypes.includes('Other');
+
+    const otherFlowersPerArrangement = useMemo(() => {
+        const parsedCount = Number.parseInt(formData.flowerQuantity, 10);
+        return Number.isFinite(parsedCount) && parsedCount > 0 ? parsedCount : 0;
+    }, [formData.flowerQuantity]);
+
+    const arrangementDetails = useMemo(() => {
+        if (!selectedArrangementOptions.length) return [];
+
+        return selectedArrangementOptions.map((option) => {
+            const parsedQty = Number.parseInt(formData.arrangementQuantities?.[option.value], 10);
+            const quantity = Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1;
+            const isOther = option.value === 'Other';
+            const label = isOther
+                ? (formData.otherArrangementType?.trim() || option.label)
+                : option.label;
+            const flowersPerArrangement = isOther
+                ? otherFlowersPerArrangement
+                : extractFlowersPerArrangement(option.label);
+
+            return {
+                value: option.value,
+                label,
+                quantity,
+                flowersPerArrangement,
+                totalFlowers: flowersPerArrangement > 0 ? flowersPerArrangement * quantity : 0
+            };
+        });
+    }, [formData.arrangementQuantities, formData.otherArrangementType, otherFlowersPerArrangement, selectedArrangementOptions]);
+
+    const arrangementSummary = useMemo(
+        () => arrangementDetails.map((detail) => detail.label + ' x' + detail.quantity).join(', '),
+        [arrangementDetails]
+    );
+
+    const totalArrangementQuantity = useMemo(
+        () => arrangementDetails.reduce((sum, detail) => sum + detail.quantity, 0),
+        [arrangementDetails]
+    );
+
+    const totalEstimatedFlowers = useMemo(
+        () => arrangementDetails.reduce((sum, detail) => sum + detail.totalFlowers, 0),
+        [arrangementDetails]
+    );
+
+    const handleArrangementSelect = (selectedOptions) => {
+        const selectedValues = (selectedOptions || []).map((option) => option.value);
+        setFormData(prev => {
+            const nextQuantities = {};
+            selectedValues.forEach((value) => {
+                const existingQty = Number.parseInt(prev.arrangementQuantities?.[value], 10);
+                nextQuantities[value] = Number.isFinite(existingQty) && existingQty > 0 ? String(existingQty) : '1';
+            });
+
+            const nextState = {
+                ...prev,
+                arrangementTypes: selectedValues,
+                arrangementQuantities: nextQuantities
+            };
+
+            if (!selectedValues.includes('Other')) {
+                nextState.otherArrangementType = '';
+                nextState.flowerQuantity = '';
+            }
+
+            return nextState;
+        });
+    };
+
+    const handleArrangementQuantityChange = (arrangementValue, value) => {
+        const digitsOnly = value.replace(/[^\d]/g, '');
+        const nextValue = digitsOnly === '' ? '' : String(Math.max(1, Number.parseInt(digitsOnly, 10)));
+        setFormData(prev => ({
+            ...prev,
+            arrangementQuantities: {
+                ...prev.arrangementQuantities,
+                [arrangementValue]: nextValue
+            }
+        }));
+    };
+
+    const handleArrangementQuantityStep = (arrangementValue, direction) => {
+        const currentValue = Number.parseInt(formData.arrangementQuantities?.[arrangementValue], 10);
+        const safeCurrentValue = Number.isFinite(currentValue) && currentValue > 0 ? currentValue : 1;
+        const nextValue = Math.max(1, safeCurrentValue + direction);
+        handleArrangementQuantityChange(arrangementValue, String(nextValue));
     };
 
     const handleColorSelect = (selectedOption) => {
@@ -289,6 +476,14 @@ const BookEvent = ({ user }) => {
     const handleSubmit = async () => {
         setIsSubmitting(true);
 
+        const arrangementSelections = arrangementDetails.map((detail) => ({
+            arrangement_type: detail.value,
+            arrangement_label: detail.label,
+            quantity: detail.quantity,
+            flowers_per_arrangement: detail.flowersPerArrangement || 0,
+            total_flowers: detail.totalFlowers || 0
+        }));
+
         // 1. Prepare Cart Item
         const newCartItem = {
             id: Date.now(),
@@ -303,9 +498,15 @@ const BookEvent = ({ user }) => {
             venue: formData.venue,
             address_id: selectedAddressId || null,
             deliveryAddress: deliveryAddress || null,
-            arrangementType: formData.arrangementType === 'Other' ? formData.otherArrangementType : formData.arrangementType,
-            arrangementQuantity: formData.arrangementQuantity || 1,
-            flowerQuantity: formData.arrangementType === 'Other' ? (formData.flowerQuantity || null) : null,
+            arrangementType: arrangementSummary || selectedArrangementOptions.map((option) => option.label).join(', '),
+            arrangementTypes: selectedArrangementOptions.map((option) => option.value === 'Other' ? (formData.otherArrangementType?.trim() || option.label) : option.label),
+            arrangementTypeValues: selectedArrangementOptions.map((option) => option.value),
+            arrangementQuantities: formData.arrangementQuantities,
+            arrangementSelections,
+            arrangementSummary,
+            arrangementQuantity: totalArrangementQuantity || 1,
+            flowerQuantity: hasOtherArrangement ? (formData.flowerQuantity || null) : null,
+            totalFlowers: totalEstimatedFlowers > 0 ? totalEstimatedFlowers : null,
             flowers: formData.selectedFlowers.map(f => f.label).join(', ') + (formData.otherFlowersText ? ` (${formData.otherFlowersText})` : ''),
             colorPreference: formData.colorPreference === 'Others' ? formData.otherColorPreference : formData.colorPreference,
             specialInstructions: formData.specialInstructions,
@@ -518,73 +719,109 @@ const BookEvent = ({ user }) => {
 
                                     <div className="row g-4 mb-4">
                                         <div className="col-12">
-                                            <div className="row g-3">
-                                                <div className="col-md-8 position-relative">
-                                                    <label className="form-label fw-semibold">Arrangement Type <span className="text-danger">*</span></label>
-                                                    <Select
-                                                        options={arrangementOptions}
-                                                        placeholder="Search or select type..."
-                                                        onChange={handleArrangementSelect}
-                                                        value={arrangementOptions.flatMap(g => g.options).find(o => o.value === formData.arrangementType) || null}
-                                                        isClearable
-                                                        styles={{
-                                                            control: (base) => ({
-                                                                ...base,
-                                                                border: (validated && !formData.arrangementType) ? '1px solid #dc3545' : '0',
-                                                                backgroundColor: '#f8f9fa',
-                                                                padding: '6px',
-                                                                borderRadius: '8px',
-                                                                minHeight: '50px',
-                                                                boxShadow: 'none'
-                                                            }),
-                                                            groupHeading: (base) => ({
-                                                                ...base,
-                                                                fontWeight: 700,
-                                                                color: '#333',
-                                                                fontSize: '0.85rem',
-                                                                textTransform: 'none'
-                                                            })
-                                                        }}
-                                                    />
-                                                    <input
-                                                        type="text"
-                                                        tabIndex={-1}
-                                                        style={{ opacity: 0, height: 0, position: 'absolute', bottom: 10, left: 20 }}
-                                                        value={formData.arrangementType || ''}
-                                                        onChange={() => { }}
-                                                        required
-                                                    />
-                                                    {validated && !formData.arrangementType && (
-                                                        <div className="text-danger small mt-1">Please select an arrangement type.</div>
-                                                    )}
-                                                    {formData.arrangementType === 'Other' && (
-                                                        <>
-                                                            <input type="text" name="otherArrangementType" className="form-control bg-light border-0 py-3 mt-2" placeholder="Describe your custom arrangement" value={formData.otherArrangementType} onChange={handleChange} required />
-                                                            <div className="mt-3">
-                                                                <label className="form-label fw-semibold">Number of Flower Pieces</label>
-                                                                <input type="number" name="flowerQuantity" className="form-control bg-light border-0 py-3" placeholder="e.g., 50" min="1" value={formData.flowerQuantity} onChange={handleChange} />
+                                            <div className="arrangement-builder">
+                                                <div className="row g-4 align-items-start">
+                                                    <div className="col-12 position-relative">
+                                                        <label className="form-label fw-semibold">Arrangement Type <span className="text-danger">*</span></label>
+                                                        <Select
+                                                            isMulti
+                                                            options={arrangementOptions}
+                                                            placeholder="Search or select type..."
+                                                            onChange={handleArrangementSelect}
+                                                            value={flattenedArrangementOptions.filter((option) => formData.arrangementTypes.includes(option.value))}
+                                                            closeMenuOnSelect={false}
+                                                            styles={buildMultiSelectStyles(validated && formData.arrangementTypes.length === 0)}
+                                                        />
+                                                        <input
+                                                            type="text"
+                                                            tabIndex={-1}
+                                                            style={{ opacity: 0, height: 0, position: 'absolute', bottom: 10, left: 20 }}
+                                                            value={formData.arrangementTypes.length > 0 ? 'selected' : ''}
+                                                            onChange={() => { }}
+                                                            required
+                                                        />
+                                                        {validated && formData.arrangementTypes.length === 0 && (
+                                                            <div className="text-danger small mt-1">Please select at least one arrangement type.</div>
+                                                        )}
+                                                        <div className="form-text arrangement-helper-text">
+                                                            Choose one or more arrangement types, then set the quantity for each selection below.
+                                                        </div>
+                                                        {hasOtherArrangement && (
+                                                            <div className="arrangement-other-panel mt-3">
+                                                                <input type="text" name="otherArrangementType" className="form-control bg-light border-0 py-3" placeholder="Describe your custom arrangement" value={formData.otherArrangementType} onChange={handleChange} required />
+                                                                <div className="mt-3">
+                                                                    <label className="form-label fw-semibold mb-2">Flowers per "Others" Arrangement</label>
+                                                                    <input type="number" name="flowerQuantity" className="form-control bg-light border-0 py-3" placeholder="e.g., 50" min="1" value={formData.flowerQuantity} onChange={handleChange} required />
+                                                                </div>
                                                             </div>
-                                                        </>
-                                                    )}
-                                                </div>
+                                                        )}
+                                                    </div>
 
-                                                <div className="col-md-4">
-                                                    <label className="form-label fw-semibold">Quantity</label>
-                                                    <input
-                                                        type="number"
-                                                        name="arrangementQuantity"
-                                                        className="form-control bg-light border-0 py-3"
-                                                        min="1"
-                                                        value={formData.arrangementQuantity}
-                                                        onChange={handleChange}
-                                                        disabled={!formData.arrangementType}
-                                                        placeholder={!formData.arrangementType ? "Disabled" : "1"}
-                                                    />
-                                                    <div className="form-text small mt-1">How many of this arrangement?</div>
+                                                    <div className="col-12">
+                                                        <label className="form-label fw-semibold">Arrangement Quantities</label>
+                                                        {arrangementDetails.length === 0 ? (
+                                                            <div className="arrangement-empty-state">
+                                                                <div className="arrangement-empty-state__title">No arrangement selected yet</div>
+                                                                <div className="arrangement-empty-state__text">Selected arrangement types will appear here as cards so the quantity for each one is easy to adjust.</div>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="arrangement-card-grid">
+                                                                {arrangementDetails.map((detail) => (
+                                                                    <div key={detail.value} className="arrangement-qty-card">
+                                                                        <div className="arrangement-qty-card__head">
+                                                                            <div>
+                                                                                <div className="arrangement-qty-card__title">{detail.label}</div>
+                                                                                <div className="arrangement-qty-card__meta">
+                                                                                    {detail.flowersPerArrangement > 0
+                                                                                        ? detail.flowersPerArrangement + ' flowers each'
+                                                                                        : 'Custom flower count pending'}
+                                                                                </div>
+                                                                            </div>
+                                                                            <div className="arrangement-qty-card__pill">
+                                                                                Qty {detail.quantity}
+                                                                            </div>
+                                                                        </div>
+
+                                                                        <div className="arrangement-stepper">
+                                                                            <button
+                                                                                type="button"
+                                                                                className="arrangement-stepper__button"
+                                                                                onClick={() => handleArrangementQuantityStep(detail.value, -1)}
+                                                                                aria-label={'Decrease quantity for ' + detail.label}
+                                                                            >
+                                                                                -
+                                                                            </button>
+                                                                            <input
+                                                                                type="number"
+                                                                                className="arrangement-stepper__input"
+                                                                                min="1"
+                                                                                value={formData.arrangementQuantities?.[detail.value] || '1'}
+                                                                                onChange={(e) => handleArrangementQuantityChange(detail.value, e.target.value)}
+                                                                                aria-label={'Quantity for ' + detail.label}
+                                                                            />
+                                                                            <button
+                                                                                type="button"
+                                                                                className="arrangement-stepper__button"
+                                                                                onClick={() => handleArrangementQuantityStep(detail.value, 1)}
+                                                                                aria-label={'Increase quantity for ' + detail.label}
+                                                                            >
+                                                                                +
+                                                                            </button>
+                                                                        </div>
+
+                                                                        <div className="arrangement-qty-card__footer">
+                                                                            {detail.totalFlowers > 0
+                                                                                ? detail.totalFlowers + ' flowers total for this arrangement'
+                                                                                : 'Add a flower count for the custom arrangement to estimate the total.'}
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
-
                                         <div className="col-12 mt-3 position-relative">
                                             <label className="form-label fw-semibold">Preferred Flowers <span className="text-danger">*</span></label>
                                             <Select
@@ -593,16 +830,7 @@ const BookEvent = ({ user }) => {
                                                 placeholder="Select flowers..."
                                                 onChange={handleFlowerSelect}
                                                 value={formData.selectedFlowers}
-                                                styles={{
-                                                    control: (base) => ({
-                                                        ...base,
-                                                        border: (validated && (!formData.selectedFlowers || formData.selectedFlowers.length === 0)) ? '1px solid #dc3545' : '0',
-                                                        backgroundColor: '#f8f9fa',
-                                                        padding: '6px',
-                                                        borderRadius: '8px',
-                                                        boxShadow: 'none'
-                                                    })
-                                                }}
+                                                styles={buildMultiSelectStyles(validated && (!formData.selectedFlowers || formData.selectedFlowers.length === 0))}
                                             />
                                             <input
                                                 type="text"
@@ -746,15 +974,15 @@ const BookEvent = ({ user }) => {
                             <hr className="my-2" />
                             <div className="d-flex justify-content-between mb-2">
                                 <span className="text-muted">Arrangement:</span>
-                                <span className="fw-semibold text-end">{formData.arrangementType === 'Other' ? formData.otherArrangementType : formData.arrangementType}</span>
+                                <span className="fw-semibold text-end" style={{ maxWidth: '60%' }}>{arrangementSummary || 'N/A'}</span>
                             </div>
                             <div className="d-flex justify-content-between mb-2">
-                                <span className="text-muted">Quantity:</span>
-                                <span className="fw-semibold text-end">{formData.arrangementQuantity || 1}</span>
+                                <span className="text-muted">Total Quantity:</span>
+                                <span className="fw-semibold text-end">{totalArrangementQuantity || 1}</span>
                             </div>
-                            {formData.arrangementType === 'Other' && formData.flowerQuantity && (
+                            {hasOtherArrangement && formData.flowerQuantity && (
                                 <div className="d-flex justify-content-between mb-2">
-                                    <span className="text-muted">No. of Flower Pieces:</span>
+                                    <span className="text-muted">Flowers per "Others" Arrangement:</span>
                                     <span className="fw-semibold text-end">{formData.flowerQuantity}</span>
                                 </div>
                             )}
@@ -829,3 +1057,4 @@ const BookEvent = ({ user }) => {
 };
 
 export default BookEvent;
+
