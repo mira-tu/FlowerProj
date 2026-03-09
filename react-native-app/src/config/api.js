@@ -33,16 +33,27 @@ const getFunctionErrorMessage = async (error, fallbackMessage) => {
 };
 
 const invokeAdminWorkflow = async (action, payload = {}) => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+
     const { data, error } = await supabase.functions.invoke(ADMIN_WORKFLOW_FUNCTION, {
         body: {
             action,
             ...payload,
         },
+        headers: accessToken
+            ? {
+                Authorization: `Bearer ${accessToken}`,
+            }
+            : undefined,
     });
 
     if (error) {
         const message = await getFunctionErrorMessage(error, `Failed to ${action.replace(/_/g, ' ')}.`);
-        throw new Error(message);
+        const enrichedError = new Error(message);
+        enrichedError.name = error?.name || 'AdminWorkflowError';
+        enrichedError.cause = error;
+        throw enrichedError;
     }
 
     if (data?.error) {
@@ -54,10 +65,22 @@ const invokeAdminWorkflow = async (action, payload = {}) => {
 
 const shouldFallbackToDirectWorkflow = (error) => {
     const message = String(error?.message || '').toLowerCase();
-    return message.includes('failed to send a request to the edge function')
-        || message.includes('network request failed')
-        || message.includes('failed to fetch')
-        || message.includes('fetch');
+    const name = String(error?.name || error?.cause?.name || '').toLowerCase();
+
+    return [
+        'functionsfetcherror',
+        'functionsrelayerror',
+        'functionshttperror',
+        'adminworkflowerror',
+        'failed to send a request to the edge function',
+        'relay error invoking the edge function',
+        'edge function returned a non-2xx status code',
+        'network request failed',
+        'failed to fetch',
+        'network error',
+        'load failed',
+        'fetch',
+    ].some((token) => name.includes(token) || message.includes(token));
 };
 
 const parseJsonObject = (value) => {
