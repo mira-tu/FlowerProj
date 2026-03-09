@@ -24,6 +24,25 @@ import { formatTimestamp, getPaymentStatusDisplay, getStatusLabel } from '../adm
 import PaymentDetailsSection from '../components/PaymentDetailsSection';
 import { generateAndShareReceipt } from '../../../utils/receiptGenerator';
 
+const getNormalizedPaymentMethod = (paymentMethod) => String(paymentMethod || '').trim().toLowerCase();
+
+const resolveAcceptedOrderPaymentStatus = (order) => {
+  const paymentMethod = getNormalizedPaymentMethod(order?.payment_method);
+
+  if (paymentMethod === 'cod') {
+    return 'to_pay';
+  }
+
+  if (paymentMethod === 'gcash') {
+    if (order?.payment_status === 'paid' || order?.payment_status === 'partial') {
+      return order.payment_status;
+    }
+    return 'waiting_for_confirmation';
+  }
+
+  return order?.payment_status || null;
+};
+
 const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -203,26 +222,17 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       return;
     }
 
-    processAccept(orderToAccept);
+    await processAccept(orderToAccept);
   };
 
   const processAccept = async (orderToAccept) => {
     try {
       const orderId = orderToAccept.id;
       await adminAPI.acceptOrder(orderId, 'processing');
-
-      // Update payment status appropriately
-      let paymentStatus = orderToAccept.payment_status;
-      if (orderToAccept.payment_method === 'cod') {
-        paymentStatus = 'to_pay';
-      } else if (orderToAccept.payment_method === 'gcash') {
-        // If it's already 'paid', keep it. If not, make sure it's waiting for confirmation.
-        if (paymentStatus !== 'paid' && paymentStatus !== 'partial') {
-          paymentStatus = 'waiting_for_confirmation';
-        }
+      const paymentStatus = resolveAcceptedOrderPaymentStatus(orderToAccept);
+      if (paymentStatus) {
+        await adminAPI.updateOrderPaymentStatus(orderId, paymentStatus);
       }
-
-      await adminAPI.updateOrderPaymentStatus(orderId, paymentStatus);
 
       Toast.show({
         type: 'success',

@@ -551,6 +551,25 @@ const firstNonEmpty = (...values) => {
   return null;
 };
 
+const getNormalizedRequestPaymentMethod = (request) => {
+  const paymentMethod = request?.payment_method || request?.data?.payment_method || '';
+  return String(paymentMethod).trim().toLowerCase();
+};
+
+const resolveAcceptedRequestStatus = (request) => {
+  if (!request) return 'accepted';
+
+  const paymentMethod = getNormalizedRequestPaymentMethod(request);
+  const paymentStatus = String(request.payment_status || '').trim().toLowerCase();
+  const isCustomized = request.type === 'customized';
+
+  if (isCustomized && (paymentMethod === 'cod' || paymentStatus === 'paid')) {
+    return 'processing';
+  }
+
+  return 'accepted';
+};
+
 const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const getCustomerInitials = (name) => {
     if (!name) return '??';
@@ -1022,6 +1041,38 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     }
     setDeliveryOrPickup(request.delivery_method || 'delivery');
     setRequestStatusModalVisible(true);
+  };
+
+  const handleAcceptPendingRequest = async (request) => {
+    if (!request) return;
+
+    const nextStatus = resolveAcceptedRequestStatus(request);
+    const acceptedMessage = nextStatus === 'processing'
+      ? 'Your request #' + request.request_number + ' has been accepted and is now being prepared.'
+      : 'Your request #' + request.request_number + " has been accepted. We'll confirm the payment details and begin processing shortly.";
+
+    try {
+      await adminAPI.updateRequestStatus(request.id, nextStatus, {
+        notification: {
+          title: 'Request accepted',
+          message: acceptedMessage,
+          link: '/profile',
+          type: 'request_update',
+        },
+      });
+
+      Toast.show({
+        type: 'success',
+        text1: nextStatus === 'processing' ? 'Request Accepted and Processing' : 'Request Accepted',
+      });
+
+      setModalVisible(false);
+      setSelectedRequest(null);
+      await loadRequests();
+    } catch (error) {
+      console.error('Error accepting request:', error);
+      Toast.show({ type: 'error', text1: 'Failed to accept request' });
+    }
   };
 
   const confirmRequestStatusChange = async () => {
@@ -1668,17 +1719,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                     <>
                       <TouchableOpacity
                         style={[styles.actionButton, styles.acceptButton]}
-                        onPress={async () => {
-                          try {
-                            await adminAPI.updateRequestStatus(selectedRequest.id, 'accepted');
-                            Toast.show({ type: 'success', text1: 'Request Accepted' });
-                            setModalVisible(false);
-                            loadRequests();
-                          } catch (err) {
-                            console.error('Error accepting request:', err);
-                            Toast.show({ type: 'error', text1: 'Failed to accept request' });
-                          }
-                        }}
+                        onPress={() => handleAcceptPendingRequest(selectedRequest)}
                       >
                         <Text style={styles.buttonText}>Accept</Text>
                       </TouchableOpacity>
