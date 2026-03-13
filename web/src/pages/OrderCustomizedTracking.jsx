@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabase';
 import TrackingPaymentDetails from '../components/TrackingPaymentDetails';
+import DeliveryDestinationsSummary from '../components/DeliveryDestinationsSummary';
 import InfoModal from '../components/InfoModal';
 import { buildTimelineTimestampMap, formatTimelineTimestamp } from '../utils/timelineTimestamps';
 import '../styles/Shop.css';
@@ -126,6 +127,9 @@ const OrderCustomizedTracking = () => {
                 deliveryMethod: foundRequest.data?.delivery_method,
                 pickupTime: foundRequest.data?.pickup_time,
                 address: finalAddress,
+                multiDeliveryDestinations: Array.isArray(foundRequest.data?.multi_delivery_destinations)
+                    ? foundRequest.data.multi_delivery_destinations
+                    : [],
                 type: foundRequest.type,
                 requestData: foundRequest.data,
                 imageUrl: foundRequest.data?.items?.[0]?.image_url || foundRequest.image_url,
@@ -454,6 +458,13 @@ const OrderCustomizedTracking = () => {
                             shippingFee={request.shipping_fee}
                         />
 
+                        {request.deliveryMethod === 'delivery' && (
+                            <DeliveryDestinationsSummary
+                                destinations={request.multiDeliveryDestinations}
+                                title="Delivery Stops"
+                            />
+                        )}
+
                         <div className="tracking-timeline">
 
                             <h5 className="fw-bold mb-4">
@@ -653,4 +664,3 @@ const OrderCustomizedTracking = () => {
 };
 
 export default OrderCustomizedTracking;
-

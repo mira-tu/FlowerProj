@@ -1,10 +1,18 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import '../styles/Shop.css';
 import { supabase } from '../config/supabase';
 import InfoModal from '../components/InfoModal';
 import CheckoutAddressSelection from '../components/CheckoutAddressSelection';
+import MultiAddressDeliverySection from '../components/MultiAddressDeliverySection';
 import qrCodeImage from '../assets/qr-code-1.jpg';
+import {
+    buildAddressFeeMap,
+    buildMultiDeliveryDestinations,
+    calculateDeliveryFee,
+    createDeliveryAssignments,
+    syncDeliveryAssignments,
+} from '../utils/deliveryDestinations';
 
 const paymentMethods = [
     { id: 'gcash', name: 'GCash', description: 'Pay via GCash e-wallet', icon: 'fa-wallet' },
@@ -36,6 +44,10 @@ const CustomizedCheckout = ({ user }) => {
     const [selectedAddressId, setSelectedAddressId] = useState(null);
     const [dynamicShippingFee, setDynamicShippingFee] = useState(100);
     const [freeShippingThreshold, setFreeShippingThreshold] = useState(2000);
+    const [savedAddresses, setSavedAddresses] = useState([]);
+    const [barangayFees, setBarangayFees] = useState([]);
+    const [multiAddressEnabled, setMultiAddressEnabled] = useState(false);
+    const [deliveryAssignments, setDeliveryAssignments] = useState([]);
 
     useEffect(() => {
         const fetchThreshold = async () => {
@@ -53,6 +65,24 @@ const CustomizedCheckout = ({ user }) => {
             }
         };
         fetchThreshold();
+    }, []);
+
+    useEffect(() => {
+        const fetchBarangayFees = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('barangay_fee')
+                    .select('barangay_name, delivery_fee');
+
+                if (error) throw error;
+                setBarangayFees(data || []);
+            } catch (error) {
+                console.error('Error fetching barangay fees:', error);
+                setBarangayFees([]);
+            }
+        };
+
+        fetchBarangayFees();
     }, []);
 
     const showInfoModal = (title, message) => setInfoModal({ show: true, title, message });
@@ -97,8 +127,40 @@ const CustomizedCheckout = ({ user }) => {
         }
     }, []);
 
+    useEffect(() => {
+        if (deliveryMethod !== 'delivery') {
+            setMultiAddressEnabled(false);
+            return;
+        }
+
+        setDeliveryAssignments((prevAssignments) => {
+            if (!prevAssignments.length) {
+                return createDeliveryAssignments(checkoutItems, selectedAddressId);
+            }
+
+            return syncDeliveryAssignments(checkoutItems, prevAssignments, selectedAddressId);
+        });
+    }, [checkoutItems, deliveryMethod, selectedAddressId]);
+
+    const addressFeeMap = useMemo(
+        () => buildAddressFeeMap(savedAddresses, barangayFees),
+        [savedAddresses, barangayFees]
+    );
+
     const subtotal = checkoutItems.reduce((acc, item) => acc + (item.price * (item.qty || 1)), 0);
-    const shippingFee = deliveryMethod === 'pickup' ? 0 : (subtotal >= freeShippingThreshold ? 0 : dynamicShippingFee);
+    const shippingFee = deliveryMethod === 'pickup'
+        ? 0
+        : calculateDeliveryFee({
+            deliveryMethod,
+            subtotal,
+            freeShippingThreshold,
+            selectedAddressId,
+            multiAddressEnabled,
+            assignments: deliveryAssignments,
+            addressFeeMap: Object.keys(addressFeeMap).length
+                ? addressFeeMap
+                : { [selectedAddressId]: dynamicShippingFee },
+        });
     const total = subtotal + shippingFee;
 
     const handlePaymentChange = (paymentId) => {
@@ -136,12 +198,30 @@ const CustomizedCheckout = ({ user }) => {
             return;
         }
 
+        if (deliveryMethod === 'delivery' && multiAddressEnabled) {
+            const hasIncompleteAssignment = deliveryAssignments.some((assignment) => !assignment.addressId);
+            if (hasIncompleteAssignment) {
+                setInfoModal({ show: true, title: 'Notice', message: 'Please assign an address to every bouquet before placing your request.' });
+                return;
+            }
+        }
+
         if (selectedPayment === 'gcash' && !receiptFile) {
             setInfoModal({ show: true, title: 'Notice', message: 'Please upload your GCash payment receipt' });
             return;
         }
 
         setIsProcessing(true);
+
+        const multiDeliveryDestinations = deliveryMethod === 'delivery' && multiAddressEnabled
+            ? buildMultiDeliveryDestinations({
+                assignments: deliveryAssignments,
+                addresses: savedAddresses,
+                addressFeeMap: Object.keys(addressFeeMap).length
+                    ? addressFeeMap
+                    : { [selectedAddressId]: dynamicShippingFee },
+            })
+            : [];
 
         // 1. Upload receipt if GCash
         let uploadedReceiptUrl = null;
@@ -188,13 +268,14 @@ const CustomizedCheckout = ({ user }) => {
         // 3. Prepare the request data
         const request_number = `CUS-${user.id.substring(0, 4)}-${Date.now()}`;
         const payment_status = selectedPayment === 'gcash' ? 'waiting_for_confirmation' : 'to_pay';
+        const primaryDestination = multiDeliveryDestinations[0] || null;
 
         const newRequest = {
             request_number: request_number,
             user_id: user.id,
             type: 'customized',
             status: 'pending',
-            contact_number: address.phone,
+            contact_number: primaryDestination?.recipient_phone || address.phone,
             final_price: total,
             shipping_fee: shippingFee,
             receipt_url: uploadedReceiptUrl,
@@ -204,7 +285,8 @@ const CustomizedCheckout = ({ user }) => {
             data: {
                 items: uploadedItems,
                 address: deliveryMethod === 'delivery' ? address : null,
-                address_id: deliveryMethod === 'delivery' ? selectedAddressId : null,
+                address_id: deliveryMethod === 'delivery' ? (primaryDestination?.address_id || selectedAddressId) : null,
+                multi_delivery_destinations: multiDeliveryDestinations,
                 delivery_method: deliveryMethod,
                 pickup_time: deliveryMethod === 'pickup' ? `${selectedPickupDate} - ${selectedPickupTime}` : null,
                 payment_method: selectedPayment,
@@ -384,6 +466,19 @@ const CustomizedCheckout = ({ user }) => {
                                 selectedAddressId={selectedAddressId}
                                 setSelectedAddressId={setSelectedAddressId}
                                 showInfoModal={showInfoModal}
+                                onAddressesLoaded={setSavedAddresses}
+                            />
+                        )}
+
+                        {deliveryMethod === 'delivery' && (
+                            <MultiAddressDeliverySection
+                                checkoutItems={checkoutItems}
+                                savedAddresses={savedAddresses}
+                                selectedAddressId={selectedAddressId}
+                                enabled={multiAddressEnabled}
+                                setEnabled={setMultiAddressEnabled}
+                                assignments={deliveryAssignments}
+                                setAssignments={setDeliveryAssignments}
                             />
                         )}
 
@@ -504,6 +599,12 @@ const CustomizedCheckout = ({ user }) => {
                                 <span>{deliveryMethod === 'pickup' ? 'Pickup' : 'Shipping Fee'}</span>
                                 <span>{shippingFee === 0 ? 'FREE' : `₱${shippingFee}`}</span>
                             </div>
+                            {deliveryMethod === 'delivery' && multiAddressEnabled && (
+                                <div className="small mb-2" style={{ color: 'var(--shop-pink)' }}>
+                                    <i className="fas fa-route me-1"></i>
+                                    {new Set(deliveryAssignments.map((assignment) => String(assignment.addressId || '')).filter(Boolean)).size} delivery stop(s) in one transaction
+                                </div>
+                            )}
                             {deliveryMethod === 'pickup' && selectedPickupDate && selectedPickupTime && (
                                 <div className="small mb-2" style={{ color: 'var(--shop-pink)' }}>
                                     <i className="fas fa-clock me-1"></i>

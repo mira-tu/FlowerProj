@@ -97,7 +97,16 @@ const EmployeesTab = () => {
       loadData();
     } catch (error) {
       console.error('Full error object:', error);
-      Alert.alert('Error', error.message || error.error_description || JSON.stringify(error) || 'Failed to add employee');
+      let errorMsg = error.message || error.error_description || 'Failed to add employee';
+      if (error.context && typeof error.context.json === 'function') {
+        try {
+          const errorBody = await error.context.json();
+          errorMsg = errorBody.error || errorMsg;
+        } catch (e) {
+          // Ignore parse error
+        }
+      }
+      Alert.alert('Error', errorMsg);
     } finally {
       setLoading(false);
     }

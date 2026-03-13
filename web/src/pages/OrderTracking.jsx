@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabase';
 import TrackingPaymentDetails from '../components/TrackingPaymentDetails';
+import DeliveryDestinationsSummary from '../components/DeliveryDestinationsSummary';
 import InfoModal from '../components/InfoModal';
 import { buildTimelineTimestampMap, formatTimelineTimestamp } from '../utils/timelineTimestamps';
+import { parseOrderDeliveryDestinations } from '../utils/deliveryDestinations';
 import '../styles/Shop.css';
 
 // Timeline steps for Delivery Orders
@@ -105,6 +107,7 @@ const OrderTracking = ({ user }) => {
                 address: foundOrder.addresses,
                 deliveryMethod: foundOrder.delivery_method,
                 pickupTime: foundOrder.pickup_time,
+                multiDeliveryDestinations: parseOrderDeliveryDestinations(foundOrder),
             };
             setOrder(transformedOrder);
 
@@ -429,6 +432,13 @@ const OrderTracking = ({ user }) => {
                             setAdditionalFile={setAdditionalFile}
                             shippingFee={order.shipping_fee}
                         />
+
+                        {!isPickup && (
+                            <DeliveryDestinationsSummary
+                                destinations={order.multiDeliveryDestinations}
+                                title="Delivery Stops"
+                            />
+                        )}
 
                         <div className="tracking-timeline">
                             <h5 className="fw-bold mb-4">

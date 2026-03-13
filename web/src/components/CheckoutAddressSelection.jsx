@@ -10,7 +10,8 @@ const CheckoutAddressSelection = ({
     setAddress,
     selectedAddressId,
     setSelectedAddressId,
-    showInfoModal
+    showInfoModal,
+    onAddressesLoaded
 }) => {
     const [savedAddresses, setSavedAddresses] = useState([]);
     const [showAddressModal, setShowAddressModal] = useState(false);
@@ -64,6 +65,7 @@ const CheckoutAddressSelection = ({
 
                 const activeAddresses = data.filter(addr => !addr.label.startsWith('[DEL]'));
                 setSavedAddresses(activeAddresses);
+                onAddressesLoaded?.(activeAddresses);
 
                 if (activeAddresses && activeAddresses.length > 0) {
                     if (!selectedAddressId) {
@@ -85,6 +87,7 @@ const CheckoutAddressSelection = ({
                 }
             } else {
                 setSavedAddresses([]);
+                onAddressesLoaded?.([]);
                 setAddress({ name: '', phone: '', street: '', barangay: '', city: '', province: '' });
                 setSelectedAddressId(null);
             }
@@ -214,6 +217,7 @@ const CheckoutAddressSelection = ({
             const { data: newAddresses } = await supabase.from('addresses').select('*').eq('user_id', user.id);
             const activeAddresses = newAddresses.filter(addr => !addr.label.startsWith('[DEL]'));
             setSavedAddresses(activeAddresses);
+            onAddressesLoaded?.(activeAddresses);
 
             if (data && data.length > 0) {
                 handleAddressSelect(data[0].id, activeAddresses);

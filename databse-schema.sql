@@ -88,6 +88,7 @@ CREATE TABLE orders (
   delivery_method delivery_method NOT NULL,
   pickup_time VARCHAR(50),
   receipt_url VARCHAR(255),
+  notes TEXT,
   status order_status NOT NULL,
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id),

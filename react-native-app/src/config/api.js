@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 import { decode } from 'base64-arraybuffer';
+import { parseMultiDeliveryNotes } from '../utils/deliveryDestinations';
 
 const ADMIN_WORKFLOW_FUNCTION = 'manage-admin-workflows';
 
@@ -95,6 +96,42 @@ const parseJsonObject = (value) => {
     return typeof value === 'object' ? value : {};
 };
 
+const insertNotificationRecord = async (notification) => {
+    const { error } = await supabase
+        .from('notifications')
+        .insert([notification]);
+
+    if (error) {
+        throw error;
+    }
+};
+
+const maybeNotifyAssignedRider = async ({ entityType, record }) => {
+    if (!record?.assigned_rider) {
+        return;
+    }
+
+    const referenceNumber = entityType === 'request'
+        ? record?.request_number || record?.id
+        : record?.order_number || record?.id;
+
+    try {
+        await insertNotificationRecord({
+            user_id: record.assigned_rider,
+            title: 'New rider assignment',
+            message: entityType === 'request'
+                ? `You were assigned to handle request #${referenceNumber}.`
+                : `You were assigned to handle order #${referenceNumber}.`,
+            type: 'rider_assignment',
+            link: entityType === 'request'
+                ? `requests/${record.id}`
+                : `orders/${record.id}`,
+        });
+    } catch (error) {
+        console.error('Failed to send rider assignment notification:', error);
+    }
+};
+
 const withStatusTimestamp = (existingValue, status) => ({
     ...parseJsonObject(existingValue),
     [status]: new Date().toISOString(),
@@ -163,6 +200,11 @@ const assignOrderRiderDirect = async (orderId, riderId, thirdPartyName = null, t
     if (error) {
         throw error;
     }
+
+    await maybeNotifyAssignedRider({
+        entityType: 'order',
+        record: data,
+    });
 
     return { success: true, order: data };
 };
@@ -342,6 +384,11 @@ const assignRequestRiderDirect = async (requestId, riderId, thirdPartyName = nul
     if (error) {
         throw error;
     }
+
+    await maybeNotifyAssignedRider({
+        entityType: 'request',
+        record: data,
+    });
 
     return { success: true, request: data };
 };
@@ -747,50 +794,62 @@ export const authAPI = {
 // Admin API - AsyncStorage-based admin operations
 export const adminAPI = {
     getAllOrders: async (params) => {
-        let query = supabase
-            .from('orders')
-            .select(`
-                id,
-                created_at,
-                order_number,
-                status,
-                assigned_rider,
-                payment_status,
-                payment_method,
-                receipt_url,
-                additional_receipts,
-                pickup_time,
-                total,
-                subtotal,
-                shipping_fee,
-                delivery_method,
-                shipping_address: addresses!address_id(*),
-                users (
+        const buildOrdersQuery = (includeNotes = true) => {
+            let query = supabase
+                .from('orders')
+                .select(`
                     id,
-                    name,
-                    email,
-                    phone
-                ),
-                order_items (
-                    product_id,
-                    quantity,
-                    price,
-                    products (
+                    created_at,
+                    order_number,
+                    status,
+                    assigned_rider,
+                    payment_status,
+                    payment_method,
+                    receipt_url,
+                    additional_receipts,
+                    pickup_time,
+                    total,
+                    subtotal,
+                    shipping_fee,
+                    delivery_method,
+                    ${includeNotes ? 'notes,' : ''}
+                    shipping_address: addresses!address_id(*),
+                    users (
+                        id,
                         name,
-                        image_url
-                    )
-                ),
-                third_party_rider_name,
-                third_party_rider_info,
-                amount_received
-            `)
-            .order('created_at', { ascending: false });
+                        email,
+                        phone
+                    ),
+                    order_items (
+                        product_id,
+                        quantity,
+                        price,
+                        products (
+                            name,
+                            image_url
+                        )
+                    ),
+                    third_party_rider_name,
+                    third_party_rider_info,
+                    amount_received
+                `)
+                .order('created_at', { ascending: false });
 
-        if (params?.status) {
-            query = query.eq('status', params.status);
+            if (params?.status) {
+                query = query.eq('status', params.status);
+            }
+
+            return query;
+        };
+
+        let { data: orders, error } = await buildOrdersQuery(true);
+        const missingNotesColumn = error?.code === '42703'
+            && String(error?.message || '').includes('orders.notes');
+
+        if (missingNotesColumn) {
+            console.warn('Orders table is missing the notes column; retrying admin order fetch without it.');
+            ({ data: orders, error } = await buildOrdersQuery(false));
         }
-
-        const { data: orders, error } = await query;
 
         if (error) {
             console.error('Supabase query error for orders:', error);
@@ -798,6 +857,7 @@ export const adminAPI = {
         }
 
         const formattedOrders = orders.map(order => {
+            const parsedNotes = parseMultiDeliveryNotes(order.notes);
             const customerName = order.users ? order.users.name : 'N/A';
             const customerEmail = order.users ? order.users.email : 'N/A';
             const customerPhone = order.users ? order.users.phone : 'N/A';
@@ -819,10 +879,12 @@ export const adminAPI = {
 
             return {
                 ...order,
+                notes: parsedNotes.note,
                 customer_name: customerName,
                 customer_email: customerEmail,
                 customer_phone: customerPhone,
                 items: items,
+                multi_delivery_destinations: parsedNotes.destinations,
                 order_items: undefined, // Remove the raw order_items object
                 shipping_address: order.shipping_address ? { // Reconstruct shipping_address to add description
                     ...order.shipping_address,

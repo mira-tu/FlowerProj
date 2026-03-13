@@ -76,7 +76,7 @@ const LoginScreen = () => {
           <Text style={styles.shopName}>Jocerry's Flower Shop</Text>
           <Text style={styles.title}>Login</Text>
         </View>
-        <Text style={styles.subtitle}>FlowerForge Admin Dashboard</Text>
+        <Text style={styles.subtitle}>FlowerForge Admin and Employee Login</Text>
 
         {errorMessage ? (
           <View style={styles.errorContainer}>

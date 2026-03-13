@@ -12,7 +12,6 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-  Switch,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +22,7 @@ import styles from '../../AdminDashboard.styles';
 import { formatTimestamp, getPaymentStatusDisplay, getStatusLabel } from '../adminHelpers';
 import PaymentDetailsSection from '../components/PaymentDetailsSection';
 import { generateAndShareReceipt } from '../../../utils/receiptGenerator';
+import { groupDeliveryDestinations } from '../../../utils/deliveryDestinations';
 
 const getNormalizedPaymentMethod = (paymentMethod) => String(paymentMethod || '').trim().toLowerCase();
 
@@ -68,11 +68,6 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const [selectedRider, setSelectedRider] = useState(null);
   const [orderToAssignRider, setOrderToAssignRider] = useState(null);
   const [riderSearchQuery, setRiderSearchQuery] = useState('');
-
-  // Third party rider state
-  const [isThirdParty, setIsThirdParty] = useState(false);
-  const [thirdPartyName, setThirdPartyName] = useState('');
-  const [thirdPartyInfo, setThirdPartyInfo] = useState('');
 
   const filteredAndSortedRiders = React.useMemo(() => {
     let result = riders;
@@ -302,7 +297,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
     // Rider enforcement: If moving to out_for_delivery, must have a rider assigned
     if (nextStatus === 'out_for_delivery') {
-      const hasRider = order.rider || order.assigned_rider || order.third_party_rider_name;
+    const hasRider = order.rider || order.assigned_rider;
       if (!hasRider) {
         Alert.alert(
           "Rider Required",
@@ -345,7 +340,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     try {
       // Rider enforcement: If moving to out_for_delivery, must have a rider assigned
       if (selectedStatus === 'out_for_delivery') {
-        const hasRider = orderToUpdate.rider || orderToUpdate.assigned_rider || orderToUpdate.third_party_rider_name;
+      const hasRider = orderToUpdate.rider || orderToUpdate.assigned_rider;
         if (!hasRider) {
           Alert.alert(
             "Rider Required",
@@ -437,6 +432,8 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   };
 
   const EnhancedOrderCard = ({ item, onMessageCustomer, onPhoneCall, onAssignRider, onUpdateStatus, openReceiptModal, onPrintReceipt }) => {
+    const groupedDestinations = groupDeliveryDestinations(item.multi_delivery_destinations || []);
+
     return (
       <View style={styles.eoCard}>
         {/* Header */}
@@ -530,6 +527,31 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
           </View>
         </View>
 
+        {groupedDestinations.length > 0 && (
+          <View style={styles.eoSection}>
+            <View style={styles.eoSectionHeader}>
+              <Ionicons name="navigate-outline" size={16} color="#6B7280" />
+              <Text style={styles.eoSectionTitle}>Delivery Stops ({groupedDestinations.length})</Text>
+            </View>
+            {groupedDestinations.map((destination, index) => (
+              <View key={`${destination.recipientName}-${index}`} style={[styles.eoItemCard, index > 0 && { marginTop: 8 }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.eoItemName}>{destination.recipientName || `Stop ${index + 1}`}</Text>
+                  {destination.recipientPhone ? (
+                    <Text style={styles.eoItemQuantity}>Phone: {destination.recipientPhone}</Text>
+                  ) : null}
+                  {destination.addressText ? (
+                    <Text style={styles.eoInfoTextBold}>{destination.addressText}</Text>
+                  ) : null}
+                  <Text style={[styles.eoItemQuantity, { marginTop: 6 }]}>
+                    {destination.items.map((stopItem) => `${stopItem.itemName} #${stopItem.unitNumber}`).join(', ')}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
         {/* Items */}
         {item.items?.length > 0 && (
           <View style={styles.eoSection}>
@@ -576,23 +598,6 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
               <View style={[styles.eoPaymentStatus, { backgroundColor: '#3B82F6' }]}>
                 <Text style={styles.eoPaymentStatusText}>{item.rider.name}</Text>
               </View>
-            </View>
-          </View>
-        ) : item.third_party_rider_name ? (
-          <View style={styles.eoSection}>
-            <View style={styles.eoSectionHeader}>
-              <Ionicons name="bicycle-outline" size={16} color="#6B7280" />
-              <Text style={styles.eoSectionTitle}>Assigned Rider (Third Party)</Text>
-            </View>
-            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <View style={[styles.eoPaymentStatus, { backgroundColor: '#3B82F6' }]}>
-                <Text style={styles.eoPaymentStatusText}>{item.third_party_rider_name}</Text>
-              </View>
-              {item.third_party_rider_info ? (
-                <View style={[styles.eoPaymentStatus, { backgroundColor: '#6B7280' }]}>
-                  <Text style={styles.eoPaymentStatusText}>{item.third_party_rider_info}</Text>
-                </View>
-              ) : null}
             </View>
           </View>
         ) : null}
@@ -664,10 +669,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const handleAssignRider = (order) => {
     setOrderToAssignRider(order);
     setSelectedRider(order.rider); // pre-select if already assigned
-    // Reset third party state
-    setIsThirdParty(!!order.third_party_rider_name);
-    setThirdPartyName(order.third_party_rider_name || '');
-    setThirdPartyInfo(order.third_party_rider_info || '');
+    setRiderSearchQuery('');
     setAssignRiderModalVisible(true);
   };
 
@@ -677,18 +679,13 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
   const handleConfirmAssignRider = async () => {
     if (!orderToAssignRider) return;
-    if (!isThirdParty && !selectedRider) return;
-    if (isThirdParty && !thirdPartyName) {
-      Alert.alert('Error', 'Please enter rider name');
+    if (!selectedRider) {
+      Alert.alert('Error', 'Please select an employee rider.');
       return;
     }
 
     try {
-      if (isThirdParty) {
-        await adminAPI.assignRider(orderToAssignRider.id, null, thirdPartyName, thirdPartyInfo);
-      } else {
-        await adminAPI.assignRider(orderToAssignRider.id, selectedRider.id);
-      }
+      await adminAPI.assignRider(orderToAssignRider.id, selectedRider.id);
       Toast.show({ type: 'success', text1: 'Rider Assigned' });
       setAssignRiderModalVisible(false);
       loadOrders();
@@ -869,81 +866,42 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
           <View style={[styles.modalContent, { maxHeight: '70%' }]}>
             <Text style={styles.modalTitle}>Assign Rider</Text>
 
-
-            {/* Clean Search Bar */}
-            {!isThirdParty && (
-              <View style={styles.riderSearchContainer}>
-                <Ionicons name="search" size={20} color="#999" style={styles.riderSearchIcon} />
-                <TextInput
-                  style={styles.riderSearchInput}
-                  placeholder="Search riders..."
-                  placeholderTextColor="#999"
-                  value={riderSearchQuery}
-                  onChangeText={setRiderSearchQuery}
-                />
-              </View>
-            )}
-
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              <Text style={{ fontSize: 16, fontWeight: '500' }}>Third Party Rider?</Text>
-              <Switch
-                trackColor={{ false: "#767577", true: "#81b0ff" }}
-                thumbColor={isThirdParty ? "#f5dd4b" : "#f4f3f4"}
-                ios_backgroundColor="#3e3e3e"
-                onValueChange={setIsThirdParty}
-                value={isThirdParty}
+            <View style={styles.riderSearchContainer}>
+              <Ionicons name="search" size={20} color="#999" style={styles.riderSearchIcon} />
+              <TextInput
+                style={styles.riderSearchInput}
+                placeholder="Search riders..."
+                placeholderTextColor="#999"
+                value={riderSearchQuery}
+                onChangeText={setRiderSearchQuery}
               />
             </View>
 
-            {isThirdParty ? (
-              <View style={{ gap: 10, marginVertical: 10 }}>
-                <View>
-                  <Text style={{ marginBottom: 5, fontWeight: '500' }}>Rider Name *</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter rider name"
-                    value={thirdPartyName}
-                    onChangeText={setThirdPartyName}
-                  />
-                </View>
-                <View>
-                  <Text style={{ marginBottom: 5, fontWeight: '500' }}>Rider Info (Optional)</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Plate number, contact, etc."
-                    value={thirdPartyInfo}
-                    onChangeText={setThirdPartyInfo}
-                    multiline
-                  />
-                </View>
-              </View>
-            ) : (
-              <FlatList
-                data={filteredAndSortedRiders}
-                renderItem={({ item: rider }) => (
-                  <TouchableOpacity
-                    style={styles.radioButtonContainer}
-                    onPress={() => setSelectedRider(rider)}
-                  >
-                    <View style={[styles.radioButton, selectedRider?.id === rider.id && styles.radioButtonSelected]}>
-                      {selectedRider?.id === rider.id && <View style={styles.radioButtonInner} />}
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.riderName}>{rider.name}</Text>
-                      <Text style={styles.riderEmail}>{rider.phone}</Text>
-                    </View>
-                  </TouchableOpacity>
-                )}
-                keyExtractor={(item) => item.id.toString()}
-                ListEmptyComponent={<Text style={styles.emptyText}>No riders found.</Text>}
-                style={{ marginVertical: 10 }}
-              />
-            )}
+            <FlatList
+              data={filteredAndSortedRiders}
+              renderItem={({ item: rider }) => (
+                <TouchableOpacity
+                  style={styles.radioButtonContainer}
+                  onPress={() => setSelectedRider(rider)}
+                >
+                  <View style={[styles.radioButton, selectedRider?.id === rider.id && styles.radioButtonSelected]}>
+                    {selectedRider?.id === rider.id && <View style={styles.radioButtonInner} />}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.riderName}>{rider.name}</Text>
+                    <Text style={styles.riderEmail}>{rider.phone}</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+              keyExtractor={(item) => item.id.toString()}
+              ListEmptyComponent={<Text style={styles.emptyText}>No riders found.</Text>}
+              style={{ marginVertical: 10 }}
+            />
             <View style={styles.modalButtons}>
-              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={() => { setAssignRiderModalVisible(false); setRiderSearchQuery(''); }}>
+              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={() => { setAssignRiderModalVisible(false); setRiderSearchQuery(''); setSelectedRider(null); }}>
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalButton, styles.saveButton]} onPress={handleConfirmAssignRider} disabled={(!isThirdParty && !selectedRider) || (isThirdParty && !thirdPartyName)}>
+              <TouchableOpacity style={[styles.modalButton, styles.saveButton]} onPress={handleConfirmAssignRider} disabled={!selectedRider}>
                 <Text style={styles.buttonText}>Confirm</Text>
               </TouchableOpacity>
             </View>

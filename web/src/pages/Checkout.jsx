@@ -1,10 +1,19 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import '../styles/Shop.css';
 import { supabase } from '../config/supabase';
 import InfoModal from '../components/InfoModal';
 import CheckoutAddressSelection from '../components/CheckoutAddressSelection';
+import MultiAddressDeliverySection from '../components/MultiAddressDeliverySection';
 import qrCodeImage from '../assets/qr-code-1.jpg';
+import {
+    buildAddressFeeMap,
+    buildMultiDeliveryDestinations,
+    calculateDeliveryFee,
+    createDeliveryAssignments,
+    serializeMultiDeliveryNotes,
+    syncDeliveryAssignments,
+} from '../utils/deliveryDestinations';
 
 const paymentMethods = [
     { id: 'cod', name: 'Cash on Delivery', description: 'Pay when you receive', icon: 'fa-money-bill-wave' },
@@ -12,6 +21,45 @@ const paymentMethods = [
 ];
 
 const pickupTimes = ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM'];
+
+const isMissingOrdersNotesColumnError = (error) => (
+    error?.code === 'PGRST204'
+    && typeof error?.message === 'string'
+    && error.message.includes("'notes'")
+    && error.message.includes("'orders'")
+);
+
+const insertOrderWithNotesFallback = async (orderPayload) => {
+    const insertOrder = (payload) => (
+        supabase
+            .from('orders')
+            .insert([payload])
+            .select()
+            .single()
+    );
+
+    const result = await insertOrder(orderPayload);
+
+    if (!isMissingOrdersNotesColumnError(result.error)) {
+        return {
+            ...result,
+            usedNotesFallback: false,
+        };
+    }
+
+    const payloadWithoutNotes = { ...orderPayload };
+    delete payloadWithoutNotes.notes;
+
+    // Keep checkout working against older schemas until the migration is applied.
+    console.warn("orders.notes is missing from the database schema. Retrying order creation without notes.");
+
+    const retryResult = await insertOrder(payloadWithoutNotes);
+
+    return {
+        ...retryResult,
+        usedNotesFallback: true,
+    };
+};
 
 const Checkout = ({ setCart, user }) => {
     const navigate = useNavigate();
@@ -40,6 +88,9 @@ const Checkout = ({ setCart, user }) => {
     const [selectedAddressId, setSelectedAddressId] = useState(null);
     const [dynamicShippingFee, setDynamicShippingFee] = useState(100);
     const [freeShippingThreshold, setFreeShippingThreshold] = useState(2000);
+    const [barangayFees, setBarangayFees] = useState([]);
+    const [multiAddressEnabled, setMultiAddressEnabled] = useState(false);
+    const [deliveryAssignments, setDeliveryAssignments] = useState([]);
 
     useEffect(() => {
         const fetchThreshold = async () => {
@@ -57,7 +108,27 @@ const Checkout = ({ setCart, user }) => {
             }
         };
         fetchThreshold();
-    }, []); useEffect(() => {
+    }, []);
+
+    useEffect(() => {
+        const fetchBarangayFees = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('barangay_fee')
+                    .select('barangay_name, delivery_fee');
+
+                if (error) throw error;
+                setBarangayFees(data || []);
+            } catch (error) {
+                console.error('Error fetching barangay fees:', error);
+                setBarangayFees([]);
+            }
+        };
+
+        fetchBarangayFees();
+    }, []);
+
+    useEffect(() => {
         const fetchFee = async () => {
             if (deliveryMethod === 'delivery' && address.barangay) {
                 const { data, error } = await supabase
@@ -101,8 +172,40 @@ const Checkout = ({ setCart, user }) => {
         }
     }, []);
 
+    useEffect(() => {
+        if (deliveryMethod !== 'delivery') {
+            setMultiAddressEnabled(false);
+            return;
+        }
+
+        setDeliveryAssignments((prevAssignments) => {
+            if (!prevAssignments.length) {
+                return createDeliveryAssignments(checkoutItems, selectedAddressId);
+            }
+
+            return syncDeliveryAssignments(checkoutItems, prevAssignments, selectedAddressId);
+        });
+    }, [checkoutItems, deliveryMethod, selectedAddressId]);
+
+    const addressFeeMap = useMemo(
+        () => buildAddressFeeMap(savedAddresses, barangayFees),
+        [savedAddresses, barangayFees]
+    );
+
     const subtotal = checkoutItems.reduce((acc, item) => acc + (item.price * (item.qty || 1)), 0);
-    const shippingFee = deliveryMethod === 'pickup' ? 0 : (subtotal >= freeShippingThreshold ? 0 : dynamicShippingFee);
+    const shippingFee = deliveryMethod === 'pickup'
+        ? 0
+        : calculateDeliveryFee({
+            deliveryMethod,
+            subtotal,
+            freeShippingThreshold,
+            selectedAddressId,
+            multiAddressEnabled,
+            assignments: deliveryAssignments,
+            addressFeeMap: Object.keys(addressFeeMap).length
+                ? addressFeeMap
+                : { [selectedAddressId]: dynamicShippingFee },
+        });
     const total = subtotal + shippingFee;
 
     const handlePaymentChange = (paymentId) => {
@@ -147,6 +250,14 @@ const Checkout = ({ setCart, user }) => {
             return;
         }
 
+        if (deliveryMethod === 'delivery' && multiAddressEnabled) {
+            const hasIncompleteAssignment = deliveryAssignments.some((assignment) => !assignment.addressId);
+            if (hasIncompleteAssignment) {
+                showInfoModal('Address Assignment Required', 'Please assign an address to every bouquet before placing your order.');
+                return;
+            }
+        }
+
         if (selectedPayment === 'gcash' && !receiptFile) {
             showInfoModal('Receipt Required', 'Please upload your GCash payment receipt screenshot before placing your order.');
             return;
@@ -155,6 +266,20 @@ const Checkout = ({ setCart, user }) => {
         setIsProcessing(true);
 
         let finalAddressId = selectedAddressId;
+
+        const multiDeliveryDestinations = deliveryMethod === 'delivery' && multiAddressEnabled
+            ? buildMultiDeliveryDestinations({
+                assignments: deliveryAssignments,
+                addresses: savedAddresses,
+                addressFeeMap: Object.keys(addressFeeMap).length
+                    ? addressFeeMap
+                    : { [selectedAddressId]: dynamicShippingFee },
+            })
+            : [];
+
+        if (multiDeliveryDestinations.length > 0) {
+            finalAddressId = multiDeliveryDestinations[0]?.address_id || selectedAddressId;
+        }
 
         let uploadedReceiptUrl = null;
         if (receiptFile && selectedPayment === 'gcash') {
@@ -203,13 +328,12 @@ const Checkout = ({ setCart, user }) => {
             delivery_method: deliveryMethod,
             pickup_time: deliveryMethod === 'pickup' ? `${selectedPickupDate} - ${selectedPickupTime}` : null,
             receipt_url: uploadedReceiptUrl,
+            notes: serializeMultiDeliveryNotes({
+                destinations: multiDeliveryDestinations,
+            }),
         };
 
-        const { data, error } = await supabase
-            .from('orders')
-            .insert([newOrder])
-            .select()
-            .single();
+        const { data, error, usedNotesFallback } = await insertOrderWithNotesFallback(newOrder);
 
         if (error) {
             console.error('Error creating order:', error);
@@ -217,6 +341,11 @@ const Checkout = ({ setCart, user }) => {
             setIsProcessing(false);
             return;
         }
+
+        if (usedNotesFallback && multiDeliveryDestinations.length > 0) {
+            console.warn('Multi-address delivery details were not saved on the order because orders.notes is not available yet.');
+        }
+
         const newOrderId = data.id; // Correct: Use data.id for the internal ID
         const newOrderNumber = data.order_number; // Correct: Use data.order_number for the human-readable number
 
@@ -306,6 +435,7 @@ const Checkout = ({ setCart, user }) => {
                     user_email: user.email,
                     delivery_method: deliveryMethod,
                     address: deliveryMethod === 'delivery' ? address : null,
+                    multi_delivery_destinations: multiDeliveryDestinations,
                     pickup_time: deliveryMethod === 'pickup' ? `${selectedPickupDate} - ${selectedPickupTime}` : null,
                 },
             });
@@ -454,6 +584,19 @@ const Checkout = ({ setCart, user }) => {
                                 selectedAddressId={selectedAddressId}
                                 setSelectedAddressId={setSelectedAddressId}
                                 showInfoModal={showInfoModal}
+                                onAddressesLoaded={setSavedAddresses}
+                            />
+                        )}
+
+                        {deliveryMethod === 'delivery' && (
+                            <MultiAddressDeliverySection
+                                checkoutItems={checkoutItems}
+                                savedAddresses={savedAddresses}
+                                selectedAddressId={selectedAddressId}
+                                enabled={multiAddressEnabled}
+                                setEnabled={setMultiAddressEnabled}
+                                assignments={deliveryAssignments}
+                                setAssignments={setDeliveryAssignments}
                             />
                         )}
 
@@ -589,6 +732,12 @@ const Checkout = ({ setCart, user }) => {
                                 <span>{deliveryMethod === 'pickup' ? 'Pickup' : 'Shipping Fee'}</span>
                                 <span>{shippingFee === 0 ? 'FREE' : `₱${shippingFee}`}</span>
                             </div>
+                            {deliveryMethod === 'delivery' && multiAddressEnabled && (
+                                <div className="small mb-2" style={{ color: 'var(--shop-pink)' }}>
+                                    <i className="fas fa-route me-1"></i>
+                                    {new Set(deliveryAssignments.map((assignment) => String(assignment.addressId || '')).filter(Boolean)).size} delivery stop(s) in one transaction
+                                </div>
+                            )}
                             {deliveryMethod === 'pickup' && selectedPickupTime && (
                                 <div className="small mb-2" style={{ color: 'var(--shop-pink)' }}>
                                     <i className="fas fa-clock me-1"></i>

@@ -22,6 +22,7 @@ import CatalogueTab from './admin/tabs/CatalogueTab';
 import ContactTab from './admin/tabs/ContactTab';
 import EmployeesTab from './admin/tabs/EmployeesTab';
 import MessagingTab from './admin/tabs/MessagingTab';
+import NotificationsTab from './admin/tabs/NotificationsTab';
 import DeliveryFeesTab from './admin/tabs/DeliveryFeesTab';
 import OrdersTab from './admin/tabs/OrdersTab';
 import RequestsTab from './admin/tabs/RequestsTab';
@@ -37,7 +38,25 @@ const AdminDashboard = () => {
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [unreadMessageCount, setUnreadMessageCount] = useState(0);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [customerToMessage, setCustomerToMessage] = useState(null);
+
+  const refreshUnreadNotificationCount = async (userId = currentUser?.id) => {
+    if (!userId) return;
+
+    try {
+      const { count, error } = await supabase
+        .from('notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('is_read', false);
+
+      if (error) throw error;
+      setUnreadNotificationCount(count || 0);
+    } catch (error) {
+      console.error('Error fetching unread notification count:', error);
+    }
+  };
 
   useEffect(() => {
     const checkUserAndSubscribe = async () => {
@@ -96,6 +115,31 @@ const AdminDashboard = () => {
     };
   }, [currentUser]);
 
+  useEffect(() => {
+    if (!currentUser?.id) return;
+
+    refreshUnreadNotificationCount(currentUser.id);
+
+    const channel = supabase.channel(`public:notifications:${currentUser.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${currentUser.id}`,
+        },
+        () => {
+          refreshUnreadNotificationCount(currentUser.id);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser?.id]);
+
   const performLogout = async () => {
     try {
       await authAPI.logout();
@@ -130,6 +174,14 @@ const AdminDashboard = () => {
         return <DeliveryFeesTab />;
       case 'messaging':
         return <MessagingTab customerToMessage={customerToMessage} setCustomerToMessage={setCustomerToMessage} />;
+      case 'notifications':
+        return (
+          <NotificationsTab
+            currentUser={currentUser}
+            setActiveTab={setActiveTab}
+            refreshUnreadCount={() => refreshUnreadNotificationCount(currentUser?.id)}
+          />
+        );
       case 'sales':
         return <SalesTab />;
       case 'about':
@@ -159,7 +211,12 @@ const AdminDashboard = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <AdminHeader onMenuPress={() => setMenuVisible(true)} onLogoutPress={showLogoutConfirm} />
+      <AdminHeader
+        currentUser={currentUser}
+        onMenuPress={() => setMenuVisible(true)}
+        onNotificationsPress={() => setActiveTab('notifications')}
+        unreadNotificationCount={unreadNotificationCount}
+      />
 
       <View style={styles.content}>
         {renderTabContent()}

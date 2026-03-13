@@ -1,5 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { Buffer } from "node:buffer";
+import nodemailer from "npm:nodemailer@6.9.7";
+
+globalThis.Buffer = Buffer;
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -10,7 +14,19 @@ const CORS_HEADERS = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const GMAIL_USER = Deno.env.get("GMAIL_USER") ?? "";
+const GMAIL_APP_PASSWORD = Deno.env.get("GMAIL_APP_PASSWORD") ?? "";
 const ALLOWED_ROLES = new Set(["admin", "employee"]);
+
+const transporter = GMAIL_USER && GMAIL_APP_PASSWORD
+  ? nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: GMAIL_USER,
+        pass: GMAIL_APP_PASSWORD,
+      },
+    })
+  : null;
 
 const json = (status: number, payload: Record<string, unknown>) =>
   new Response(JSON.stringify(payload), {
@@ -36,6 +52,104 @@ const withStatusTimestamp = (value: unknown, status: string) => {
     ...(timestamps && typeof timestamps === "object" ? timestamps : {}),
     [status]: new Date().toISOString(),
   };
+};
+
+const insertNotificationSafely = async (
+  adminClient: ReturnType<typeof createClient>,
+  notification: Record<string, unknown>,
+) => {
+  const { error } = await adminClient.from("notifications").insert([notification]);
+
+  if (error) {
+    console.error("Failed to insert notification:", error);
+  }
+};
+
+const sendAssignmentEmailSafely = async ({
+  recipientEmail,
+  recipientName,
+  entityType,
+  referenceNumber,
+}: {
+  recipientEmail?: string | null;
+  recipientName?: string | null;
+  entityType: "order" | "request";
+  referenceNumber: string;
+}) => {
+  if (!recipientEmail || !transporter || !GMAIL_USER) {
+    return;
+  }
+
+  const label = entityType === "request" ? "request" : "order";
+  const subject =
+    entityType === "request"
+      ? `New delivery assignment: Request #${referenceNumber}`
+      : `New delivery assignment: Order #${referenceNumber}`;
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+      <h2 style="color: #ec4899;">New Delivery Assignment</h2>
+      <p>Hi ${recipientName || "Team Member"},</p>
+      <p>You have been assigned to handle ${label} <strong>#${referenceNumber}</strong>.</p>
+      <p>Please open the employee app and check your notifications to view the full ${label} details.</p>
+      <p>Thank you.</p>
+      <p>Joccery's Flower Shop</p>
+    </div>
+  `;
+
+  try {
+    await transporter.sendMail({
+      from: `"Joccery's Flower Shop" <${GMAIL_USER}>`,
+      to: recipientEmail,
+      subject,
+      html,
+    });
+  } catch (error) {
+    console.error("Failed to send rider assignment email:", error);
+  }
+};
+
+const notifyAssignedRider = async (
+  adminClient: ReturnType<typeof createClient>,
+  entityType: "order" | "request",
+  record: Record<string, unknown> | null | undefined,
+) => {
+  if (!record?.assigned_rider) {
+    return;
+  }
+
+  const referenceNumber =
+    entityType === "request"
+      ? record.request_number || record.id
+      : record.order_number || record.id;
+
+  const { data: assignedUser, error: assignedUserError } = await adminClient
+    .from("users")
+    .select("email, name")
+    .eq("id", record.assigned_rider)
+    .maybeSingle();
+
+  if (assignedUserError) {
+    console.error("Failed to load assigned rider details:", assignedUserError);
+  }
+
+  await insertNotificationSafely(adminClient, {
+    user_id: record.assigned_rider,
+    title: "New rider assignment",
+    message:
+      entityType === "request"
+        ? `You were assigned to handle request #${referenceNumber}.`
+        : `You were assigned to handle order #${referenceNumber}.`,
+    type: "rider_assignment",
+    link: entityType === "request" ? `requests/${record.id}` : `orders/${record.id}`,
+  });
+
+  await sendAssignmentEmailSafely({
+    recipientEmail: assignedUser?.email,
+    recipientName: assignedUser?.name,
+    entityType,
+    referenceNumber: String(referenceNumber),
+  });
 };
 
 serve(async (req) => {
@@ -189,6 +303,8 @@ serve(async (req) => {
         if (error) {
           throw error;
         }
+
+        await notifyAssignedRider(adminClient, "order", order);
 
         return json(200, { success: true, order });
       }
@@ -403,6 +519,8 @@ serve(async (req) => {
         if (error) {
           throw error;
         }
+
+        await notifyAssignedRider(adminClient, "request", request);
 
         return json(200, { success: true, request });
       }
