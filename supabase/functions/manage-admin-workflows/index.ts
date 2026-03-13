@@ -17,6 +17,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "
 const GMAIL_USER = Deno.env.get("GMAIL_USER") ?? "";
 const GMAIL_APP_PASSWORD = Deno.env.get("GMAIL_APP_PASSWORD") ?? "";
 const ALLOWED_ROLES = new Set(["admin", "employee"]);
+const MULTI_DELIVERY_NOTES_PREFIX = "[multi_delivery_v1]";
 
 const transporter = GMAIL_USER && GMAIL_APP_PASSWORD
   ? nodemailer.createTransport({
@@ -44,6 +45,122 @@ const parseMaybeJson = (value: unknown) => {
   } catch {
     return {};
   }
+};
+
+const parseMultiDeliveryNotes = (notes: unknown) => {
+  if (typeof notes !== "string" || !notes.startsWith(MULTI_DELIVERY_NOTES_PREFIX)) {
+    return {
+      note: typeof notes === "string" ? notes : "",
+      destinations: [] as Record<string, unknown>[],
+    };
+  }
+
+  try {
+    const payload = JSON.parse(notes.slice(MULTI_DELIVERY_NOTES_PREFIX.length));
+    return {
+      note: typeof payload?.note === "string" ? payload.note : "",
+      destinations: Array.isArray(payload?.destinations)
+        ? payload.destinations as Record<string, unknown>[]
+        : [],
+    };
+  } catch {
+    return {
+      note: typeof notes === "string" ? notes : "",
+      destinations: [] as Record<string, unknown>[],
+    };
+  }
+};
+
+const serializeMultiDeliveryNotes = ({
+  destinations = [],
+  note = "",
+}: {
+  destinations?: Record<string, unknown>[];
+  note?: string | null;
+}) => {
+  const cleanDestinations = Array.isArray(destinations) ? destinations.filter(Boolean) : [];
+  const cleanNote = String(note ?? "").trim();
+
+  if (!cleanDestinations.length) {
+    return cleanNote || null;
+  }
+
+  return `${MULTI_DELIVERY_NOTES_PREFIX}${JSON.stringify({
+    note: cleanNote,
+    destinations: cleanDestinations,
+  })}`;
+};
+
+const buildStopAssignmentLookup = (stopAssignments: unknown) => {
+  const lookup = new Map<string, string | null>();
+
+  if (!Array.isArray(stopAssignments)) {
+    return lookup;
+  }
+
+  stopAssignments.forEach((assignment) => {
+    const riderId = assignment?.riderId ? String(assignment.riderId) : null;
+    const unitKeys = Array.isArray(assignment?.unitKeys) ? assignment.unitKeys : [];
+
+    unitKeys.forEach((unitKey) => {
+      const normalizedUnitKey = String(unitKey ?? "").trim();
+      if (normalizedUnitKey) {
+        lookup.set(normalizedUnitKey, riderId);
+      }
+    });
+  });
+
+  return lookup;
+};
+
+const applyStopAssignmentsToDestinations = (
+  destinations: Record<string, unknown>[],
+  stopAssignments: unknown,
+) => {
+  const assignmentLookup = buildStopAssignmentLookup(stopAssignments);
+
+  return destinations.map((destination) => {
+    const unitKey = String(destination?.unit_key ?? "").trim();
+    if (!assignmentLookup.has(unitKey)) {
+      return destination;
+    }
+
+    return {
+      ...destination,
+      assigned_rider_id: assignmentLookup.get(unitKey) ?? null,
+    };
+  });
+};
+
+const getUniqueAssignedRiderIds = (destinations: Record<string, unknown>[]) =>
+  Array.from(
+    new Set(
+      destinations
+        .map((destination) => String(destination?.assigned_rider_id ?? "").trim())
+        .filter(Boolean),
+    ),
+  );
+
+const buildDestinationGroupKey = (destination: Record<string, unknown>) => {
+  const snapshot = destination?.address_snapshot && typeof destination.address_snapshot === "object"
+    ? destination.address_snapshot as Record<string, unknown>
+    : {};
+  const addressText = [
+    snapshot.street,
+    snapshot.barangay,
+    snapshot.city,
+    snapshot.province,
+    snapshot.zip,
+  ]
+    .filter(Boolean)
+    .join("|");
+
+  return [
+    destination?.address_id ?? "",
+    destination?.recipient_name ?? "",
+    destination?.recipient_phone ?? "",
+    addressText,
+  ].join("|");
 };
 
 const withStatusTimestamp = (value: unknown, status: string) => {
@@ -150,6 +267,100 @@ const notifyAssignedRider = async (
     entityType,
     referenceNumber: String(referenceNumber),
   });
+};
+
+const notifyAssignedOrderStopRiders = async (
+  adminClient: ReturnType<typeof createClient>,
+  order: Record<string, unknown> | null | undefined,
+  destinations: Record<string, unknown>[],
+) => {
+  if (!order?.id || !order?.order_number) {
+    return;
+  }
+
+  const riderIds = getUniqueAssignedRiderIds(destinations);
+
+  for (const riderId of riderIds) {
+    const stopCount = new Set(
+      destinations
+        .filter((destination) => String(destination?.assigned_rider_id ?? "") === riderId)
+        .map((destination) => buildDestinationGroupKey(destination)),
+    ).size || 1;
+
+    const { data: assignedUser, error: assignedUserError } = await adminClient
+      .from("users")
+      .select("email, name")
+      .eq("id", riderId)
+      .maybeSingle();
+
+    if (assignedUserError) {
+      console.error("Failed to load stop rider details:", assignedUserError);
+    }
+
+    await insertNotificationSafely(adminClient, {
+      user_id: riderId,
+      title: "New rider assignment",
+      message: stopCount > 1
+        ? `You were assigned to ${stopCount} delivery stops for order #${order.order_number}.`
+        : `You were assigned to a delivery stop for order #${order.order_number}.`,
+      type: "rider_assignment",
+      link: `orders/${order.id}`,
+    });
+
+    await sendAssignmentEmailSafely({
+      recipientEmail: assignedUser?.email,
+      recipientName: assignedUser?.name,
+      entityType: "order",
+      referenceNumber: String(order.order_number),
+    });
+  }
+};
+
+const notifyAssignedRequestStopRiders = async (
+  adminClient: ReturnType<typeof createClient>,
+  request: Record<string, unknown> | null | undefined,
+  destinations: Record<string, unknown>[],
+) => {
+  if (!request?.id || !request?.request_number) {
+    return;
+  }
+
+  const riderIds = getUniqueAssignedRiderIds(destinations);
+
+  for (const riderId of riderIds) {
+    const stopCount = new Set(
+      destinations
+        .filter((destination) => String(destination?.assigned_rider_id ?? "") === riderId)
+        .map((destination) => buildDestinationGroupKey(destination)),
+    ).size || 1;
+
+    const { data: assignedUser, error: assignedUserError } = await adminClient
+      .from("users")
+      .select("email, name")
+      .eq("id", riderId)
+      .maybeSingle();
+
+    if (assignedUserError) {
+      console.error("Failed to load request stop rider details:", assignedUserError);
+    }
+
+    await insertNotificationSafely(adminClient, {
+      user_id: riderId,
+      title: "New rider assignment",
+      message: stopCount > 1
+        ? `You were assigned to ${stopCount} delivery stops for request #${request.request_number}.`
+        : `You were assigned to a delivery stop for request #${request.request_number}.`,
+      type: "rider_assignment",
+      link: `requests/${request.id}`,
+    });
+
+    await sendAssignmentEmailSafely({
+      recipientEmail: assignedUser?.email,
+      recipientName: assignedUser?.name,
+      entityType: "request",
+      referenceNumber: String(request.request_number),
+    });
+  }
 };
 
 serve(async (req) => {
@@ -305,6 +516,56 @@ serve(async (req) => {
         }
 
         await notifyAssignedRider(adminClient, "order", order);
+
+        return json(200, { success: true, order });
+      }
+
+      case "assign_order_stop_riders": {
+        const orderId = body?.orderId;
+        const stopAssignments = body?.stopAssignments;
+
+        if (!orderId) {
+          return json(400, { error: "Order id is required." });
+        }
+
+        const { data: currentOrder, error: fetchError } = await adminClient
+          .from("orders")
+          .select("id, order_number, notes")
+          .eq("id", orderId)
+          .single();
+
+        if (fetchError) {
+          throw fetchError;
+        }
+
+        const parsedNotes = parseMultiDeliveryNotes(currentOrder?.notes);
+        if (!parsedNotes.destinations.length) {
+          return json(400, { error: "This order does not have multiple delivery stops to assign." });
+        }
+
+        const updatedDestinations = applyStopAssignmentsToDestinations(parsedNotes.destinations, stopAssignments);
+        const assignedRiderIds = getUniqueAssignedRiderIds(updatedDestinations);
+
+        const { data: order, error } = await adminClient
+          .from("orders")
+          .update({
+            notes: serializeMultiDeliveryNotes({
+              destinations: updatedDestinations,
+              note: parsedNotes.note,
+            }),
+            assigned_rider: assignedRiderIds.length === 1 ? assignedRiderIds[0] : null,
+            third_party_rider_name: null,
+            third_party_rider_info: null,
+          })
+          .eq("id", orderId)
+          .select()
+          .single();
+
+        if (error) {
+          throw error;
+        }
+
+        await notifyAssignedOrderStopRiders(adminClient, order, updatedDestinations);
 
         return json(200, { success: true, order });
       }
@@ -521,6 +782,60 @@ serve(async (req) => {
         }
 
         await notifyAssignedRider(adminClient, "request", request);
+
+        return json(200, { success: true, request });
+      }
+
+      case "assign_request_stop_riders": {
+        const requestId = body?.requestId;
+        const stopAssignments = body?.stopAssignments;
+
+        if (!requestId) {
+          return json(400, { error: "Request id is required." });
+        }
+
+        const { data: currentRequest, error: fetchError } = await adminClient
+          .from("requests")
+          .select("id, request_number, data")
+          .eq("id", requestId)
+          .single();
+
+        if (fetchError) {
+          throw fetchError;
+        }
+
+        const currentData = parseMaybeJson(currentRequest?.data);
+        const currentDestinations = Array.isArray(currentData?.multi_delivery_destinations)
+          ? currentData.multi_delivery_destinations
+          : [];
+
+        if (!currentDestinations.length) {
+          return json(400, { error: "This request does not have multiple delivery stops to assign." });
+        }
+
+        const updatedDestinations = applyStopAssignmentsToDestinations(currentDestinations, stopAssignments);
+        const assignedRiderIds = getUniqueAssignedRiderIds(updatedDestinations);
+
+        const { data: request, error } = await adminClient
+          .from("requests")
+          .update({
+            data: {
+              ...(currentData && typeof currentData === "object" ? currentData : {}),
+              multi_delivery_destinations: updatedDestinations,
+            },
+            assigned_rider: assignedRiderIds.length === 1 ? assignedRiderIds[0] : null,
+            third_party_rider_name: null,
+            third_party_rider_info: null,
+          })
+          .eq("id", requestId)
+          .select()
+          .single();
+
+        if (error) {
+          throw error;
+        }
+
+        await notifyAssignedRequestStopRiders(adminClient, request, updatedDestinations);
 
         return json(200, { success: true, request });
       }

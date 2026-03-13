@@ -13,6 +13,7 @@ import { supabase } from '../../../config/supabase';
 import RiderAssignmentPreview from '../components/RiderAssignmentPreview';
 import styles from '../../AdminDashboard.styles';
 import { formatTimestamp, getPaymentStatusDisplay, getStatusColor, getStatusLabel } from '../adminHelpers';
+import { groupDeliveryDestinations, parseMultiDeliveryNotes } from '../../../utils/deliveryDestinations';
 
 const ORDER_DETAIL_SELECT = `
   id,
@@ -26,6 +27,7 @@ const ORDER_DETAIL_SELECT = `
   subtotal,
   shipping_fee,
   delivery_method,
+  notes,
   amount_received,
   shipping_address: addresses!address_id(*),
   users (
@@ -153,12 +155,20 @@ const formatRequestTypeLabel = (requestType) => {
   return getStatusLabel(requestType);
 };
 
-const buildOrderPreview = (order) => {
+const buildOrderPreview = (order, currentUserId = null) => {
   const items = (order.order_items || []).map((item) => ({
     label: `${item.quantity} x ${item.products?.name || 'Unknown Product'}`,
     secondary: formatCurrency(item.price),
     imageUri: toAbsoluteImageUrl(item.products?.image_url),
   }));
+  const parsedNotes = parseMultiDeliveryNotes(order.notes);
+  const assignedStops = currentUserId
+    ? groupDeliveryDestinations(
+        parsedNotes.destinations.filter(
+          (destination) => String(destination?.assigned_rider_id || '') === String(currentUserId)
+        )
+      )
+    : [];
 
   let shippingAddressDescription = null;
   if (order.shipping_address) {
@@ -202,6 +212,17 @@ const buildOrderPreview = (order) => {
           },
         ]),
       },
+      ...(assignedStops.length
+        ? [{
+            title: 'Assigned delivery stops',
+            rows: assignedStops.map((stop, index) => ({
+              label: `Stop ${index + 1}`,
+              value: [stop.addressText, stop.items.map((item) => `${item.itemName} #${item.unitNumber}`).join(', ')]
+                .filter(Boolean)
+                .join(' | '),
+            })),
+          }]
+        : []),
     ],
     itemsTitle: 'Items',
     items,
@@ -493,7 +514,7 @@ const NotificationsTab = ({ currentUser, setActiveTab, refreshUnreadCount }) => 
 
         setPreviewByNotificationId((currentPreviews) => ({
           ...currentPreviews,
-          [notificationId]: buildOrderPreview(data),
+          [notificationId]: buildOrderPreview(data, currentUser?.id),
         }));
       } else if (target.entityType === 'request') {
         const { data, error } = await supabase

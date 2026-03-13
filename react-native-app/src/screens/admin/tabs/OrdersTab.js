@@ -68,9 +68,11 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const [selectedRider, setSelectedRider] = useState(null);
   const [orderToAssignRider, setOrderToAssignRider] = useState(null);
   const [riderSearchQuery, setRiderSearchQuery] = useState('');
+  const [selectedStopGroupKey, setSelectedStopGroupKey] = useState(null);
+  const [stopRiderAssignments, setStopRiderAssignments] = useState({});
 
   const filteredAndSortedRiders = React.useMemo(() => {
-    let result = riders;
+    let result = [...riders];
     if (riderSearchQuery) {
       result = result.filter(rider =>
         rider.name.toLowerCase().includes(riderSearchQuery.toLowerCase()) ||
@@ -80,6 +82,53 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     result.sort((a, b) => a.name.localeCompare(b.name));
     return result;
   }, [riders, riderSearchQuery]);
+
+  const riderLookup = React.useMemo(
+    () => Object.fromEntries(riders.map((rider) => [String(rider.id), rider])),
+    [riders]
+  );
+
+  const getGroupedDestinations = React.useCallback(
+    (order) => groupDeliveryDestinations(order?.multi_delivery_destinations || []),
+    []
+  );
+
+  const getInitialStopRiderAssignments = React.useCallback((order) => {
+    const groupedDestinations = getGroupedDestinations(order);
+    const fallbackRiderId = order?.assigned_rider ? String(order.assigned_rider) : '';
+
+    return Object.fromEntries(
+      groupedDestinations.map((group) => [
+        group.groupKey,
+        group.assignedRiderIds?.[0] || fallbackRiderId || '',
+      ])
+    );
+  }, [getGroupedDestinations]);
+
+  const getAssignedRiderNamesForGroup = React.useCallback((group, order) => {
+    const explicitRiderIds = Array.isArray(group?.assignedRiderIds) ? group.assignedRiderIds : [];
+    const fallbackRiderId = explicitRiderIds.length
+      ? null
+      : (order?.assigned_rider ? String(order.assigned_rider) : null);
+    const riderIds = explicitRiderIds.length ? explicitRiderIds : (fallbackRiderId ? [fallbackRiderId] : []);
+
+    return riderIds
+      .map((riderId) => riderLookup[String(riderId)]?.name)
+      .filter(Boolean);
+  }, [riderLookup]);
+
+  const hasRequiredRiderAssignments = React.useCallback((order) => {
+    const groupedDestinations = getGroupedDestinations(order);
+
+    if (!groupedDestinations.length) {
+      return Boolean(order?.rider || order?.assigned_rider);
+    }
+
+    return groupedDestinations.every((group) => {
+      const assignedNames = getAssignedRiderNamesForGroup(group, order);
+      return assignedNames.length > 0;
+    });
+  }, [getAssignedRiderNamesForGroup, getGroupedDestinations]);
 
   const ordersWithRiderDetails = React.useMemo(() => {
     if (!orders.length || !riders.length) {
@@ -297,11 +346,11 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
     // Rider enforcement: If moving to out_for_delivery, must have a rider assigned
     if (nextStatus === 'out_for_delivery') {
-    const hasRider = order.rider || order.assigned_rider;
+      const hasRider = hasRequiredRiderAssignments(order);
       if (!hasRider) {
         Alert.alert(
           "Rider Required",
-          "Please assign a rider before moving this order to Out for Delivery."
+          "Please assign a rider to every delivery stop before moving this order to Out for Delivery."
         );
         return;
       }
@@ -340,11 +389,11 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     try {
       // Rider enforcement: If moving to out_for_delivery, must have a rider assigned
       if (selectedStatus === 'out_for_delivery') {
-      const hasRider = orderToUpdate.rider || orderToUpdate.assigned_rider;
+        const hasRider = hasRequiredRiderAssignments(orderToUpdate);
         if (!hasRider) {
           Alert.alert(
             "Rider Required",
-            "Please assign a rider before moving this order to Out for Delivery."
+            "Please assign a rider to every delivery stop before moving this order to Out for Delivery."
           );
           return;
         }
@@ -432,7 +481,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   };
 
   const EnhancedOrderCard = ({ item, onMessageCustomer, onPhoneCall, onAssignRider, onUpdateStatus, openReceiptModal, onPrintReceipt }) => {
-    const groupedDestinations = groupDeliveryDestinations(item.multi_delivery_destinations || []);
+    const groupedDestinations = getGroupedDestinations(item);
 
     return (
       <View style={styles.eoCard}>
@@ -533,8 +582,11 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
               <Ionicons name="navigate-outline" size={16} color="#6B7280" />
               <Text style={styles.eoSectionTitle}>Delivery Stops ({groupedDestinations.length})</Text>
             </View>
-            {groupedDestinations.map((destination, index) => (
-              <View key={`${destination.recipientName}-${index}`} style={[styles.eoItemCard, index > 0 && { marginTop: 8 }]}>
+            {groupedDestinations.map((destination, index) => {
+              const assignedRiderNames = getAssignedRiderNamesForGroup(destination, item);
+
+              return (
+              <View key={destination.groupKey || `${destination.recipientName}-${index}`} style={[styles.eoItemCard, index > 0 && { marginTop: 8 }]}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.eoItemName}>{destination.recipientName || `Stop ${index + 1}`}</Text>
                   {destination.recipientPhone ? (
@@ -546,9 +598,15 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                   <Text style={[styles.eoItemQuantity, { marginTop: 6 }]}>
                     {destination.items.map((stopItem) => `${stopItem.itemName} #${stopItem.unitNumber}`).join(', ')}
                   </Text>
+                  <View style={styles.eoStopAssignmentRow}>
+                    <Ionicons name="bicycle-outline" size={14} color={assignedRiderNames.length ? '#2563EB' : '#F97316'} />
+                    <Text style={[styles.eoStopAssignmentText, !assignedRiderNames.length && styles.eoStopAssignmentTextPending]}>
+                      {assignedRiderNames.length ? assignedRiderNames.join(', ') : 'Rider not assigned yet'}
+                    </Text>
+                  </View>
                 </View>
               </View>
-            ))}
+            )})}
           </View>
         )}
 
@@ -588,7 +646,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
         )}
 
         {/* Assigned Rider Info */}
-        {item.rider ? (
+        {item.rider && groupedDestinations.length === 0 ? (
           <View style={styles.eoSection}>
             <View style={styles.eoSectionHeader}>
               <Ionicons name="bicycle-outline" size={16} color="#6B7280" />
@@ -648,7 +706,7 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
               {item.delivery_method === 'delivery' && item.status === 'processing' && (
                 <TouchableOpacity style={[styles.eoMainBtn, { backgroundColor: '#10B981', marginTop: 10 }]} onPress={() => onAssignRider(item)}>
                   <Ionicons name="person-add-outline" size={18} color="#fff" />
-                  <Text style={styles.eoMainBtnText}>Assign Rider</Text>
+                  <Text style={styles.eoMainBtnText}>{groupedDestinations.length > 0 ? 'Assign Stop Riders' : 'Assign Rider'}</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -666,11 +724,66 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     }
   };
 
-  const handleAssignRider = (order) => {
-    setOrderToAssignRider(order);
-    setSelectedRider(order.rider); // pre-select if already assigned
+  const closeAssignRiderModal = () => {
+    setAssignRiderModalVisible(false);
+    setOrderToAssignRider(null);
+    setSelectedRider(null);
+    setSelectedStopGroupKey(null);
+    setStopRiderAssignments({});
     setRiderSearchQuery('');
+  };
+
+  const handleAssignRider = (order) => {
+    const groupedDestinations = getGroupedDestinations(order);
+    setOrderToAssignRider(order);
+    setRiderSearchQuery('');
+    if (groupedDestinations.length > 0) {
+      const initialAssignments = getInitialStopRiderAssignments(order);
+      const firstGroup = groupedDestinations[0] || null;
+      const initialRiderId = firstGroup ? initialAssignments[firstGroup.groupKey] : '';
+
+      setStopRiderAssignments(initialAssignments);
+      setSelectedStopGroupKey(firstGroup?.groupKey || null);
+      setSelectedRider(initialRiderId ? riderLookup[String(initialRiderId)] || null : null);
+    } else {
+      setStopRiderAssignments({});
+      setSelectedStopGroupKey(null);
+      setSelectedRider(order.rider || null);
+    }
     setAssignRiderModalVisible(true);
+  };
+
+  const handleSelectStopGroup = (group) => {
+    const riderId = stopRiderAssignments[group.groupKey] || '';
+    setSelectedStopGroupKey(group.groupKey);
+    setSelectedRider(riderId ? riderLookup[String(riderId)] || null : null);
+  };
+
+  const handleSelectRider = (rider) => {
+    if (orderToAssignRider && getGroupedDestinations(orderToAssignRider).length > 0) {
+      if (!selectedStopGroupKey) {
+        return;
+      }
+
+      setStopRiderAssignments((currentAssignments) => ({
+        ...currentAssignments,
+        [selectedStopGroupKey]: rider.id,
+      }));
+    }
+
+    setSelectedRider(rider);
+  };
+
+  const handleClearStopRider = () => {
+    if (!selectedStopGroupKey) {
+      return;
+    }
+
+    setStopRiderAssignments((currentAssignments) => ({
+      ...currentAssignments,
+      [selectedStopGroupKey]: '',
+    }));
+    setSelectedRider(null);
   };
 
   const handleMessageCustomer = (customerId, customerName, customerEmail) => {
@@ -679,18 +792,35 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
   const handleConfirmAssignRider = async () => {
     if (!orderToAssignRider) return;
-    if (!selectedRider) {
-      Alert.alert('Error', 'Please select an employee rider.');
-      return;
-    }
 
     try {
-      await adminAPI.assignRider(orderToAssignRider.id, selectedRider.id);
-      Toast.show({ type: 'success', text1: 'Rider Assigned' });
-      setAssignRiderModalVisible(false);
+      const groupedDestinations = getGroupedDestinations(orderToAssignRider);
+
+      if (groupedDestinations.length > 0) {
+        const stopAssignments = groupedDestinations.map((group) => ({
+          unitKeys: group.unitKeys,
+          riderId: stopRiderAssignments[group.groupKey] || null,
+        }));
+
+        await adminAPI.assignOrderStopRiders(orderToAssignRider.id, stopAssignments);
+        Toast.show({ type: 'success', text1: 'Delivery stop riders updated' });
+      } else {
+        if (!selectedRider) {
+          Alert.alert('Error', 'Please select an employee rider.');
+          return;
+        }
+
+        await adminAPI.assignRider(orderToAssignRider.id, selectedRider.id);
+        Toast.show({ type: 'success', text1: 'Rider Assigned' });
+      }
+
+      closeAssignRiderModal();
       loadOrders();
     } catch (error) {
-      Toast.show({ type: 'error', text1: 'Assignment Failed' });
+      console.error('Error assigning rider:', error);
+      const errorMessage = error?.message || 'Failed to assign rider.';
+      Toast.show({ type: 'error', text1: 'Assignment Failed', text2: errorMessage });
+      Alert.alert('Assignment Failed', errorMessage);
     }
   };
 
@@ -775,6 +905,18 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       Toast.show({ type: 'error', text1: 'Failed to reject receipt' });
     }
   };
+
+  const assignableStopGroups = React.useMemo(
+    () => (orderToAssignRider ? getGroupedDestinations(orderToAssignRider) : []),
+    [getGroupedDestinations, orderToAssignRider]
+  );
+
+  const selectedStopGroup = React.useMemo(
+    () => assignableStopGroups.find((group) => group.groupKey === selectedStopGroupKey) || assignableStopGroups[0] || null,
+    [assignableStopGroups, selectedStopGroupKey]
+  );
+
+  const isStopAssignmentMode = assignableStopGroups.length > 0;
 
   if (loading && !refreshing) {
     return (
@@ -863,45 +1005,134 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       {/* Assign Rider Modal */}
       <Modal visible={assignRiderModalVisible} animationType="fade" transparent>
         <View style={styles.modalContainer}>
-          <View style={[styles.modalContent, { maxHeight: '70%' }]}>
-            <Text style={styles.modalTitle}>Assign Rider</Text>
+          <View style={[styles.modalContent, styles.assignRiderModalContent]}>
+            <Text style={styles.modalTitle}>{isStopAssignmentMode ? 'Assign Delivery Stop Riders' : 'Assign Rider'}</Text>
+            <View style={styles.assignRiderModalBody}>
+              {isStopAssignmentMode && (
+                <>
+                  <Text style={styles.stopAssignmentHelpText}>
+                    Choose a delivery stop first, then select the employee rider for that stop.
+                  </Text>
 
-            <View style={styles.riderSearchContainer}>
-              <Ionicons name="search" size={20} color="#999" style={styles.riderSearchIcon} />
-              <TextInput
-                style={styles.riderSearchInput}
-                placeholder="Search riders..."
-                placeholderTextColor="#999"
-                value={riderSearchQuery}
-                onChangeText={setRiderSearchQuery}
+                  <ScrollView
+                    style={styles.stopAssignmentList}
+                    contentContainerStyle={styles.stopAssignmentListContent}
+                    nestedScrollEnabled
+                    showsVerticalScrollIndicator={assignableStopGroups.length > 3}
+                  >
+                    {assignableStopGroups.map((group, index) => {
+                      const assignedNames = getAssignedRiderNamesForGroup({
+                        ...group,
+                        assignedRiderIds: stopRiderAssignments[group.groupKey]
+                          ? [String(stopRiderAssignments[group.groupKey])]
+                          : group.assignedRiderIds,
+                      }, orderToAssignRider);
+                      const isActive = selectedStopGroup?.groupKey === group.groupKey;
+
+                      return (
+                        <TouchableOpacity
+                          key={group.groupKey || `${group.recipientName}-${index}`}
+                          style={[styles.stopAssignmentRow, isActive && styles.stopAssignmentRowActive]}
+                          onPress={() => handleSelectStopGroup(group)}
+                          activeOpacity={0.9}
+                        >
+                          <View style={[styles.stopAssignmentIndicator, isActive && styles.stopAssignmentIndicatorActive]}>
+                            {isActive ? <View style={styles.stopAssignmentIndicatorInner} /> : null}
+                          </View>
+                          <View style={styles.stopAssignmentRowContent}>
+                            <Text style={styles.stopAssignmentRowTitle} numberOfLines={1}>
+                              {`Stop ${index + 1} - ${group.recipientName || `Delivery stop ${index + 1}`}`}
+                            </Text>
+                            {group.addressText ? (
+                              <Text style={styles.stopAssignmentRowSubtitle} numberOfLines={1}>
+                                {group.addressText}
+                              </Text>
+                            ) : null}
+                            <Text style={[styles.stopAssignmentRowMeta, !assignedNames.length && styles.stopAssignmentRowMetaPending]}>
+                              {assignedNames.length ? `Rider: ${assignedNames.join(', ')}` : 'Rider: Not assigned'}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </>
+              )}
+
+              <View style={styles.riderSearchContainer}>
+                <Ionicons name="search" size={20} color="#999" style={styles.riderSearchIcon} />
+                <TextInput
+                  style={styles.riderSearchInput}
+                  placeholder="Search riders..."
+                  placeholderTextColor="#999"
+                  value={riderSearchQuery}
+                  onChangeText={setRiderSearchQuery}
+                />
+              </View>
+
+              {isStopAssignmentMode && selectedStopGroup ? (
+                <View style={styles.stopAssignmentSummary}>
+                  <View style={styles.stopAssignmentSummaryHeader}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.stopAssignmentSelectionLabel}>Selected stop</Text>
+                      <Text style={styles.stopAssignmentSelectionTitle} numberOfLines={1}>
+                        {selectedStopGroup.recipientName || 'Delivery stop'}
+                      </Text>
+                    </View>
+                    <TouchableOpacity onPress={handleClearStopRider}>
+                      <Text style={styles.stopAssignmentClearText}>Clear</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {selectedStopGroup.addressText ? (
+                    <Text style={styles.stopAssignmentSelectionAddress} numberOfLines={1}>
+                      {selectedStopGroup.addressText}
+                    </Text>
+                  ) : null}
+                  <Text
+                    style={[
+                      styles.stopAssignmentSummaryStatus,
+                      !selectedRider && styles.stopAssignmentSummaryStatusPending,
+                    ]}
+                  >
+                    {selectedRider
+                      ? `Selected rider: ${selectedRider.name}`
+                      : 'No rider selected'}
+                  </Text>
+                </View>
+              ) : null}
+
+              <FlatList
+                data={filteredAndSortedRiders}
+                renderItem={({ item: rider }) => (
+                  <TouchableOpacity
+                    style={styles.radioButtonContainer}
+                    onPress={() => handleSelectRider(rider)}
+                  >
+                    <View style={[styles.radioButton, selectedRider?.id === rider.id && styles.radioButtonSelected]}>
+                      {selectedRider?.id === rider.id && <View style={styles.radioButtonInner} />}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.riderName}>{rider.name}</Text>
+                      <Text style={styles.riderEmail}>{rider.phone}</Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
+                keyExtractor={(item) => item.id.toString()}
+                ListEmptyComponent={<Text style={styles.assignRiderEmptyText}>No riders found.</Text>}
+                style={styles.assignRiderList}
+                contentContainerStyle={styles.assignRiderListContent}
+                keyboardShouldPersistTaps="handled"
               />
             </View>
-
-            <FlatList
-              data={filteredAndSortedRiders}
-              renderItem={({ item: rider }) => (
-                <TouchableOpacity
-                  style={styles.radioButtonContainer}
-                  onPress={() => setSelectedRider(rider)}
-                >
-                  <View style={[styles.radioButton, selectedRider?.id === rider.id && styles.radioButtonSelected]}>
-                    {selectedRider?.id === rider.id && <View style={styles.radioButtonInner} />}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.riderName}>{rider.name}</Text>
-                    <Text style={styles.riderEmail}>{rider.phone}</Text>
-                  </View>
-                </TouchableOpacity>
-              )}
-              keyExtractor={(item) => item.id.toString()}
-              ListEmptyComponent={<Text style={styles.emptyText}>No riders found.</Text>}
-              style={{ marginVertical: 10 }}
-            />
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={() => { setAssignRiderModalVisible(false); setRiderSearchQuery(''); setSelectedRider(null); }}>
+            <View style={[styles.modalButtons, styles.assignRiderFooter]}>
+              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={closeAssignRiderModal}>
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalButton, styles.saveButton]} onPress={handleConfirmAssignRider} disabled={!selectedRider}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.saveButton]}
+                onPress={handleConfirmAssignRider}
+                disabled={!selectedRider && !isStopAssignmentMode}
+              >
                 <Text style={styles.buttonText}>Confirm</Text>
               </TouchableOpacity>
             </View>

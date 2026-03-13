@@ -1,7 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 import { decode } from 'base64-arraybuffer';
-import { parseMultiDeliveryNotes } from '../utils/deliveryDestinations';
+import {
+    groupDeliveryDestinations,
+    parseMultiDeliveryNotes,
+    serializeMultiDeliveryNotes,
+} from '../utils/deliveryDestinations';
 
 const ADMIN_WORKFLOW_FUNCTION = 'manage-admin-workflows';
 
@@ -96,6 +100,50 @@ const parseJsonObject = (value) => {
     return typeof value === 'object' ? value : {};
 };
 
+const buildStopAssignmentLookup = (stopAssignments = []) => {
+    const lookup = new Map();
+
+    (Array.isArray(stopAssignments) ? stopAssignments : []).forEach((assignment) => {
+        const riderId = assignment?.riderId ? String(assignment.riderId) : null;
+        const unitKeys = Array.isArray(assignment?.unitKeys) ? assignment.unitKeys : [];
+
+        unitKeys.forEach((unitKey) => {
+            const normalizedUnitKey = String(unitKey || '').trim();
+            if (normalizedUnitKey) {
+                lookup.set(normalizedUnitKey, riderId);
+            }
+        });
+    });
+
+    return lookup;
+};
+
+const applyStopAssignmentsToDestinations = (destinations = [], stopAssignments = []) => {
+    const assignmentLookup = buildStopAssignmentLookup(stopAssignments);
+
+    return (Array.isArray(destinations) ? destinations : []).map((destination) => {
+        const unitKey = String(destination?.unit_key || '').trim();
+
+        if (!assignmentLookup.has(unitKey)) {
+            return destination;
+        }
+
+        const assignedRiderId = assignmentLookup.get(unitKey);
+        return {
+            ...destination,
+            assigned_rider_id: assignedRiderId || null,
+        };
+    });
+};
+
+const getUniqueAssignedRiderIds = (destinations = []) => Array.from(
+    new Set(
+        (Array.isArray(destinations) ? destinations : [])
+            .map((destination) => String(destination?.assigned_rider_id || '').trim())
+            .filter(Boolean)
+    )
+);
+
 const insertNotificationRecord = async (notification) => {
     const { error } = await supabase
         .from('notifications')
@@ -103,6 +151,64 @@ const insertNotificationRecord = async (notification) => {
 
     if (error) {
         throw error;
+    }
+};
+
+const maybeNotifyAssignedStopRiders = async ({ order, destinations }) => {
+    if (!order?.id || !order?.order_number) {
+        return;
+    }
+
+    const riderIds = getUniqueAssignedRiderIds(destinations);
+
+    for (const riderId of riderIds) {
+        const riderStops = groupDeliveryDestinations(
+            (destinations || []).filter((destination) => String(destination?.assigned_rider_id || '') === riderId)
+        );
+        const stopCount = riderStops.length || 1;
+
+        try {
+            await insertNotificationRecord({
+                user_id: riderId,
+                title: 'New rider assignment',
+                message: stopCount > 1
+                    ? `You were assigned to ${stopCount} delivery stops for order #${order.order_number}.`
+                    : `You were assigned to a delivery stop for order #${order.order_number}.`,
+                type: 'rider_assignment',
+                link: `orders/${order.id}`,
+            });
+        } catch (error) {
+            console.error('Failed to send delivery stop notification:', error);
+        }
+    }
+};
+
+const maybeNotifyAssignedRequestStopRiders = async ({ request, destinations }) => {
+    if (!request?.id || !request?.request_number) {
+        return;
+    }
+
+    const riderIds = getUniqueAssignedRiderIds(destinations);
+
+    for (const riderId of riderIds) {
+        const riderStops = groupDeliveryDestinations(
+            (destinations || []).filter((destination) => String(destination?.assigned_rider_id || '') === riderId)
+        );
+        const stopCount = riderStops.length || 1;
+
+        try {
+            await insertNotificationRecord({
+                user_id: riderId,
+                title: 'New rider assignment',
+                message: stopCount > 1
+                    ? `You were assigned to ${stopCount} delivery stops for request #${request.request_number}.`
+                    : `You were assigned to a delivery stop for request #${request.request_number}.`,
+                type: 'rider_assignment',
+                link: `requests/${request.id}`,
+            });
+        } catch (error) {
+            console.error('Failed to send request stop notification:', error);
+        }
     }
 };
 
@@ -207,6 +313,91 @@ const assignOrderRiderDirect = async (orderId, riderId, thirdPartyName = null, t
     });
 
     return { success: true, order: data };
+};
+
+const assignOrderStopRidersDirect = async (orderId, stopAssignments = []) => {
+    const { data: currentOrder, error: fetchError } = await supabase
+        .from('orders')
+        .select('id, order_number, notes')
+        .eq('id', orderId)
+        .single();
+
+    if (fetchError) {
+        throw fetchError;
+    }
+
+    const parsedNotes = parseMultiDeliveryNotes(currentOrder?.notes);
+    if (!parsedNotes.destinations.length) {
+        throw new Error('This order does not have multiple delivery stops to assign.');
+    }
+
+    const updatedDestinations = applyStopAssignmentsToDestinations(parsedNotes.destinations, stopAssignments);
+    const assignedRiderIds = getUniqueAssignedRiderIds(updatedDestinations);
+
+    const updatedNotes = serializeMultiDeliveryNotes({
+        destinations: updatedDestinations,
+        note: parsedNotes.note,
+    });
+    const nextAssignedRider = assignedRiderIds.length === 1 ? assignedRiderIds[0] : null;
+
+    const { error } = await supabase
+        .from('orders')
+        .update({
+            notes: updatedNotes,
+            assigned_rider: nextAssignedRider,
+            third_party_rider_name: null,
+            third_party_rider_info: null,
+        })
+        .eq('id', orderId);
+
+    if (error) {
+        throw error;
+    }
+
+    const { data: refreshedOrder, error: refreshError } = await supabase
+        .from('orders')
+        .select('id, order_number, notes, assigned_rider, third_party_rider_name, third_party_rider_info')
+        .eq('id', orderId)
+        .maybeSingle();
+
+    if (refreshError) {
+        console.warn('Could not reload order after stop rider assignment:', refreshError.message);
+    }
+
+    const orderRecord = refreshedOrder || {
+        ...currentOrder,
+        notes: updatedNotes,
+        assigned_rider: nextAssignedRider,
+        third_party_rider_name: null,
+        third_party_rider_info: null,
+    };
+
+    const persistedDestinations = parseMultiDeliveryNotes(orderRecord?.notes).destinations;
+    const expectedAssignments = buildStopAssignmentLookup(stopAssignments);
+    const assignmentsPersisted = Array.isArray(persistedDestinations)
+        && persistedDestinations.every((destination) => {
+            const unitKey = String(destination?.unit_key || '').trim();
+            if (!expectedAssignments.has(unitKey)) {
+                return true;
+            }
+
+            const expectedRiderId = expectedAssignments.get(unitKey);
+            const actualRiderId = destination?.assigned_rider_id ? String(destination.assigned_rider_id) : null;
+            return actualRiderId === expectedRiderId;
+        });
+
+    if (!refreshedOrder || !assignmentsPersisted) {
+        throw new Error(
+            'Different rider assignments were not saved. The updated manage-admin-workflows function still needs to be deployed to Supabase.'
+        );
+    }
+
+    await maybeNotifyAssignedStopRiders({
+        order: orderRecord,
+        destinations: updatedDestinations,
+    });
+
+    return { success: true, order: orderRecord };
 };
 
 const provideQuoteDirect = async (id, price, shippingFee = 0, quoteBreakdown = null) => {
@@ -391,6 +582,97 @@ const assignRequestRiderDirect = async (requestId, riderId, thirdPartyName = nul
     });
 
     return { success: true, request: data };
+};
+
+const assignRequestStopRidersDirect = async (requestId, stopAssignments = []) => {
+    const { data: currentRequest, error: fetchError } = await supabase
+        .from('requests')
+        .select('id, request_number, data, assigned_rider, third_party_rider_name, third_party_rider_info')
+        .eq('id', requestId)
+        .single();
+
+    if (fetchError) {
+        throw fetchError;
+    }
+
+    const currentData = parseJsonObject(currentRequest?.data);
+    const currentDestinations = Array.isArray(currentData?.multi_delivery_destinations)
+        ? currentData.multi_delivery_destinations
+        : [];
+
+    if (!currentDestinations.length) {
+        throw new Error('This request does not have multiple delivery stops to assign.');
+    }
+
+    const updatedDestinations = applyStopAssignmentsToDestinations(currentDestinations, stopAssignments);
+    const assignedRiderIds = getUniqueAssignedRiderIds(updatedDestinations);
+    const nextAssignedRider = assignedRiderIds.length === 1 ? assignedRiderIds[0] : null;
+    const updatedData = {
+        ...currentData,
+        multi_delivery_destinations: updatedDestinations,
+    };
+
+    const { error } = await supabase
+        .from('requests')
+        .update({
+            data: updatedData,
+            assigned_rider: nextAssignedRider,
+            third_party_rider_name: null,
+            third_party_rider_info: null,
+        })
+        .eq('id', requestId);
+
+    if (error) {
+        throw error;
+    }
+
+    const { data: refreshedRequest, error: refreshError } = await supabase
+        .from('requests')
+        .select('id, request_number, data, assigned_rider, third_party_rider_name, third_party_rider_info')
+        .eq('id', requestId)
+        .maybeSingle();
+
+    if (refreshError) {
+        console.warn('Could not reload request after stop rider assignment:', refreshError.message);
+    }
+
+    const requestRecord = refreshedRequest || {
+        ...currentRequest,
+        data: updatedData,
+        assigned_rider: nextAssignedRider,
+        third_party_rider_name: null,
+        third_party_rider_info: null,
+    };
+
+    const persistedData = parseJsonObject(requestRecord?.data);
+    const persistedDestinations = Array.isArray(persistedData?.multi_delivery_destinations)
+        ? persistedData.multi_delivery_destinations
+        : [];
+    const expectedAssignments = buildStopAssignmentLookup(stopAssignments);
+    const assignmentsPersisted = Array.isArray(persistedDestinations)
+        && persistedDestinations.every((destination) => {
+            const unitKey = String(destination?.unit_key || '').trim();
+            if (!expectedAssignments.has(unitKey)) {
+                return true;
+            }
+
+            const expectedRiderId = expectedAssignments.get(unitKey);
+            const actualRiderId = destination?.assigned_rider_id ? String(destination.assigned_rider_id) : null;
+            return actualRiderId === expectedRiderId;
+        });
+
+    if (!refreshedRequest || !assignmentsPersisted) {
+        throw new Error(
+            'Different rider assignments were not saved. The updated manage-admin-workflows function still needs to be deployed to Supabase.'
+        );
+    }
+
+    await maybeNotifyAssignedRequestStopRiders({
+        request: requestRecord,
+        destinations: updatedDestinations,
+    });
+
+    return { success: true, request: requestRecord };
 };
 
 // Products API
@@ -971,6 +1253,20 @@ export const adminAPI = {
         }
     },
 
+    assignOrderStopRiders: async (orderId, stopAssignments = []) => {
+        try {
+            const data = await invokeAdminWorkflow('assign_order_stop_riders', {
+                orderId,
+                stopAssignments,
+            });
+            return { data };
+        } catch (error) {
+            if (!shouldFallbackToDirectWorkflow(error)) throw error;
+            console.warn('Falling back to direct delivery stop assignment:', error.message);
+            return { data: await assignOrderStopRidersDirect(orderId, stopAssignments) };
+        }
+    },
+
     getStats: async () => {
         const { count: completedOrders, error: completedOrdersError } = await supabase
             .from('orders')
@@ -1362,6 +1658,20 @@ export const adminAPI = {
             if (!shouldFallbackToDirectWorkflow(error)) throw error;
             console.warn('Falling back to direct request rider assignment:', error.message);
             return { data: await assignRequestRiderDirect(requestId, riderId, thirdPartyName, thirdPartyInfo) };
+        }
+    },
+
+    assignRequestStopRiders: async (requestId, stopAssignments = []) => {
+        try {
+            const data = await invokeAdminWorkflow('assign_request_stop_riders', {
+                requestId,
+                stopAssignments,
+            });
+            return { data };
+        } catch (error) {
+            if (!shouldFallbackToDirectWorkflow(error)) throw error;
+            console.warn('Falling back to direct request stop assignment:', error.message);
+            return { data: await assignRequestStopRidersDirect(requestId, stopAssignments) };
         }
     },
 

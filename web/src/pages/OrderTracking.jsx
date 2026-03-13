@@ -437,6 +437,7 @@ const OrderTracking = ({ user }) => {
                             <DeliveryDestinationsSummary
                                 destinations={order.multiDeliveryDestinations}
                                 title="Delivery Stops"
+                                fallbackRider={order.rider}
                             />
                         )}
 

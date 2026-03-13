@@ -26,6 +26,36 @@ const requestPickupSteps = [
     { id: 5, key: 'completed', title: 'Picked up', description: 'Your request has been picked up.', icon: 'fa-check-circle' },
 ];
 
+const getCustomizedTrackingItems = (request) => {
+    const sourceItems = Array.isArray(request?.requestData?.items)
+        ? request.requestData.items.filter(Boolean)
+        : [];
+
+    if (sourceItems.length) {
+        return sourceItems.map((item, index) => ({
+            key: item.id || item.listId || `${request?.id || 'customized'}-${index}`,
+            name: item.name || (item.bundleSize ? `Customized Bouquet (${item.bundleSize} stems)` : `Customized Bouquet ${index + 1}`),
+            image: item.image_url || item.image || request?.imageUrl || null,
+            quantity: Number(item.qty || item.quantity || 1) || 1,
+            price: Number(item.price || 0),
+        }));
+    }
+
+    if (!(request?.imageUrl || request?.requestData?.bundleSize || request?.requestData?.flower)) {
+        return [];
+    }
+
+    return [{
+        key: `${request?.id || 'customized'}-legacy`,
+        name: request?.requestData?.bundleSize
+            ? `Customized Bouquet (${request.requestData.bundleSize} stems)`
+            : 'Customized Bouquet',
+        image: request?.imageUrl || null,
+        quantity: 1,
+        price: Number(request?.finalPrice || 0),
+    }];
+};
+
 const OrderCustomizedTracking = () => {
     const navigate = useNavigate();
     const { requestNumber } = useParams();
@@ -333,6 +363,7 @@ const OrderCustomizedTracking = () => {
         createdAt: request?.date,
         updatedAt: request?.updated_at
     });
+    const customizedTrackingItems = getCustomizedTrackingItems(request);
     const isPickup = request?.deliveryMethod === 'pickup';
     const isFinalStep = currentStep >= trackingSteps.length && currentStep !== -1;
     const isDeclinedOrCancelled = currentStep === -1;
@@ -462,6 +493,7 @@ const OrderCustomizedTracking = () => {
                             <DeliveryDestinationsSummary
                                 destinations={request.multiDeliveryDestinations}
                                 title="Delivery Stops"
+                                fallbackRider={request.rider}
                             />
                         )}
 
@@ -585,35 +617,36 @@ const OrderCustomizedTracking = () => {
                     <div className="col-lg-4">
                         <div className="tracking-items p-4 rounded-4 shadow-sm bg-white">
                             <h5 className="fw-bold mb-4 pb-3 border-bottom d-flex align-items-center">
-                                <i className="fas fa-info-circle fs-5 me-2" style={{ color: 'var(--shop-pink)' }}></i>
-                                Request Details
+                                <i className="fas fa-box fs-5 me-2" style={{ color: 'var(--shop-pink)' }}></i>
+                                Order Items
                             </h5>
 
-                            {request.requestData && request.requestData.items && request.requestData.items.map((item, index) => (
-                                <div key={item.id || index} className="mb-4 d-flex flex-column gap-3">
-                                    <div className="d-flex align-items-center mb-1">
-                                        {item.image_url && (
-                                            <img
-                                                src={item.image_url}
-                                                alt={item.name}
-                                                className="rounded-3 shadow-sm me-3"
-                                                style={{ width: '56px', height: '56px', objectFit: 'cover' }}
-                                            />
-                                        )}
-                                        <div>
-                                            <div className="text-muted small text-uppercase fw-bold letter-spacing-1 mb-1">Item #{index + 1}</div>
-                                            <h6 className="mb-0 fw-bold fs-5">{item.name}</h6>
+                            {customizedTrackingItems.slice(0, 2).map((item) => (
+                                <div key={item.key} className="d-flex align-items-center mb-3 pb-3 border-bottom">
+                                    <img
+                                        src={item.image || 'https://via.placeholder.com/56'}
+                                        alt={item.name}
+                                        className="rounded-3 shadow-sm me-3"
+                                        style={{ width: '56px', height: '56px', objectFit: 'cover' }}
+                                        onError={(e) => e.target.src = 'https://via.placeholder.com/56'}
+                                    />
+                                    <div className="flex-grow-1">
+                                        <div className="fw-bold">{item.name}</div>
+                                        <div className="text-muted small">Qty: {item.quantity}</div>
+                                    </div>
+                                    {item.price > 0 && (
+                                        <div className="fw-bold" style={{ color: 'var(--shop-pink)' }}>
+                                            ₱{(item.price * item.quantity).toLocaleString()}
                                         </div>
-                                    </div>
-
-                                    <div className="d-flex flex-column gap-2 ms-1">
-                                        <div className="d-flex flex-column"><span className="text-muted small fw-medium">Flowers</span><span className="fw-bold text-dark">{item.flowers.map(f => f.name).join(', ')}</span></div>
-                                        <div className="d-flex flex-column"><span className="text-muted small fw-medium">Bundle Size</span><span className="fw-bold text-dark">{item.bundleSize} stems</span></div>
-                                        {item.wrapper && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Wrapper</span><span className="fw-bold text-dark">{item.wrapper.name}</span></div>}
-                                        {item.ribbon && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Ribbon</span><span className="fw-bold text-dark">{item.ribbon.name}</span></div>}
-                                    </div>
+                                    )}
                                 </div>
                             ))}
+
+                            {customizedTrackingItems.length > 2 && (
+                                <div className="text-muted small mb-3">
+                                    + {customizedTrackingItems.length - 2} more item(s)
+                                </div>
+                            )}
 
                             <div className="mt-4 pt-3 border-top">
                                 <div className="d-flex justify-content-between mb-2 small text-muted">

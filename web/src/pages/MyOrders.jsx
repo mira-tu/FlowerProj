@@ -15,6 +15,34 @@ const orderTabs = [
     { id: 'cancelled', label: 'Cancelled' },
 ];
 
+const getCustomizedPreviewItems = (order) => {
+    const sourceItems = Array.isArray(order?.data?.items) ? order.data.items.filter(Boolean) : [];
+
+    if (sourceItems.length) {
+        return sourceItems.map((item, index) => ({
+            key: item.id || item.listId || `${order?.id || 'customized'}-${index}`,
+            name: item.name || (item.bundleSize ? `Customized Bouquet (${item.bundleSize} stems)` : `Customized Bouquet ${index + 1}`),
+            image: item.image_url || item.image || item.photo || order?.photo || order?.photo_url || null,
+            quantity: item.qty || item.quantity || 1,
+            price: Number(item.price || 0),
+            variant: item.bundleSize ? `${item.bundleSize} stems` : null,
+        }));
+    }
+
+    if (!(order?.flower || order?.bundleSize || order?.wrapper || order?.ribbon || order?.photo || order?.photo_url)) {
+        return [];
+    }
+
+    return [{
+        key: `${order?.id || 'customized'}-legacy`,
+        name: order?.bundleSize ? `Customized Bouquet (${order.bundleSize} stems)` : 'Customized Bouquet',
+        image: order?.photo || order?.photo_url || null,
+        quantity: 1,
+        price: 0,
+        variant: order?.bundleSize ? `${order.bundleSize} stems` : null,
+    }];
+};
+
 const MyOrders = () => {
     const navigate = useNavigate();
     const [activeOrderTab, setActiveOrderTab] = useState('all');

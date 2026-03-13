@@ -191,6 +191,7 @@ export const groupDeliveryDestinations = (destinations = []) => {
 
         if (!groups.has(groupKey)) {
             groups.set(groupKey, {
+                groupKey,
                 addressId: destination?.address_id ?? null,
                 addressLabel: destination?.address_label || '',
                 recipientName: destination?.recipient_name || '',
@@ -198,6 +199,7 @@ export const groupDeliveryDestinations = (destinations = []) => {
                 addressText,
                 shippingFee: toFiniteNumber(destination?.shipping_fee),
                 items: [],
+                assignedRiderIds: [],
             });
         }
 
@@ -207,6 +209,13 @@ export const groupDeliveryDestinations = (destinations = []) => {
             unitNumber: destination?.unit_number || 1,
             quantity: destination?.quantity || 1,
         });
+
+        if (destination?.assigned_rider_id) {
+            const riderId = String(destination.assigned_rider_id);
+            if (!groups.get(groupKey).assignedRiderIds.includes(riderId)) {
+                groups.get(groupKey).assignedRiderIds.push(riderId);
+            }
+        }
     });
 
     return Array.from(groups.values());

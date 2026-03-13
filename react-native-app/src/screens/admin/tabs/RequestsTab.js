@@ -23,6 +23,7 @@ import styles from '../../AdminDashboard.styles';
 import { formatTimestamp, getPaymentStatusDisplay, getStatusColor, getStatusLabel } from '../adminHelpers';
 import PaymentDetailsSection from '../components/PaymentDetailsSection';
 import { generateAndShareReceipt } from '../../../utils/receiptGenerator';
+import { groupDeliveryDestinations } from '../../../utils/deliveryDestinations';
 
 const DetailSection = ({ label, value }) => {
   if (!value) return null;
@@ -550,6 +551,132 @@ const firstNonEmpty = (...values) => {
   return null;
 };
 
+const getNamedValue = (value) => {
+  if (!value) return null;
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+
+  if (typeof value === 'object') {
+    return firstNonEmpty(value.name, value.label, value.value);
+  }
+
+  const text = String(value).trim();
+  return text || null;
+};
+
+const toAbsoluteImageUrl = (value) => {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  if (/^(https?:\/\/|data:)/i.test(text)) return text;
+  return `${BASE_URL}${text.startsWith('/') ? text : `/${text}`}`;
+};
+
+const formatAddressParts = (address = {}) => (
+  [address?.street, address?.barangay, address?.city, address?.province, address?.zip]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+    .join(', ')
+);
+
+const getCustomizedRequestItems = (request) => {
+  const requestData = normalizeRequestData(request);
+  const hasLegacyCustomizedItem =
+    requestData.bundleSize ||
+    requestData.flower ||
+    requestData.wrapper ||
+    requestData.ribbon ||
+    requestData.image_url ||
+    request?.image_url;
+
+  const sourceItems = Array.isArray(requestData.items) && requestData.items.length
+    ? requestData.items
+    : hasLegacyCustomizedItem
+      ? [{
+        name: requestData.bundleSize ? `Customized Bouquet (${requestData.bundleSize} stems)` : 'Customized Bouquet',
+        flowers: requestData.flower ? [requestData.flower] : [],
+        bundleSize: requestData.bundleSize ?? null,
+        wrapper: requestData.wrapper ?? null,
+        ribbon: requestData.ribbon ?? null,
+        image_url: requestData.image_url || request?.image_url || null,
+        price: requestData.price ?? null,
+        message: requestData.message ?? '',
+      }]
+      : [];
+
+  const multiDeliveryDestinations = Array.isArray(requestData.multi_delivery_destinations)
+    ? requestData.multi_delivery_destinations
+    : [];
+  const sharedRecipientName = firstNonEmpty(
+    requestData.address?.name,
+    requestData.recipient_name,
+    requestData.recipientName
+  );
+  const sharedAddressText = formatAddressParts(requestData.address || {});
+
+  return sourceItems.map((item, index) => {
+    const rawFlowers = Array.isArray(item?.flowers)
+      ? item.flowers
+      : item?.flower
+        ? [item.flower]
+        : [];
+    const flowersText = normalizeFlowerNames(rawFlowers, requestData.otherFlowersText).join(', ');
+    const wrapperName = getNamedValue(item?.wrapper) || getNamedValue(requestData.wrapper);
+    const ribbonName = getNamedValue(item?.ribbon) || getNamedValue(requestData.ribbon);
+    const bundleSize = toPositiveInt(item?.bundleSize, 0) || toPositiveInt(requestData.bundleSize, 0);
+    const itemDestinations = multiDeliveryDestinations.filter(
+      (destination) => String(destination?.item_index ?? '') === String(index)
+    );
+    const primaryDestination = itemDestinations[0] || null;
+    const assignedRiderIds = Array.from(
+      new Set(
+        itemDestinations
+          .map((destination) => String(destination?.assigned_rider_id || '').trim())
+          .filter(Boolean)
+      )
+    );
+    const recipientName = primaryDestination
+      ? firstNonEmpty(primaryDestination.recipient_name, primaryDestination.address_label)
+      : sharedRecipientName;
+    const addressText = primaryDestination
+      ? formatAddressParts(primaryDestination.address_snapshot || {})
+      : sharedAddressText;
+    const destinationSummary = [recipientName, addressText].filter(Boolean).join(' - ');
+    const price = parseCurrencyNumber(item?.price);
+    const title = String(item?.name || '').trim() || (
+      bundleSize ? `Customized Bouquet (${bundleSize} stems)` : `Customized Bouquet ${index + 1}`
+    );
+    const materialsSummary = [
+      flowersText ? `Flowers: ${flowersText}` : null,
+      wrapperName ? `Wrapper: ${wrapperName}` : null,
+      ribbonName ? `Ribbon: ${ribbonName}` : null,
+    ].filter(Boolean).join(' | ');
+
+    return {
+      ...item,
+      key: String(item?.id || item?.listId || `${request?.id || 'customized'}-${index}`),
+      itemIndex: index,
+      label: `Bouquet ${index + 1}`,
+      title,
+      imageUri: toAbsoluteImageUrl(item?.image_url || item?.image || item?.photo || request?.image_url),
+      flowersText,
+      wrapperName,
+      ribbonName,
+      bundleSize,
+      bundleSizeText: bundleSize ? `${bundleSize} stems` : null,
+      priceText: price > 0 ? `PHP ${price.toFixed(2)}` : null,
+      recipientName,
+      addressText,
+      destinationSummary,
+      assignedRiderIds,
+      cardMessage: firstNonEmpty(item?.card_message, item?.cardMessage, item?.message, requestData.message),
+      materialsSummary,
+    };
+  });
+};
+
 const getNormalizedRequestPaymentMethod = (request) => {
   const paymentMethod = request?.payment_method || request?.data?.payment_method || '';
   return String(paymentMethod).trim().toLowerCase();
@@ -599,7 +726,9 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [statusFilter, setStatusFilter] = useState('All');
   const [selectedRequest, setSelectedRequest] = useState(null);
+  const [selectedCustomizedItem, setSelectedCustomizedItem] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [customizedItemModalVisible, setCustomizedItemModalVisible] = useState(false);
   const [requestStatusModalVisible, setRequestStatusModalVisible] = useState(false);
   const [requestToUpdate, setRequestToUpdate] = useState(null);
   const [selectedRequestStatus, setSelectedRequestStatus] = useState(null);
@@ -628,9 +757,11 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const [selectedRider, setSelectedRider] = useState(null);
   const [requestToAssignRider, setRequestToAssignRider] = useState(null);
   const [riderSearchQuery, setRiderSearchQuery] = useState('');
+  const [selectedStopGroupKey, setSelectedStopGroupKey] = useState(null);
+  const [stopRiderAssignments, setStopRiderAssignments] = useState({});
 
   const filteredAndSortedRiders = React.useMemo(() => {
-    let result = riders;
+    let result = [...riders];
     if (riderSearchQuery) {
       result = result.filter(rider =>
         rider.name.toLowerCase().includes(riderSearchQuery.toLowerCase()) ||
@@ -640,6 +771,11 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     result.sort((a, b) => a.name.localeCompare(b.name));
     return result;
   }, [riders, riderSearchQuery]);
+
+  const riderLookup = React.useMemo(
+    () => Object.fromEntries(riders.map((rider) => [String(rider.id), rider])),
+    [riders]
+  );
 
   const loadRiders = async () => {
     try {
@@ -651,6 +787,50 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     }
   };
 
+  const getGroupedDestinations = React.useCallback(
+    (request) => groupDeliveryDestinations(request?.data?.multi_delivery_destinations || []),
+    []
+  );
+
+  const getInitialStopRiderAssignments = React.useCallback((request) => {
+    const groupedDestinations = getGroupedDestinations(request);
+    const fallbackRiderId = request?.assigned_rider ? String(request.assigned_rider) : '';
+
+    return Object.fromEntries(
+      groupedDestinations.map((group) => [
+        group.groupKey,
+        group.assignedRiderIds?.[0] || fallbackRiderId || '',
+      ])
+    );
+  }, [getGroupedDestinations]);
+
+  const getAssignedRiderNamesForGroup = React.useCallback((group, request) => {
+    const explicitRiderIds = Array.isArray(group?.assignedRiderIds) ? group.assignedRiderIds : [];
+    const fallbackRiderId = explicitRiderIds.length
+      ? null
+      : (request?.assigned_rider ? String(request.assigned_rider) : null);
+    const riderIds = explicitRiderIds.length ? explicitRiderIds : (fallbackRiderId ? [fallbackRiderId] : []);
+
+    return riderIds
+      .map((riderId) => riderLookup[String(riderId)]?.name)
+      .filter(Boolean);
+  }, [riderLookup]);
+
+  const hasRequiredRiderAssignments = React.useCallback((request) => {
+    const groupedDestinations = getGroupedDestinations(request);
+
+    if (!groupedDestinations.length) {
+      return Boolean(request?.rider || request?.assigned_rider);
+    }
+
+    return groupedDestinations.every((group) => {
+      const explicitRiderIds = Array.isArray(group?.assignedRiderIds)
+        ? group.assignedRiderIds.filter(Boolean)
+        : [];
+      return explicitRiderIds.length > 0 || Boolean(request?.assigned_rider);
+    });
+  }, [getGroupedDestinations]);
+
   const requestsWithRiderDetails = React.useMemo(() => {
     if (!requests.length || !riders.length) return requests;
     return requests.map(request => {
@@ -661,6 +841,18 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       return request;
     });
   }, [requests, riders]);
+
+  const assignableStopGroups = React.useMemo(
+    () => requestToAssignRider ? getGroupedDestinations(requestToAssignRider) : [],
+    [requestToAssignRider, getGroupedDestinations]
+  );
+
+  const selectedStopGroup = React.useMemo(
+    () => assignableStopGroups.find((group) => group.groupKey === selectedStopGroupKey) || null,
+    [assignableStopGroups, selectedStopGroupKey]
+  );
+
+  const isStopAssignmentMode = assignableStopGroups.length > 0;
 
   // Filter wrapper
   const filteredRequests = React.useMemo(() => {
@@ -831,72 +1023,50 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   );
 
   const renderCustomizedDetails = (request) => {
-    // Attempt to parse data if it's a string
-    let requestData = request.data;
-    if (typeof requestData === 'string') {
-      try {
-        requestData = JSON.parse(requestData);
-      } catch (e) {
-        console.error("Failed to parse request.data:", e);
-        requestData = {}; // Default to empty object on parse error
-      }
-    }
-
-    const item = requestData?.items?.[0]; // Get the first item from the items array
-    const flowersString = item?.flowers?.map(f => f.name).join(', ') || '';
+    const customizedItems = getCustomizedRequestItems(request);
 
     return (
       <>
-        <Text style={styles.inputLabel}>Customer Email</Text>
-        <TextInput style={styles.input} value={request.user_email} editable={false} />
+        <DetailSection label="Customer Email:" value={request.user_email} />
+        <DetailSection label="Contact Number:" value={request.contact_number || request.user_phone} />
+        <DetailSection
+          label="Delivery Method:"
+          value={request.delivery_method === 'delivery' ? 'Delivery' : 'Pick-up'}
+        />
+        <DetailSection
+          label="Customized Bouquets:"
+          value={customizedItems.length ? String(customizedItems.length) : null}
+        />
 
-        <Text style={styles.inputLabel}>Contact Number</Text>
-        <TextInput style={styles.input} value={request.contact_number || request.user_phone} editable={false} />
-
-        {item ? (
-          <>
-            <Text style={styles.inputLabel}>Quantity (Stems)</Text>
-            <TextInput style={styles.input} value={item.bundleSize?.toString() || ''} editable={false} />
-
-            <Text style={styles.inputLabel}>Flowers</Text>
-            <TextInput style={styles.input} value={flowersString} editable={false} multiline />
-
-            <Text style={styles.inputLabel}>Wrapper</Text>
-            <TextInput style={styles.input} value={item.wrapper?.name || ''} editable={false} />
-
-            <Text style={styles.inputLabel}>Ribbon</Text>
-            <TextInput style={styles.input} value={item.ribbon?.name || ''} editable={false} />
-
-            {item.image_url && (
-              <>
-                <Text style={styles.inputLabel}>Customized Bouquet Image</Text>
+        {customizedItems.map((item) => (
+          <View key={item.key} style={styles.customizedRequestDetailCard}>
+            <Text style={styles.customizedRequestItemMeta}>{item.label}</Text>
+            <Text style={styles.customizedRequestDetailTitle}>{item.title}</Text>
+            <DetailSection label="Bundle Size:" value={item.bundleSizeText} />
+            <DetailSection label="Flowers:" value={item.flowersText} />
+            <DetailSection label="Wrapper:" value={item.wrapperName} />
+            <DetailSection label="Ribbon:" value={item.ribbonName} />
+            <DetailSection label="Card Message:" value={item.cardMessage} />
+            <DetailSection label="Recipient:" value={item.recipientName} />
+            <DetailSection label="Delivery Address:" value={item.addressText} />
+            {item.imageUri ? (
+              <View style={styles.imageSection}>
+                <Text style={styles.detailLabel}>Customized Bouquet Image:</Text>
                 <Image
-                  source={{ uri: item.image_url }}
+                  source={{ uri: item.imageUri }}
                   style={styles.fullImage}
                   resizeMode="contain"
                 />
-              </>
-            )}
-          </>
-        ) : (
-          // Fallback for old data structure or if items is empty
-          <>
-            <Text style={styles.inputLabel}>Quantity (Stems)</Text>
-            <TextInput style={styles.input} value={requestData?.bundleSize?.toString()} editable={false} />
-            <Text style={styles.inputLabel}>Flower Type</Text>
-            <TextInput style={styles.input} value={requestData?.flower?.name} editable={false} />
-            <Text style={styles.inputLabel}>Wrapper</Text>
-            <TextInput style={styles.input} value={requestData?.wrapper?.name} editable={false} />
-            <Text style={styles.inputLabel}>Ribbon</Text>
-            <TextInput style={styles.input} value={requestData?.ribbon?.name} editable={false} />
-          </>
-        )}
+              </View>
+            ) : null}
+          </View>
+        ))}
 
         {request.final_price && (
-          <>
-            <Text style={styles.inputLabel}>Final Price</Text>
-            <TextInput style={styles.input} value={`PHP ${request.final_price.toFixed(2)}`} editable={false} />
-          </>
+          <DetailSection
+            label="Final Price:"
+            value={`PHP ${parseCurrencyNumber(request.final_price).toFixed(2)}`}
+          />
         )}
         {renderPickupTimeSection(request)}
       </>
@@ -948,7 +1118,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
     // Rider enforcement: If moving to out_for_delivery, must have a rider assigned
     if (nextStatus === 'out_for_delivery') {
-      const hasRider = request.rider || request.assigned_rider;
+      const hasRider = hasRequiredRiderAssignments(request);
       if (!hasRider) {
         Alert.alert(
           "Rider Required",
@@ -1076,7 +1246,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     try {
       // Rider enforcement: If moving to out_for_delivery, must have a rider assigned
       if (selectedRequestStatus === 'out_for_delivery') {
-        const hasRider = requestToUpdate.rider || requestToUpdate.assigned_rider;
+        const hasRider = hasRequiredRiderAssignments(requestToUpdate);
         if (!hasRider) {
           Alert.alert(
             "Rider Required",
@@ -1363,33 +1533,115 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     setModalVisible(true);
   };
 
-  const handleAssignRider = (request) => {
-    setRequestToAssignRider(request);
-    setSelectedRider(request.rider); // pre-select if already assigned
+  const openCustomizedItemModal = (request, customizedItem) => {
+    setSelectedCustomizedItem({ request, item: customizedItem });
+    setCustomizedItemModalVisible(true);
+  };
+
+  const closeCustomizedItemModal = () => {
+    setCustomizedItemModalVisible(false);
+    setSelectedCustomizedItem(null);
+  };
+
+  const closeAssignRiderModal = () => {
+    setAssignRiderModalVisible(false);
+    setRequestToAssignRider(null);
+    setSelectedRider(null);
+    setSelectedStopGroupKey(null);
+    setStopRiderAssignments({});
     setRiderSearchQuery('');
+  };
+
+  const handleAssignRider = (request) => {
+    const groupedDestinations = getGroupedDestinations(request);
+    setRequestToAssignRider(request);
+    setRiderSearchQuery('');
+    if (groupedDestinations.length > 0) {
+      const initialAssignments = getInitialStopRiderAssignments(request);
+      const firstGroup = groupedDestinations[0] || null;
+      const initialRiderId = firstGroup ? initialAssignments[firstGroup.groupKey] : '';
+
+      setStopRiderAssignments(initialAssignments);
+      setSelectedStopGroupKey(firstGroup?.groupKey || null);
+      setSelectedRider(initialRiderId ? riderLookup[String(initialRiderId)] || null : null);
+    } else {
+      setStopRiderAssignments({});
+      setSelectedStopGroupKey(null);
+      setSelectedRider(request.rider || null);
+    }
     setAssignRiderModalVisible(true);
+  };
+
+  const handleSelectStopGroup = (group) => {
+    const riderId = stopRiderAssignments[group.groupKey] || '';
+    setSelectedStopGroupKey(group.groupKey);
+    setSelectedRider(riderId ? riderLookup[String(riderId)] || null : null);
+  };
+
+  const handleSelectRider = (rider) => {
+    if (isStopAssignmentMode) {
+      if (!selectedStopGroupKey) {
+        return;
+      }
+
+      setStopRiderAssignments((currentAssignments) => ({
+        ...currentAssignments,
+        [selectedStopGroupKey]: rider.id,
+      }));
+    }
+
+    setSelectedRider(rider);
+  };
+
+  const handleClearStopRider = () => {
+    if (!selectedStopGroupKey) {
+      return;
+    }
+
+    setStopRiderAssignments((currentAssignments) => ({
+      ...currentAssignments,
+      [selectedStopGroupKey]: '',
+    }));
+    setSelectedRider(null);
   };
 
   const handleConfirmAssignRider = async () => {
     if (!requestToAssignRider) return;
-    if (!selectedRider) {
-      Alert.alert('Error', 'Please select an employee rider.');
-      return;
-    }
 
     try {
-      await adminAPI.assignRiderToRequest(requestToAssignRider.id, selectedRider.id);
+      if (isStopAssignmentMode) {
+        const stopAssignments = assignableStopGroups.map((group) => ({
+          unitKeys: group.unitKeys,
+          riderId: stopRiderAssignments[group.groupKey] || null,
+        }));
 
-      Toast.show({ type: 'success', text1: 'Rider Assigned' });
-      setAssignRiderModalVisible(false);
+        await adminAPI.assignRequestStopRiders(requestToAssignRider.id, stopAssignments);
+        Toast.show({ type: 'success', text1: 'Delivery stop riders updated' });
+      } else {
+        if (!selectedRider) {
+          Alert.alert('Error', 'Please select an employee rider.');
+          return;
+        }
+
+        await adminAPI.assignRiderToRequest(requestToAssignRider.id, selectedRider.id);
+        Toast.show({ type: 'success', text1: 'Rider Assigned' });
+      }
+
+      closeAssignRiderModal();
       loadRequests(); // Refresh the list
     } catch (err) {
       console.error('Error assigning rider to request:', err);
-      Toast.show({ type: 'error', text1: 'Assignment Failed', text2: err.message });
+      const errorMessage = err?.message || 'Failed to assign rider.';
+      Toast.show({ type: 'error', text1: 'Assignment Failed', text2: errorMessage });
+      Alert.alert('Assignment Failed', errorMessage);
     }
   };
 
-  const EnhancedRequestCard = ({ item, onMessageCustomer, onPhoneCall, openDetailsModal, openReceiptModal, handleUpdatePaymentStatus, onAssignRider, onUpdateStatus, onProvidePrice, onDecline, onPrintReceipt }) => {
+  const EnhancedRequestCard = ({ item, onMessageCustomer, onPhoneCall, openDetailsModal, openReceiptModal, handleUpdatePaymentStatus, onAssignRider, onUpdateStatus, onProvidePrice, onDecline, onPrintReceipt, onOpenCustomizedItem }) => {
+    const isCustomizedRequest = item.type === 'customized';
+    const customizedItems = isCustomizedRequest ? getCustomizedRequestItems(item) : [];
+    const groupedDestinations = item.delivery_method === 'delivery' ? getGroupedDestinations(item) : [];
+
     return (
       <View style={styles.eoCard}>
         {/* Header */}
@@ -1470,6 +1722,107 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
           )}
         </View>
 
+        {groupedDestinations.length > 0 && (
+          <View style={styles.eoSection}>
+            <View style={styles.eoSectionHeader}>
+              <Ionicons name="navigate-outline" size={16} color="#6B7280" />
+              <Text style={styles.eoSectionTitle}>Delivery Stops ({groupedDestinations.length})</Text>
+            </View>
+            {groupedDestinations.map((destination, index) => {
+              const assignedRiderNames = getAssignedRiderNamesForGroup(destination, item);
+
+              return (
+                <View key={destination.groupKey || `${destination.recipientName}-${index}`} style={[styles.eoItemCard, index > 0 && { marginTop: 8 }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.eoItemName}>{destination.recipientName || `Stop ${index + 1}`}</Text>
+                    {destination.recipientPhone ? (
+                      <Text style={styles.eoItemQuantity}>Phone: {destination.recipientPhone}</Text>
+                    ) : null}
+                    {destination.addressText ? (
+                      <Text style={styles.eoInfoTextBold}>{destination.addressText}</Text>
+                    ) : null}
+                    <Text style={[styles.eoItemQuantity, { marginTop: 6 }]}>
+                      {destination.items.map((stopItem) => `${stopItem.itemName} #${stopItem.unitNumber}`).join(', ')}
+                    </Text>
+                    <View style={styles.eoStopAssignmentRow}>
+                      <Ionicons name="bicycle-outline" size={14} color={assignedRiderNames.length ? '#2563EB' : '#F97316'} />
+                      <Text style={[styles.eoStopAssignmentText, !assignedRiderNames.length && styles.eoStopAssignmentTextPending]}>
+                        {assignedRiderNames.length ? assignedRiderNames.join(', ') : 'Rider not assigned yet'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {isCustomizedRequest && customizedItems.length > 0 && (
+          <View style={styles.eoSection}>
+            <View style={styles.eoSectionHeader}>
+              <Ionicons name="image-outline" size={16} color="#6B7280" />
+              <Text style={styles.eoSectionTitle}>Customized Bouquets ({customizedItems.length})</Text>
+            </View>
+            {customizedItems.map((customizedItem, index) => (
+              <TouchableOpacity
+                key={customizedItem.key}
+                activeOpacity={0.85}
+                style={[styles.eoItemCard, index > 0 && { marginTop: 8 }]}
+                onPress={() => onOpenCustomizedItem(item, customizedItem)}
+              >
+                <View style={styles.eoItemImage}>
+                  {customizedItem.imageUri ? (
+                    <Image
+                      source={{ uri: customizedItem.imageUri }}
+                      style={{ width: '100%', height: '100%', resizeMode: 'cover' }}
+                    />
+                  ) : (
+                    <Ionicons name="image-outline" size={24} color="#666" />
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.customizedRequestItemMeta}>{customizedItem.label}</Text>
+                  {(() => {
+                    const assignedRiderNames = customizedItem.assignedRiderIds
+                      .map((riderId) => riderLookup[String(riderId)]?.name)
+                      .filter(Boolean);
+
+                    return customizedItem.destinationSummary ? (
+                      <Text
+                        style={[
+                          styles.customizedRequestAssignedRider,
+                          !assignedRiderNames.length && styles.customizedRequestAssignedRiderPending,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        Rider: {assignedRiderNames.length ? assignedRiderNames.join(', ') : 'Not assigned'}
+                      </Text>
+                    ) : null;
+                  })()}
+                  <Text style={styles.eoItemName}>{customizedItem.title}</Text>
+                  {customizedItem.bundleSizeText ? (
+                    <Text style={styles.eoItemQuantity}>Bundle Size: {customizedItem.bundleSizeText}</Text>
+                  ) : null}
+                  {customizedItem.materialsSummary ? (
+                    <Text style={styles.eoItemQuantity} numberOfLines={2}>
+                      {customizedItem.materialsSummary}
+                    </Text>
+                  ) : null}
+                  {customizedItem.destinationSummary ? (
+                    <Text style={styles.customizedRequestDestination} numberOfLines={2}>
+                      Deliver to: {customizedItem.destinationSummary}
+                    </Text>
+                  ) : null}
+                  {customizedItem.priceText ? (
+                    <Text style={styles.eoItemPrice}>{customizedItem.priceText}</Text>
+                  ) : null}
+                  <Text style={styles.customizedRequestTapHint}>Tap to view bouquet details</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
         {/* Request Image Preview */}
         {item.image_url && (
           <View style={styles.eoSection}>
@@ -1483,7 +1836,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
         )}
 
         {/* Assigned Rider Info */}
-        {item.rider ? (
+        {item.rider && groupedDestinations.length === 0 ? (
           <View style={styles.eoSection}>
             <View style={styles.eoSectionHeader}>
               <Ionicons name="bicycle-outline" size={16} color="#6B7280" />
@@ -1521,10 +1874,31 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
         {/* Action to open full details */}
         <View style={styles.eoFooter}>
-          <TouchableOpacity style={[styles.eoMainBtn, { backgroundColor: '#8B5CF6' }]} onPress={() => openDetailsModal(item)}>
-            <Ionicons name="eye" size={18} color="#fff" />
-            <Text style={styles.eoMainBtnText}>View Details</Text>
-          </TouchableOpacity>
+          {!isCustomizedRequest && (
+            <TouchableOpacity style={[styles.eoMainBtn, { backgroundColor: '#8B5CF6' }]} onPress={() => openDetailsModal(item)}>
+              <Ionicons name="eye" size={18} color="#fff" />
+              <Text style={styles.eoMainBtnText}>View Details</Text>
+            </TouchableOpacity>
+          )}
+
+          {item.status === 'pending' && item.type === 'customized' && (
+            <View style={styles.customizedRequestActionRow}>
+              <TouchableOpacity
+                style={[styles.eoMainBtn, styles.customizedRequestActionButton, { backgroundColor: '#10B981' }]}
+                onPress={() => handleAcceptPendingRequest(item)}
+              >
+                <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
+                <Text style={styles.eoMainBtnText}>Accept</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.eoMainBtn, styles.customizedRequestActionButton, { backgroundColor: '#EF4444' }]}
+                onPress={() => onDecline(item)}
+              >
+                <Ionicons name="close-circle-outline" size={18} color="#fff" />
+                <Text style={styles.eoMainBtnText}>Decline</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* Phase 1: Pending - admin is yet to provide price */}
           {item.status === 'pending' && (item.type === 'booking' || item.type === 'special_order') && (
@@ -1564,7 +1938,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
           {item.delivery_method === 'delivery' && item.status === 'processing' && (
             <TouchableOpacity style={[styles.eoMainBtn, { backgroundColor: '#10B981', marginTop: 10 }]} onPress={() => onAssignRider(item)}>
               <Ionicons name="person-add-outline" size={18} color="#fff" />
-              <Text style={styles.eoMainBtnText}>Assign Rider</Text>
+              <Text style={styles.eoMainBtnText}>{groupedDestinations.length > 0 ? 'Assign Stop Riders' : 'Assign Rider'}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -1627,6 +2001,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
           onProvidePrice={(req) => { setModalVisible(false); openQuoteModal(req); }}
           onDecline={handleDeclineRequest}
           onPrintReceipt={(item) => generateAndShareReceipt(item, true)}
+          onOpenCustomizedItem={openCustomizedItemModal}
         />}
         keyExtractor={item => item.id.toString()}
         contentContainerStyle={{ paddingBottom: 20, paddingHorizontal: 16 }}
@@ -1705,6 +2080,67 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
           </View >
         </View >
       </Modal >
+
+      <Modal
+        visible={customizedItemModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={closeCustomizedItemModal}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={styles.modalTitle}>Customized Bouquet Details</Text>
+                <Text style={styles.modalSubtitle}>
+                  {selectedCustomizedItem?.item?.label} - Request #{selectedCustomizedItem?.request?.request_number}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={closeCustomizedItemModal}>
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+
+            {selectedCustomizedItem?.item ? (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {selectedCustomizedItem.item.imageUri ? (
+                  <View style={styles.imageSection}>
+                    <Image
+                      source={{ uri: selectedCustomizedItem.item.imageUri }}
+                      style={styles.fullImage}
+                      resizeMode="contain"
+                    />
+                  </View>
+                ) : null}
+
+                <View style={styles.customizedRequestDetailCard}>
+                  <Text style={styles.customizedRequestItemMeta}>{selectedCustomizedItem.item.label}</Text>
+                  <Text style={styles.customizedRequestDetailTitle}>{selectedCustomizedItem.item.title}</Text>
+                  {selectedCustomizedItem.item.assignedRiderIds?.length ? (
+                    <DetailSection
+                      label="Assigned Rider:"
+                      value={selectedCustomizedItem.item.assignedRiderIds
+                        .map((riderId) => riderLookup[String(riderId)]?.name)
+                        .filter(Boolean)
+                        .join(', ')}
+                    />
+                  ) : null}
+                  <DetailSection label="Bundle Size:" value={selectedCustomizedItem.item.bundleSizeText} />
+                  <DetailSection label="Flowers:" value={selectedCustomizedItem.item.flowersText} />
+                  <DetailSection label="Wrapper:" value={selectedCustomizedItem.item.wrapperName} />
+                  <DetailSection label="Ribbon:" value={selectedCustomizedItem.item.ribbonName} />
+                  <DetailSection label="Card Message:" value={selectedCustomizedItem.item.cardMessage} />
+                  <DetailSection label="Recipient:" value={selectedCustomizedItem.item.recipientName} />
+                  <DetailSection label="Delivery Address:" value={selectedCustomizedItem.item.addressText} />
+                  <DetailSection label="Bouquet Price:" value={selectedCustomizedItem.item.priceText} />
+                </View>
+
+                {renderPickupTimeSection(selectedCustomizedItem.request)}
+              </ScrollView>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
 
       {/* Request Change Status Modal (Timeline UI) */}
       < Modal visible={requestStatusModalVisible} transparent animationType="fade" onRequestClose={() => setRequestStatusModalVisible(false)}>
@@ -2084,45 +2520,134 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
       {/* Assign Rider Modal */}
       < Modal visible={assignRiderModalVisible} animationType="fade" transparent >
         <View style={styles.modalContainer}>
-          <View style={[styles.modalContent, { maxHeight: '70%' }]}>
-            <Text style={styles.modalTitle}>Assign Rider</Text>
+          <View style={[styles.modalContent, styles.assignRiderModalContent]}>
+            <Text style={styles.modalTitle}>{isStopAssignmentMode ? 'Assign Delivery Stop Riders' : 'Assign Rider'}</Text>
+            <View style={styles.assignRiderModalBody}>
+              {isStopAssignmentMode && (
+                <>
+                  <Text style={styles.stopAssignmentHelpText}>
+                    Choose a delivery stop first, then select the employee rider for that stop.
+                  </Text>
 
-            <View style={styles.riderSearchContainer}>
-              <Ionicons name="search" size={20} color="#999" style={styles.riderSearchIcon} />
-              <TextInput
-                style={styles.riderSearchInput}
-                placeholder="Search riders..."
-                placeholderTextColor="#999"
-                value={riderSearchQuery}
-                onChangeText={setRiderSearchQuery}
+                  <ScrollView
+                    style={styles.stopAssignmentList}
+                    contentContainerStyle={styles.stopAssignmentListContent}
+                    nestedScrollEnabled
+                    showsVerticalScrollIndicator={assignableStopGroups.length > 3}
+                  >
+                    {assignableStopGroups.map((group, index) => {
+                      const assignedNames = getAssignedRiderNamesForGroup({
+                        ...group,
+                        assignedRiderIds: stopRiderAssignments[group.groupKey]
+                          ? [String(stopRiderAssignments[group.groupKey])]
+                          : group.assignedRiderIds,
+                      }, requestToAssignRider);
+                      const isActive = selectedStopGroup?.groupKey === group.groupKey;
+
+                      return (
+                        <TouchableOpacity
+                          key={group.groupKey || `${group.recipientName}-${index}`}
+                          style={[styles.stopAssignmentRow, isActive && styles.stopAssignmentRowActive]}
+                          onPress={() => handleSelectStopGroup(group)}
+                          activeOpacity={0.9}
+                        >
+                          <View style={[styles.stopAssignmentIndicator, isActive && styles.stopAssignmentIndicatorActive]}>
+                            {isActive ? <View style={styles.stopAssignmentIndicatorInner} /> : null}
+                          </View>
+                          <View style={styles.stopAssignmentRowContent}>
+                            <Text style={styles.stopAssignmentRowTitle} numberOfLines={1}>
+                              {`Stop ${index + 1} - ${group.recipientName || `Delivery stop ${index + 1}`}`}
+                            </Text>
+                            {group.addressText ? (
+                              <Text style={styles.stopAssignmentRowSubtitle} numberOfLines={1}>
+                                {group.addressText}
+                              </Text>
+                            ) : null}
+                            <Text style={[styles.stopAssignmentRowMeta, !assignedNames.length && styles.stopAssignmentRowMetaPending]}>
+                              {assignedNames.length ? `Rider: ${assignedNames.join(', ')}` : 'Rider: Not assigned'}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </>
+              )}
+
+              <View style={styles.riderSearchContainer}>
+                <Ionicons name="search" size={20} color="#999" style={styles.riderSearchIcon} />
+                <TextInput
+                  style={styles.riderSearchInput}
+                  placeholder="Search riders..."
+                  placeholderTextColor="#999"
+                  value={riderSearchQuery}
+                  onChangeText={setRiderSearchQuery}
+                />
+              </View>
+
+              {isStopAssignmentMode && selectedStopGroup ? (
+                <View style={styles.stopAssignmentSummary}>
+                  <View style={styles.stopAssignmentSummaryHeader}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.stopAssignmentSelectionLabel}>Selected stop</Text>
+                      <Text style={styles.stopAssignmentSelectionTitle} numberOfLines={1}>
+                        {selectedStopGroup.recipientName || 'Delivery stop'}
+                      </Text>
+                    </View>
+                    <TouchableOpacity onPress={handleClearStopRider}>
+                      <Text style={styles.stopAssignmentClearText}>Clear</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {selectedStopGroup.addressText ? (
+                    <Text style={styles.stopAssignmentSelectionAddress} numberOfLines={1}>
+                      {selectedStopGroup.addressText}
+                    </Text>
+                  ) : null}
+                  <Text
+                    style={[
+                      styles.stopAssignmentSummaryStatus,
+                      !selectedRider && styles.stopAssignmentSummaryStatusPending,
+                    ]}
+                  >
+                    {selectedRider
+                      ? `Selected rider: ${selectedRider.name}`
+                      : 'No rider selected'}
+                  </Text>
+                </View>
+              ) : null}
+
+              <FlatList
+                data={filteredAndSortedRiders}
+                renderItem={({ item: rider }) => (
+                  <TouchableOpacity
+                    style={styles.radioButtonContainer}
+                    onPress={() => handleSelectRider(rider)}
+                  >
+                    <View style={[styles.radioButton, selectedRider?.id === rider.id && styles.radioButtonSelected]}>
+                      {selectedRider?.id === rider.id && <View style={styles.radioButtonInner} />}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.riderName}>{rider.name}</Text>
+                      <Text style={styles.riderEmail}>{rider.phone}</Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
+                keyExtractor={(item) => item.id.toString()}
+                ListEmptyComponent={<Text style={styles.assignRiderEmptyText}>No riders found.</Text>}
+                style={styles.assignRiderList}
+                contentContainerStyle={styles.assignRiderListContent}
+                keyboardShouldPersistTaps="handled"
               />
             </View>
-
-            <FlatList
-              data={filteredAndSortedRiders}
-              renderItem={({ item: rider }) => (
-                <TouchableOpacity
-                  style={styles.radioButtonContainer}
-                  onPress={() => setSelectedRider(rider)}
-                >
-                  <View style={[styles.radioButton, selectedRider?.id === rider.id && styles.radioButtonSelected]}>
-                    {selectedRider?.id === rider.id && <View style={styles.radioButtonInner} />}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.riderName}>{rider.name}</Text>
-                    <Text style={styles.riderEmail}>{rider.phone}</Text>
-                  </View>
-                </TouchableOpacity>
-              )}
-              keyExtractor={(item) => item.id.toString()}
-              ListEmptyComponent={<Text style={styles.emptyText}>No riders found.</Text>}
-              style={{ marginVertical: 10 }}
-            />
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={() => { setAssignRiderModalVisible(false); setRiderSearchQuery(''); setSelectedRider(null); }}>
+            <View style={[styles.modalButtons, styles.assignRiderFooter]}>
+              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={closeAssignRiderModal}>
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalButton, styles.saveButton]} onPress={handleConfirmAssignRider} disabled={!selectedRider}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.saveButton]}
+                onPress={handleConfirmAssignRider}
+                disabled={!selectedRider && !isStopAssignmentMode}
+              >
                 <Text style={styles.buttonText}>Confirm</Text>
               </TouchableOpacity>
             </View>
