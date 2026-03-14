@@ -307,6 +307,7 @@ const OrderTracking = ({ user }) => {
         createdAt: order?.date,
         updatedAt: order?.updated_at
     });
+    const cancellationReason = order?.cancellation_reason || order?.status_timestamps?.cancellation_reason || order?.status_timestamps?.cancel_reason || null;
     const isPickup = order?.deliveryMethod === 'pickup';
     const isFinalStep = currentStep >= trackingSteps.length && currentStep !== -1;
     const isDeclinedOrCancelled = currentStep === -1;
@@ -411,7 +412,11 @@ const OrderTracking = ({ user }) => {
                             <div className="expected-delivery">
                                 {!isFinalStep && !isDeclinedOrCancelled && `Expected delivery by: ${getExpectedDeliveryDate()}`}
 
-                                {isDeclinedOrCancelled && (order.status === 'declined' ? 'Order not fulfilled.' : 'Order cancelled.')}
+                                {isDeclinedOrCancelled && (
+                                    cancellationReason
+                                        ? `${order.status === 'declined' ? 'Declined' : 'Cancelled'}: ${cancellationReason}`
+                                        : (order.status === 'declined' ? 'Order not fulfilled.' : 'Order cancelled.')
+                                )}
                             </div>
                         </div>
                     </div>
@@ -493,6 +498,7 @@ const OrderTracking = ({ user }) => {
                                         <div className="timeline-content">
                                             <h5>Order {order.status === 'declined' ? 'Declined' : 'Cancelled'}</h5>
                                             <p>{order.status === 'declined' ? 'Your order could not be fulfilled.' : 'You have cancelled this order.'}</p>
+                                            <p className="mb-1"><strong>Reason:</strong> {cancellationReason || 'No cancellation reason provided.'}</p>
                                             <div className="timeline-date">{new Date(order.date).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
                                         </div>
                                     </div>
@@ -584,7 +590,7 @@ const OrderTracking = ({ user }) => {
                                     <span>₱{(order.subtotal || 0).toLocaleString()}</span>
                                 </div>
                                 <div className="d-flex justify-content-between mb-3 small text-muted">
-                                    <span>{isPickup ? 'Pickup' : 'Shipping Fee'}</span>
+                                        <span>{isPickup ? 'Pickup' : 'Delivery Fee'}</span>
                                     <span>{order.shipping_fee === 0 ? 'FREE' : `₱${(order.shipping_fee || 0).toLocaleString()}`}</span>
                                 </div>
                                 <div className="d-flex justify-content-between align-items-center pt-3 border-top">

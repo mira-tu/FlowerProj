@@ -233,7 +233,7 @@ const CustomizedCart = ({ user }) => {
                                     <span>₱{totalAmount.toLocaleString()}</span>
                                 </div>
                                 <div className="d-flex justify-content-between mb-2">
-                                    <span className="text-muted">Shipping Fee</span>
+                                        <span className="text-muted">Delivery Fee</span>
                                     <span>{cartItems.length > 0 && user && address ? `₱${shippingFee.toLocaleString()}` : 'TBD at checkout'}</span>
                                 </div>
 

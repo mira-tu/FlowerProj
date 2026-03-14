@@ -7,6 +7,32 @@ import { formatPhoneNumber } from '../utils/format';
 import InfoModal from '../components/InfoModal';
 import qrCodeImage from '../assets/qr-code-1.jpg';
 
+const parseJsonObject = (value) => {
+    if (!value) return {};
+    if (typeof value === 'string') {
+        try {
+            return JSON.parse(value);
+        } catch (error) {
+            return {};
+        }
+    }
+    return typeof value === 'object' ? value : {};
+};
+
+const buildStatusTimestamps = (existingValue, status, reason = '') => {
+    const next = {
+        ...parseJsonObject(existingValue),
+        [status]: new Date().toISOString(),
+    };
+
+    if (status === 'cancelled' && reason) {
+        next.cancellation_reason = reason;
+        next.cancel_reason = reason;
+    }
+
+    return next;
+};
+
 const Profile = ({ user, logout }) => {
     const navigate = useNavigate();
     const location = useLocation();
@@ -345,6 +371,7 @@ const Profile = ({ user, logout }) => {
                 order_number: order.order_number,
                 date: order.created_at,
                 status: order.status, // pending, accepted, processing, etc.
+                cancellationReason: order.cancellation_reason || order.status_timestamps?.cancellation_reason || order.status_timestamps?.cancel_reason || null,
                 payment_status: order.payment_status,
                 payment_method: order.payment_method,
                 delivery_method: order.delivery_method,
@@ -402,6 +429,7 @@ const Profile = ({ user, logout }) => {
                     notes: request.notes || requestData.notes,
                     data: requestData,
                     quoteBreakdown: requestData?.quote_breakdown || null,
+                    cancellationReason: request.cancellation_reason || requestData?.cancellation_reason || requestData?.decline_feedback || requestData?.declineFeedback || null,
                     declineFeedback: requestData?.decline_feedback || requestData?.declineFeedback || null,
                     shipping_fee: parseFloat(request.shipping_fee || requestData?.quote_breakdown?.shipping_fee || 0),
                     image_url: request.image_url,
@@ -713,26 +741,96 @@ const Profile = ({ user, logout }) => {
         if (!orderToCancel) return;
 
         try {
-            if (orderToCancel.type) { // It's a request (booking, special_order, customized)
-                const { error } = await supabase
-                    .from('requests')
-                    .update({ status: 'cancelled' })
-                    .eq('id', orderToCancel.request_id || orderToCancel.id); // Use request_id if available, else id
+            const customerCancellationReason = 'Cancelled by customer';
 
-                if (error) {
-                    console.error('Error cancelling request:', error);
-                    setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel request: ' + error.message });
+            if (orderToCancel.type) { // It's a request (booking, special_order, customized)
+                const requestId = orderToCancel.request_id || (orderToCancel.isRequest ? orderToCancel.id?.replace?.(/^request-/, '') : null) || orderToCancel.id;
+                const { data: currentRequest, error: requestFetchError } = await supabase
+                    .from('requests')
+                    .select('data, status_timestamps')
+                    .eq('id', requestId)
+                    .single();
+
+                if (requestFetchError) {
+                    console.error('Error loading request before cancellation:', requestFetchError);
+                    setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel request: ' + requestFetchError.message });
                     return;
                 }
+
+                const requestData = parseJsonObject(currentRequest?.data);
+                const { error: requestUpdateError } = await supabase
+                    .from('requests')
+                    .update({
+                        status: 'cancelled',
+                        cancellation_reason: customerCancellationReason,
+                        status_timestamps: buildStatusTimestamps(currentRequest?.status_timestamps, 'cancelled', customerCancellationReason),
+                        data: {
+                            ...requestData,
+                            cancellation_reason: customerCancellationReason,
+                            cancelled_at: new Date().toISOString(),
+                        },
+                    })
+                    .eq('id', requestId);
+
+                if (requestUpdateError) {
+                    console.error('Error cancelling request:', requestUpdateError);
+                    setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel request: ' + requestUpdateError.message });
+                    return;
+                }
+
+                if (!orderToCancel.isRequest && orderToCancel.id) {
+                    const { data: currentOrder, error: orderFetchError } = await supabase
+                        .from('orders')
+                        .select('status_timestamps')
+                        .eq('id', orderToCancel.id)
+                        .single();
+
+                    if (orderFetchError) {
+                        console.error('Error loading linked order before cancellation:', orderFetchError);
+                        setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel linked order: ' + orderFetchError.message });
+                        return;
+                    }
+
+                    const { error: orderUpdateError } = await supabase
+                        .from('orders')
+                        .update({
+                            status: 'cancelled',
+                            cancellation_reason: customerCancellationReason,
+                            status_timestamps: buildStatusTimestamps(currentOrder?.status_timestamps, 'cancelled', customerCancellationReason),
+                        })
+                        .eq('id', orderToCancel.id);
+
+                    if (orderUpdateError) {
+                        console.error('Error cancelling linked order:', orderUpdateError);
+                        setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel linked order: ' + orderUpdateError.message });
+                        return;
+                    }
+                }
             } else { // It's a regular order
-                const { error } = await supabase
+                const { data: currentOrder, error: orderFetchError } = await supabase
                     .from('orders')
-                    .update({ status: 'cancelled' })
+                    .select('status_timestamps')
+                    .eq('id', orderToCancel.id)
+                    .single();
+
+                if (orderFetchError) {
+                    console.error('Error loading order before cancellation:', orderFetchError);
+                    setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel order: ' + orderFetchError.message });
+                    return;
+                }
+
+                const { error: orderUpdateError } = await supabase
+                    .from('orders')
+                    .update({
+                        status: 'cancelled',
+                        cancellation_reason: customerCancellationReason,
+                        status_timestamps: buildStatusTimestamps(currentOrder?.status_timestamps, 'cancelled', customerCancellationReason),
+                    })
                     .eq('id', orderToCancel.id);
 
-                if (error) {
-                    console.error('Error cancelling order:', error);
-                    setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel order: ' + error.message });
+                if (orderUpdateError) {
+                    console.error('Error cancelling order:', orderUpdateError);
+                    setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel order: ' + orderUpdateError.message });
                     return;
                 }
             }
@@ -1010,10 +1108,12 @@ const Profile = ({ user, logout }) => {
                                     </div>
                                 )}
 
-                                {order.status === 'declined' && (order.declineFeedback || order.data?.decline_feedback || order.data?.declineFeedback) && (
+                                {['cancelled', 'declined'].includes(order.status) && (
                                     <div className="mt-3 p-3 rounded" style={{ background: '#fff1f2', border: '1px solid #fecdd3' }}>
-                                        <div className="small fw-bold text-danger mb-1">Decline Feedback</div>
-                                        <div className="small text-dark">{order.declineFeedback || order.data?.decline_feedback || order.data?.declineFeedback}</div>
+                                        <div className="small fw-bold text-danger mb-1">{order.status === 'cancelled' ? 'Cancellation Reason' : 'Decline Feedback'}</div>
+                                        <div className="small text-dark">
+                                            {order.cancellationReason || order.declineFeedback || order.data?.cancellation_reason || order.data?.decline_feedback || order.data?.declineFeedback || (order.status === 'cancelled' ? 'No cancellation reason provided.' : 'No decline feedback provided.')}
+                                        </div>
                                     </div>
                                 )}
 
@@ -1054,7 +1154,7 @@ const Profile = ({ user, logout }) => {
                                                 <span className="fw-semibold">₱{subtotal.toLocaleString()}</span>
                                             </div>
                                             <div className="d-flex justify-content-between small">
-                                                <span>Shipping Fee</span>
+                                                <span>Delivery Fee</span>
                                                 <span className="fw-semibold">₱{shipping.toLocaleString()}</span>
                                             </div>
                                             <div className="d-flex justify-content-between small fw-bold mt-1" style={{ color: 'var(--shop-pink)' }}>
@@ -1175,7 +1275,7 @@ const Profile = ({ user, logout }) => {
                                             )}
 
                                             {/* CANCEL BUTTON */}
-                                            {order.status === 'pending' && (
+                                            {['pending', 'processing'].includes(order.status) && (
                                                 <button
                                                     className="btn-order-action danger"
                                                     onClick={() => handleCancelClick(order)}

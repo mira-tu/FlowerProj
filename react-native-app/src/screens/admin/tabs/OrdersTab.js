@@ -57,6 +57,9 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const [selectedReceiptUrl, setSelectedReceiptUrl] = useState(null);
   const [declineModalVisible, setDeclineModalVisible] = useState(false);
   const [orderToDecline, setOrderToDecline] = useState(null);
+  const [declineReason, setDeclineReason] = useState('');
+  const [declineAction, setDeclineAction] = useState('decline');
+  const [isDecliningOrder, setIsDecliningOrder] = useState(false);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [orderToRecordPayment, setOrderToRecordPayment] = useState(null);
@@ -293,21 +296,50 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     }
   };
 
-  const handleDecline = (order) => {
+  const openOrderDeclineModal = (order, action = 'decline') => {
     setOrderToDecline(order);
+    setDeclineAction(action);
+    setDeclineReason('');
     setDeclineModalVisible(true);
+  };
+
+  const closeOrderDeclineModal = () => {
+    setDeclineModalVisible(false);
+    setOrderToDecline(null);
+    setDeclineAction('decline');
+    setDeclineReason('');
+  };
+
+  const handleDecline = (order) => {
+    openOrderDeclineModal(order, 'decline');
   };
 
   const confirmDecline = async () => {
     if (!orderToDecline) return;
+
+    const reason = declineReason.trim();
+    if (!reason) {
+      Alert.alert('Reason Required', 'Please provide a short reason before cancelling this order.');
+      return;
+    }
+
+    setIsDecliningOrder(true);
     try {
-      await adminAPI.declineOrder(orderToDecline.id, 'cancelled');
-      Toast.show({ type: 'success', text1: 'Order Declined' });
+      const status = 'cancelled';
+      const options = { cancellationReason: reason };
+
+      if (declineAction === 'cancel') {
+        await adminAPI.updateOrderStatus(orderToDecline.id, status, options);
+        Toast.show({ type: 'success', text1: 'Order Cancelled' });
+      } else {
+        await adminAPI.declineOrder(orderToDecline.id, status, options);
+        Toast.show({ type: 'success', text1: 'Order Declined' });
+      }
     } catch (error) {
       Toast.show({ type: 'error', text1: 'Decline Failed' });
     } finally {
-      setDeclineModalVisible(false);
-      setOrderToDecline(null);
+      setIsDecliningOrder(false);
+      closeOrderDeclineModal();
       await loadOrders();
     }
   };
@@ -385,6 +417,14 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const confirmStatusChange = async () => {
     if (!orderToUpdate || !selectedStatus) return;
     const orderId = orderToUpdate.id;
+
+    if (selectedStatus === 'cancelled') {
+      setStatusModalVisible(false);
+      openOrderDeclineModal(orderToUpdate, 'cancel');
+      setOrderToUpdate(null);
+      setSelectedStatus(null);
+      return;
+    }
 
     try {
       // Rider enforcement: If moving to out_for_delivery, must have a rider assigned
@@ -657,6 +697,16 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                 <Text style={styles.eoPaymentStatusText}>{item.rider.name}</Text>
               </View>
             </View>
+          </View>
+        ) : null}
+
+        {item.status === 'cancelled' && item.cancellation_reason ? (
+          <View style={styles.eoSection}>
+            <View style={styles.eoSectionHeader}>
+              <Ionicons name="alert-circle-outline" size={16} color="#EF4444" />
+              <Text style={styles.eoSectionTitle}>Cancellation Reason</Text>
+            </View>
+            <Text style={styles.eoInstructionsText}>{item.cancellation_reason}</Text>
           </View>
         ) : null}
 
@@ -982,20 +1032,45 @@ const OrdersTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
         }
       />
 
-      {/* Decline Confirmation Modal */}
+      {/* Order Cancellation Reason Modal */}
       <Modal visible={declineModalVisible} animationType="fade" transparent>
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Confirm Decline</Text>
+            <Text style={styles.modalTitle}>{declineAction === 'cancel' ? 'Cancel Order' : 'Decline Order'}</Text>
             <Text style={styles.modalText}>
-              Are you sure you want to decline Order #{orderToDecline?.order_number}?
+              Order #{orderToDecline?.order_number}
             </Text>
+            <View style={{ paddingBottom: 10 }}>
+              <Text style={[styles.inputLabel, { marginBottom: 6 }]}>Reason for customer</Text>
+              <TextInput
+                style={[styles.input, { minHeight: 90, textAlignVertical: 'top' }]}
+                placeholder={declineAction === 'cancel'
+                  ? 'Explain why this order is being cancelled'
+                  : 'Explain why this order is being declined'}
+                multiline
+                value={declineReason}
+                onChangeText={setDeclineReason}
+                editable={!isDecliningOrder}
+              />
+            </View>
             <View style={styles.modalButtons}>
-              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={() => setDeclineModalVisible(false)}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={closeOrderDeclineModal}
+                disabled={isDecliningOrder}
+              >
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalButton, styles.deleteButton]} onPress={confirmDecline}>
-                <Text style={styles.buttonText}>Confirm Decline</Text>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.deleteButton]}
+                onPress={confirmDecline}
+                disabled={isDecliningOrder}
+              >
+                <Text style={styles.buttonText}>
+                  {isDecliningOrder
+                    ? (declineAction === 'cancel' ? 'Cancelling...' : 'Declining...')
+                    : (declineAction === 'cancel' ? 'Send Cancellation' : 'Send Decline')}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>

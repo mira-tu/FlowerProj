@@ -431,13 +431,17 @@ serve(async (req) => {
       case "decline_order": {
         const id = body?.id;
         const status = String(body?.status ?? "").trim();
+        const options = body?.options && typeof body.options === "object" ? body.options : {};
+        const cancellationReason = typeof options?.cancellationReason === "string"
+          ? options.cancellationReason.trim()
+          : "";
         if (!id || !status) {
           return json(400, { error: "Order id and status are required." });
         }
 
         const { data: currentOrder, error: fetchError } = await adminClient
           .from("orders")
-          .select("status_timestamps")
+          .select("status_timestamps, cancellation_reason")
           .eq("id", id)
           .single();
 
@@ -445,11 +449,20 @@ serve(async (req) => {
           throw fetchError;
         }
 
+        const nextStatusTimestamps = withStatusTimestamp(currentOrder?.status_timestamps, status);
+        if (status === "cancelled" && cancellationReason) {
+          nextStatusTimestamps.cancellation_reason = cancellationReason;
+          nextStatusTimestamps.cancel_reason = cancellationReason;
+        }
+
         const { data: order, error: updateError } = await adminClient
           .from("orders")
           .update({
             status,
-            status_timestamps: withStatusTimestamp(currentOrder?.status_timestamps, status),
+            status_timestamps: nextStatusTimestamps,
+            cancellation_reason: status === "cancelled"
+              ? (cancellationReason || currentOrder?.cancellation_reason || null)
+              : currentOrder?.cancellation_reason ?? null,
           })
           .eq("id", id)
           .select()
@@ -639,13 +652,16 @@ serve(async (req) => {
         const id = body?.id;
         const status = String(body?.status ?? "").trim();
         const options = body?.options && typeof body.options === "object" ? body.options : {};
+        const cancellationReason = typeof options?.cancellationReason === "string"
+          ? options.cancellationReason.trim()
+          : "";
         if (!id || !status) {
           return json(400, { error: "Request id and status are required." });
         }
 
         const { data: currentRequest, error: fetchError } = await adminClient
           .from("requests")
-          .select("status_timestamps, data, user_id, request_number")
+          .select("status_timestamps, data, user_id, request_number, cancellation_reason")
           .eq("id", id)
           .single();
 
@@ -657,6 +673,10 @@ serve(async (req) => {
           status,
           status_timestamps: withStatusTimestamp(currentRequest?.status_timestamps, status),
         };
+
+        if (status === "cancelled" || status === "declined") {
+          updatePayload.cancellation_reason = cancellationReason || currentRequest?.cancellation_reason || null;
+        }
 
         if (options?.dataPatch && typeof options.dataPatch === "object") {
           const currentData = parseMaybeJson(currentRequest?.data);

@@ -596,7 +596,7 @@ const CustomizedCheckout = ({ user }) => {
                                 <span>₱{subtotal.toLocaleString()}</span>
                             </div>
                             <div className="summary-row">
-                                <span>{deliveryMethod === 'pickup' ? 'Pickup' : 'Shipping Fee'}</span>
+                                    <span>{deliveryMethod === 'pickup' ? 'Pickup' : 'Delivery Fee'}</span>
                                 <span>{shippingFee === 0 ? 'FREE' : `₱${shippingFee}`}</span>
                             </div>
                             {deliveryMethod === 'delivery' && multiAddressEnabled && (

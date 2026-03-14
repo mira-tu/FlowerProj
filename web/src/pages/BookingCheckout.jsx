@@ -327,7 +327,7 @@ const BookingCheckout = ({ user }) => {
                                 <span>1</span>
                             </div>
                             <div className="summary-row">
-                                <span>{deliveryMethod === 'pickup' ? 'Pickup' : 'Shipping Fee'}</span>
+                                    <span>{deliveryMethod === 'pickup' ? 'Pickup' : 'Delivery Fee'}</span>
                                 <span>{deliveryMethod === 'pickup' ? 'FREE' : `₱${dynamicShippingFee.toLocaleString()}`}</span>
                             </div>
                             <hr />

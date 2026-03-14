@@ -743,6 +743,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const [declineModalVisible, setDeclineModalVisible] = useState(false);
   const [requestToDecline, setRequestToDecline] = useState(null);
   const [declineFeedback, setDeclineFeedback] = useState('');
+  const [declineAction, setDeclineAction] = useState('decline');
   const [isDeclining, setIsDeclining] = useState(false);
 
   // Payment Recording State
@@ -1150,10 +1151,22 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     }
   };
 
-  const handleDeclineRequest = (request) => {
+  const openRequestDeclineModal = (request, action = 'decline') => {
     setRequestToDecline(request);
+    setDeclineAction(action);
     setDeclineFeedback('');
     setDeclineModalVisible(true);
+  };
+
+  const closeRequestDeclineModal = () => {
+    setDeclineModalVisible(false);
+    setRequestToDecline(null);
+    setDeclineAction('decline');
+    setDeclineFeedback('');
+  };
+
+  const handleDeclineRequest = (request) => {
+    openRequestDeclineModal(request, 'decline');
   };
 
   const submitDeclineRequest = async () => {
@@ -1161,30 +1174,37 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
 
     const feedback = declineFeedback.trim();
     if (!feedback) {
-      Alert.alert('Feedback Required', 'Please provide a short reason before declining this request.');
+      Alert.alert('Reason Required', 'Please provide a short reason before cancelling this request.');
       return;
     }
 
     setIsDeclining(true);
 
     try {
-      await adminAPI.updateRequestStatus(requestToDecline.id, 'declined', {
+      const status = declineAction === 'cancel' ? 'cancelled' : 'declined';
+      await adminAPI.updateRequestStatus(requestToDecline.id, status, {
+        cancellationReason: feedback,
         dataPatch: {
-          decline_feedback: feedback,
-          declined_at: new Date().toISOString(),
+          ...(declineAction === 'decline'
+            ? {
+              decline_feedback: feedback,
+              declined_at: new Date().toISOString(),
+            }
+            : {
+              cancellation_reason: feedback,
+              cancelled_at: new Date().toISOString(),
+            }),
         },
         notification: {
-          title: 'Custom order declined',
-          message: `Your request #${requestToDecline.request_number} was declined. Reason: ${feedback}`,
+          title: declineAction === 'cancel' ? 'Request cancelled' : 'Custom order declined',
+          message: `Your request #${requestToDecline.request_number} was ${declineAction === 'cancel' ? 'cancelled' : 'declined'}. Reason: ${feedback}`,
           link: '/profile',
           type: 'request_update',
         },
       });
 
-      Toast.show({ type: 'success', text1: 'Request Declined' });
-      setDeclineModalVisible(false);
-      setRequestToDecline(null);
-      setDeclineFeedback('');
+      Toast.show({ type: 'success', text1: declineAction === 'cancel' ? 'Request Cancelled' : 'Request Declined' });
+      closeRequestDeclineModal();
       setModalVisible(false);
       loadRequests();
     } catch (error) {
@@ -1242,6 +1262,14 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
   const confirmRequestStatusChange = async () => {
     if (!requestToUpdate || !selectedRequestStatus) return;
     const requestId = requestToUpdate.id;
+
+    if (selectedRequestStatus === 'cancelled') {
+      setRequestStatusModalVisible(false);
+      openRequestDeclineModal(requestToUpdate, 'cancel');
+      setRequestToUpdate(null);
+      setSelectedRequestStatus(null);
+      return;
+    }
 
     try {
       // Rider enforcement: If moving to out_for_delivery, must have a rider assigned
@@ -1849,6 +1877,18 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
           </View>
         ) : null}
 
+        {['cancelled', 'declined'].includes(item.status) && (item.cancellation_reason || item.data?.decline_feedback || item.data?.declineFeedback) ? (
+          <View style={styles.eoSection}>
+            <View style={styles.eoSectionHeader}>
+              <Ionicons name="alert-circle-outline" size={16} color="#EF4444" />
+              <Text style={styles.eoSectionTitle}>Cancellation Reason</Text>
+            </View>
+            <Text style={styles.eoInstructionsText}>
+              {item.cancellation_reason || item.data?.decline_feedback || item.data?.declineFeedback}
+            </Text>
+          </View>
+        ) : null}
+
         {/* Payment Details - Only shown after customer accepted (i.e. status != pending) */}
         {item.status !== 'pending' && (item.payment_status || item.final_price) && (
           <PaymentDetailsSection
@@ -2369,7 +2409,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                     </View>
 
                     <View style={quoteStyles.quoteTotalRow}>
-                      <Text style={quoteStyles.quoteTotalLabel}>Shipping Fee</Text>
+                    <Text style={quoteStyles.quoteTotalLabel}>Delivery Fee</Text>
                       <Text style={quoteStyles.quoteTotalValue}>{formatCurrency(quoteShippingValue)}</Text>
                     </View>
 
@@ -2425,7 +2465,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                     </View>
 
                     <View style={quoteStyles.quoteTotalRow}>
-                      <Text style={quoteStyles.quoteTotalLabel}>Shipping Fee</Text>
+                    <Text style={quoteStyles.quoteTotalLabel}>Delivery Fee</Text>
                       <Text style={quoteStyles.quoteTotalValue}>{formatCurrency(quoteShippingValue)}</Text>
                     </View>
 
@@ -2461,17 +2501,19 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Decline Request</Text>
-              <TouchableOpacity disabled={isDeclining} onPress={() => { setDeclineModalVisible(false); setRequestToDecline(null); setDeclineFeedback(''); }}>
+              <Text style={styles.modalTitle}>{declineAction === 'cancel' ? 'Cancel Request' : 'Decline Request'}</Text>
+              <TouchableOpacity disabled={isDeclining} onPress={closeRequestDeclineModal}>
                 <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
             <Text style={[styles.modalSubtitle, { textAlign: 'left', paddingHorizontal: 20 }]}>Request #{requestToDecline?.request_number}</Text>
             <View style={{ paddingHorizontal: 20, paddingBottom: 10 }}>
-              <Text style={[styles.inputLabel, { marginBottom: 6 }]}>Feedback to customer</Text>
+              <Text style={[styles.inputLabel, { marginBottom: 6 }]}>Reason for customer</Text>
               <TextInput
                 style={[styles.input, { minHeight: 90, textAlignVertical: 'top' }]}
-                placeholder="Explain why this request is being declined"
+                placeholder={declineAction === 'cancel'
+                  ? 'Explain why this request is being cancelled'
+                  : 'Explain why this request is being declined'}
                 multiline
                 value={declineFeedback}
                 onChangeText={setDeclineFeedback}
@@ -2481,7 +2523,7 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => { setDeclineModalVisible(false); setRequestToDecline(null); setDeclineFeedback(''); }}
+                onPress={closeRequestDeclineModal}
                 disabled={isDeclining}
               >
                 <Text style={styles.buttonText}>Cancel</Text>
@@ -2491,7 +2533,11 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
                 onPress={submitDeclineRequest}
                 disabled={isDeclining}
               >
-                <Text style={styles.buttonText}>{isDeclining ? 'Declining...' : 'Decline Request'}</Text>
+                <Text style={styles.buttonText}>
+                  {isDeclining
+                    ? (declineAction === 'cancel' ? 'Cancelling...' : 'Declining...')
+                    : (declineAction === 'cancel' ? 'Send Cancellation' : 'Decline Request')}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>

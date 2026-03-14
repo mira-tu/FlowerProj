@@ -243,20 +243,39 @@ const withStatusTimestamp = (existingValue, status) => ({
     [status]: new Date().toISOString(),
 });
 
-const updateOrderStatusDirect = async (id, status) => {
+const updateOrderStatusDirect = async (id, status, options = {}) => {
     const { data: current, error: fetchError } = await supabase
         .from('orders')
-        .select('status_timestamps')
+        .select('status_timestamps, cancellation_reason')
         .eq('id', id)
         .single();
 
     if (fetchError) {
+        if (fetchError.code === '42703' && String(fetchError.message || '').includes('orders.cancellation_reason')) {
+            throw new Error('The orders.cancellation_reason column is missing. Apply the latest Supabase migration first.');
+        }
         throw fetchError;
+    }
+
+    const cancellationReason = typeof options?.cancellationReason === 'string'
+        ? options.cancellationReason.trim()
+        : '';
+    const nextStatusTimestamps = withStatusTimestamp(current?.status_timestamps, status);
+
+    if (status === 'cancelled' && cancellationReason) {
+        nextStatusTimestamps.cancellation_reason = cancellationReason;
+        nextStatusTimestamps.cancel_reason = cancellationReason;
     }
 
     const { data, error } = await supabase
         .from('orders')
-        .update({ status, status_timestamps: withStatusTimestamp(current?.status_timestamps, status) })
+        .update({
+            status,
+            status_timestamps: nextStatusTimestamps,
+            cancellation_reason: status === 'cancelled'
+                ? (cancellationReason || current?.cancellation_reason || null)
+                : current?.cancellation_reason ?? null,
+        })
         .eq('id', id)
         .select()
         .single();
@@ -323,6 +342,9 @@ const assignOrderStopRidersDirect = async (orderId, stopAssignments = []) => {
         .single();
 
     if (fetchError) {
+        if (fetchError.code === '42703' && String(fetchError.message || '').includes('requests.cancellation_reason')) {
+            throw new Error('The requests.cancellation_reason column is missing. Apply the latest Supabase migration first.');
+        }
         throw fetchError;
     }
 
@@ -458,10 +480,47 @@ const provideQuoteDirect = async (id, price, shippingFee = 0, quoteBreakdown = n
     return { success: true, request };
 };
 
+const getMonthRange = (monthKey) => {
+    const normalizedKey = String(monthKey || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(normalizedKey)) {
+        return null;
+    }
+
+    const [yearText, monthText] = normalizedKey.split('-');
+    const year = Number.parseInt(yearText, 10);
+    const monthIndex = Number.parseInt(monthText, 10) - 1;
+
+    if (!Number.isFinite(year) || !Number.isFinite(monthIndex) || monthIndex < 0 || monthIndex > 11) {
+        return null;
+    }
+
+    const start = new Date(year, monthIndex, 1);
+    const end = new Date(year, monthIndex + 1, 1);
+
+    return {
+        key: normalizedKey,
+        start,
+        end,
+        startIso: start.toISOString(),
+        endIso: end.toISOString(),
+        label: start.toLocaleDateString('en-PH', { month: 'long', year: 'numeric' }),
+    };
+};
+
+const applyDateRangeToQuery = (query, column, range) => {
+    if (!range) {
+        return query;
+    }
+
+    return query
+        .gte(column, range.startIso)
+        .lt(column, range.endIso);
+};
+
 const updateRequestStatusDirect = async (id, status, options = {}) => {
     const { data: current, error: fetchError } = await supabase
         .from('requests')
-        .select('status_timestamps, data, user_id, request_number')
+        .select('status_timestamps, data, user_id, request_number, cancellation_reason')
         .eq('id', id)
         .single();
 
@@ -473,6 +532,13 @@ const updateRequestStatusDirect = async (id, status, options = {}) => {
         status,
         status_timestamps: withStatusTimestamp(current?.status_timestamps, status),
     };
+    const cancellationReason = typeof options?.cancellationReason === 'string'
+        ? options.cancellationReason.trim()
+        : '';
+
+    if (status === 'cancelled' || status === 'declined') {
+        updatePayload.cancellation_reason = cancellationReason || current?.cancellation_reason || null;
+    }
 
     if (options?.dataPatch && typeof options.dataPatch === 'object') {
         updatePayload.data = {
@@ -1076,7 +1142,7 @@ export const authAPI = {
 // Admin API - AsyncStorage-based admin operations
 export const adminAPI = {
     getAllOrders: async (params) => {
-        const buildOrdersQuery = (includeNotes = true) => {
+        const buildOrdersQuery = ({ includeNotes = true, includeCancellationReason = true } = {}) => {
             let query = supabase
                 .from('orders')
                 .select(`
@@ -1093,6 +1159,7 @@ export const adminAPI = {
                     total,
                     subtotal,
                     shipping_fee,
+                    ${includeCancellationReason ? 'cancellation_reason,' : ''}
                     delivery_method,
                     ${includeNotes ? 'notes,' : ''}
                     shipping_address: addresses!address_id(*),
@@ -1124,13 +1191,21 @@ export const adminAPI = {
             return query;
         };
 
-        let { data: orders, error } = await buildOrdersQuery(true);
-        const missingNotesColumn = error?.code === '42703'
-            && String(error?.message || '').includes('orders.notes');
+        let queryOptions = { includeNotes: true, includeCancellationReason: true };
+        let { data: orders, error } = await buildOrdersQuery(queryOptions);
 
-        if (missingNotesColumn) {
+        const missingColumnError = () => error?.code === '42703' ? String(error?.message || '') : '';
+
+        if (missingColumnError().includes('orders.notes')) {
             console.warn('Orders table is missing the notes column; retrying admin order fetch without it.');
-            ({ data: orders, error } = await buildOrdersQuery(false));
+            queryOptions = { ...queryOptions, includeNotes: false };
+            ({ data: orders, error } = await buildOrdersQuery(queryOptions));
+        }
+
+        if (missingColumnError().includes('orders.cancellation_reason')) {
+            console.warn('Orders table is missing the cancellation_reason column; retrying admin order fetch without it.');
+            queryOptions = { ...queryOptions, includeCancellationReason: false };
+            ({ data: orders, error } = await buildOrdersQuery(queryOptions));
         }
 
         if (error) {
@@ -1172,20 +1247,21 @@ export const adminAPI = {
                     ...order.shipping_address,
                     description: shippingAddressDescription
                 } : null,
+                cancellation_reason: order.cancellation_reason || null,
             };
         });
 
         return { data: formattedOrders };
     },
 
-    updateOrderStatus: async (id, status) => {
+    updateOrderStatus: async (id, status, options = {}) => {
         try {
-            const data = await invokeAdminWorkflow('update_order_status', { id, status });
+            const data = await invokeAdminWorkflow('update_order_status', { id, status, options });
             return { data };
         } catch (error) {
             if (!shouldFallbackToDirectWorkflow(error)) throw error;
             console.warn('Falling back to direct order status update:', error.message);
-            return { data: await updateOrderStatusDirect(id, status) };
+            return { data: await updateOrderStatusDirect(id, status, options) };
         }
     },
 
@@ -1226,14 +1302,14 @@ export const adminAPI = {
         }
     },
 
-    declineOrder: async (id, status) => {
+    declineOrder: async (id, status, options = {}) => {
         try {
-            const data = await invokeAdminWorkflow('decline_order', { id, status });
+            const data = await invokeAdminWorkflow('decline_order', { id, status, options });
             return { data };
         } catch (error) {
             if (!shouldFallbackToDirectWorkflow(error)) throw error;
             console.warn('Falling back to direct order decline:', error.message);
-            return { data: await updateOrderStatusDirect(id, status) };
+            return { data: await updateOrderStatusDirect(id, status, options) };
         }
     },
 
@@ -1267,26 +1343,37 @@ export const adminAPI = {
         }
     },
 
-    getStats: async () => {
-        const { count: completedOrders, error: completedOrdersError } = await supabase
+    getStats: async (filters = {}) => {
+        const monthRange = getMonthRange(filters?.monthKey);
+
+        let completedOrdersQuery = supabase
             .from('orders')
             .select('*', { count: 'exact', head: true })
             .in('status', ['completed', 'claimed']);
-
-        const { count: pendingOrders, error: pendingOrdersError } = await supabase
+        let pendingOrdersQuery = supabase
             .from('orders')
             .select('*', { count: 'exact', head: true })
             .eq('status', 'pending');
-
-        const { count: completedRequests, error: completedRequestsError } = await supabase
+        let completedRequestsQuery = supabase
             .from('requests')
             .select('*', { count: 'exact', head: true })
             .eq('status', 'completed');
-
-        const { count: pendingRequests, error: pendingRequestsError } = await supabase
+        let pendingRequestsQuery = supabase
             .from('requests')
             .select('*', { count: 'exact', head: true })
             .eq('status', 'pending');
+
+        if (monthRange) {
+            completedOrdersQuery = applyDateRangeToQuery(completedOrdersQuery, 'created_at', monthRange);
+            pendingOrdersQuery = applyDateRangeToQuery(pendingOrdersQuery, 'created_at', monthRange);
+            completedRequestsQuery = applyDateRangeToQuery(completedRequestsQuery, 'created_at', monthRange);
+            pendingRequestsQuery = applyDateRangeToQuery(pendingRequestsQuery, 'created_at', monthRange);
+        }
+
+        const { count: completedOrders, error: completedOrdersError } = await completedOrdersQuery;
+        const { count: pendingOrders, error: pendingOrdersError } = await pendingOrdersQuery;
+        const { count: completedRequests, error: completedRequestsError } = await completedRequestsQuery;
+        const { count: pendingRequests, error: pendingRequestsError } = await pendingRequestsQuery;
 
         if (completedOrdersError || pendingOrdersError || completedRequestsError || pendingRequestsError) {
             console.error({ completedOrdersError, pendingOrdersError, completedRequestsError, pendingRequestsError });
@@ -1305,8 +1392,12 @@ export const adminAPI = {
 
 
 
-    getSalesSummary: async () => {
-        const { data: sales, error: salesError } = await supabase.from('sales').select('total_amount, sale_date');
+    getSalesSummary: async (filters = {}) => {
+        const monthRange = getMonthRange(filters?.monthKey);
+        let salesQuery = supabase.from('sales').select('total_amount, sale_date');
+        salesQuery = applyDateRangeToQuery(salesQuery, 'sale_date', monthRange);
+
+        const { data: sales, error: salesError } = await salesQuery;
 
         if (salesError) {
             console.error('Error fetching sales:', salesError);
@@ -1316,64 +1407,79 @@ export const adminAPI = {
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-        let totalSales = 0, todaySales = 0, weekSales = 0, monthSales = 0;
+        let totalSales = 0;
+        let todaySales = 0;
+        let weekSales = 0;
+        let monthSales = 0;
 
         (sales || []).forEach((sale) => {
             const saleDate = new Date(sale.sale_date);
             const saleAmount = parseFloat(sale.total_amount || 0);
 
-            if (!isNaN(saleAmount) && saleDate.getTime()) {
-                totalSales += saleAmount;
-                if (saleDate >= today) todaySales += saleAmount;
-                if (saleDate >= new Date(weekAgo)) weekSales += saleAmount;
-                if (saleDate >= new Date(monthAgo)) monthSales += saleAmount;
-            } else {
-                console.warn('Skipping invalid sale record:', sale);
+            if (!Number.isFinite(saleAmount) || Number.isNaN(saleDate.getTime())) {
+                return;
+            }
+
+            totalSales += saleAmount;
+            if (saleDate >= today) todaySales += saleAmount;
+            if (saleDate >= weekAgo) weekSales += saleAmount;
+            if (monthRange) {
+                monthSales += saleAmount;
+            } else if (saleDate >= currentMonthStart) {
+                monthSales += saleAmount;
             }
         });
 
-        const { data: stats, error: statsError } = await adminAPI.getStats();
-        if (statsError) {
-            console.error('Error fetching stats:', statsError);
-            throw statsError;
-        }
+        const { data: stats } = await adminAPI.getStats({ monthKey: monthRange?.key || null });
 
-        const { count: totalOrders, error: totalOrdersError } = await supabase
+        let totalOrdersQuery = supabase
             .from('orders')
             .select('*', { count: 'exact', head: true });
+        let totalRequestsQuery = supabase
+            .from('requests')
+            .select('*', { count: 'exact', head: true });
+
+        totalOrdersQuery = applyDateRangeToQuery(totalOrdersQuery, 'created_at', monthRange);
+        totalRequestsQuery = applyDateRangeToQuery(totalRequestsQuery, 'created_at', monthRange);
+
+        const { count: totalOrders, error: totalOrdersError } = await totalOrdersQuery;
         if (totalOrdersError) {
             console.error('Error fetching total orders:', totalOrdersError);
             throw totalOrdersError;
         }
 
-        const { count: totalRequests, error: totalRequestsError } = await supabase
-            .from('requests')
-            .select('*', { count: 'exact', head: true });
+        const { count: totalRequests, error: totalRequestsError } = await totalRequestsQuery;
         if (totalRequestsError) {
             console.error('Error fetching total requests:', totalRequestsError);
             throw totalRequestsError;
         }
 
-        const summary = {
-            totalSales,
-            todaySales,
-            weekSales,
-            monthSales,
-            totalOrders: (totalOrders || 0) + (totalRequests || 0),
-            completedOrders: stats.completedOrders + stats.completedRequests,
-            pendingOrders: stats.pendingOrders + stats.pendingRequests,
+        return {
+            data: {
+                totalSales,
+                todaySales,
+                weekSales,
+                monthSales,
+                totalOrders: (totalOrders || 0) + (totalRequests || 0),
+                completedOrders: (stats?.completedOrders || 0) + (stats?.completedRequests || 0),
+                pendingOrders: (stats?.pendingOrders || 0) + (stats?.pendingRequests || 0),
+                monthLabel: monthRange?.label || null,
+            }
         };
-
-        return { data: summary };
     },
 
-    getSalesChartData: async () => {
-        const { data, error } = await supabase
+    getSalesChartData: async (period = 'week', monthKey = null) => {
+        const monthRange = getMonthRange(monthKey);
+        let query = supabase
             .from('sales')
             .select('sale_date, total_amount')
             .order('sale_date', { ascending: true });
+
+        query = applyDateRangeToQuery(query, 'sale_date', period === 'month' ? monthRange : null);
+
+        const { data, error } = await query;
 
         if (error) {
             console.error('Error fetching sales chart data:', error);
@@ -1382,48 +1488,68 @@ export const adminAPI = {
         return { data };
     },
 
-    getBestSellingProducts: async () => {
-        // Get all completed order items with product info
-        const { data: orderItems, error } = await supabase
-            .from('order_items')
+    getBestSellingProducts: async (monthKey = null) => {
+        const monthRange = getMonthRange(monthKey);
+        let query = supabase
+            .from('sales')
             .select(`
-                product_id,
-                quantity,
-                products (
-                    name,
-                    image_url,
-                    price
+                sale_date,
+                orders (
+                    order_items (
+                        product_id,
+                        quantity,
+                        price,
+                        products (
+                            name,
+                            image_url,
+                            price
+                        )
+                    )
                 )
-            `);
+            `)
+            .not('order_id', 'is', null);
+
+        query = applyDateRangeToQuery(query, 'sale_date', monthRange);
+
+        const { data, error } = await query;
 
         if (error) {
             console.error('Error fetching best selling products:', error);
             throw error;
         }
 
-        // Aggregate by product_id
         const productMap = {};
-        (orderItems || []).forEach(item => {
-            const id = item.product_id;
-            if (!productMap[id]) {
-                productMap[id] = {
-                    product_id: id,
-                    name: item.products?.name || 'Unknown',
-                    image_url: item.products?.image_url || null,
-                    price: item.products?.price || 0,
-                    total_sold: 0,
-                    total_revenue: 0,
-                };
-            }
-            productMap[id].total_sold += item.quantity;
-            productMap[id].total_revenue += item.quantity * parseFloat(item.products?.price || 0);
+
+        (data || []).forEach((sale) => {
+            (sale.orders?.order_items || []).forEach((item) => {
+                const id = item.product_id;
+                if (!id) {
+                    return;
+                }
+
+                if (!productMap[id]) {
+                    productMap[id] = {
+                        product_id: id,
+                        name: item.products?.name || 'Unknown',
+                        image_url: item.products?.image_url || null,
+                        price: item.products?.price || item.price || 0,
+                        total_sold: 0,
+                        total_revenue: 0,
+                    };
+                }
+
+                const quantity = Number(item.quantity || 0);
+                const unitPrice = Number(item.price || item.products?.price || 0);
+                productMap[id].total_sold += quantity;
+                productMap[id].total_revenue += quantity * unitPrice;
+            });
         });
 
         const sorted = Object.values(productMap).sort((a, b) => b.total_sold - a.total_sold);
         return { data: sorted.slice(0, 5) };
     },
 
-    getTransactionHistory: async (period = 'all') => {
+    getTransactionHistory: async (period = 'all', monthKey = null) => {
         let query = supabase
             .from('sales')
             .select(`
@@ -1454,14 +1580,13 @@ export const adminAPI = {
             `)
             .order('sale_date', { ascending: false });
 
-        // Apply period filter
         const now = new Date();
+        const monthRange = getMonthRange(monthKey);
         if (period === 'week') {
             const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
             query = query.gte('sale_date', weekAgo.toISOString());
         } else if (period === 'month') {
-            const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-            query = query.gte('sale_date', monthAgo.toISOString());
+            query = applyDateRangeToQuery(query, 'sale_date', monthRange);
         }
 
         const { data, error } = await query;
@@ -1501,7 +1626,7 @@ export const adminAPI = {
     },
 
     getAllRequests: async (params) => {
-        let query = supabase
+        const buildRequestsQuery = (includeCancellationReason = true) => supabase
             .from('requests')
             .select(`
                 id,
@@ -1511,6 +1636,7 @@ export const adminAPI = {
                 contact_number,
                 image_url,
                 notes,
+                ${includeCancellationReason ? 'cancellation_reason,' : ''}
                 data,
                 created_at,
                 delivery_method,
@@ -1531,7 +1657,12 @@ export const adminAPI = {
             `)
             .order('created_at', { ascending: false });
 
-        const { data: requests, error } = await query;
+        let { data: requests, error } = await buildRequestsQuery(true);
+
+        if (error?.code === '42703' && String(error?.message || '').includes('requests.cancellation_reason')) {
+            console.warn('Requests table is missing the cancellation_reason column; retrying admin request fetch without it.');
+            ({ data: requests, error } = await buildRequestsQuery(false));
+        }
 
         if (error) {
             console.error('Supabase query error for requests:', error);
@@ -1582,6 +1713,7 @@ export const adminAPI = {
                 user_phone: userData.phone,
                 users: userData,
                 data: requestData,
+                cancellation_reason: req.cancellation_reason || requestData?.cancellation_reason || requestData?.decline_feedback || requestData?.declineFeedback || null,
             };
         });
 

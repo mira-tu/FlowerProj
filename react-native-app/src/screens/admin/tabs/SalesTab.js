@@ -22,6 +22,39 @@ import { adminAPI } from '../../../config/api';
 import { supabase } from '../../../config/supabase';
 import styles from '../../AdminDashboard.styles';
 
+const formatMonthKey = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+};
+
+const getMonthRange = (monthKey) => {
+  const normalizedKey = String(monthKey || '').trim();
+  if (!/^\d{4}-\d{2}$/.test(normalizedKey)) {
+    return null;
+  }
+
+  const [yearText, monthText] = normalizedKey.split('-');
+  const start = new Date(Number(yearText), Number(monthText) - 1, 1);
+  const end = new Date(Number(yearText), Number(monthText), 1);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return null;
+  }
+
+  return { start, end };
+};
+
+const buildYearMonthOptions = (year = new Date().getFullYear()) => Array.from({ length: 12 }, (_, index) => {
+  const date = new Date(year, index, 1);
+
+  return {
+    key: formatMonthKey(date),
+    label: date.toLocaleDateString('en-PH', { month: 'short', year: 'numeric' }),
+    fullLabel: date.toLocaleDateString('en-PH', { month: 'long', year: 'numeric' }),
+  };
+});
+
 const SalesTab = () => {
   const { width } = useWindowDimensions();
   const isWeb = Platform.OS === 'web';
@@ -41,6 +74,7 @@ const SalesTab = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState('week');
+  const [selectedMonthKey, setSelectedMonthKey] = useState(formatMonthKey(new Date()));
   const [bestSellers, setBestSellers] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [expandedTxn, setExpandedTxn] = useState(null);
@@ -50,8 +84,10 @@ const SalesTab = () => {
     summary: true,
     bestSellers: true,
     transactions: true,
-    period: 'week' // Default period for export
+    period: 'week'
   });
+  const monthOptions = React.useMemo(() => buildYearMonthOptions(new Date().getFullYear()), []);
+  const selectedMonthOption = monthOptions.find((option) => option.key === selectedMonthKey) || monthOptions[0];
 
   useEffect(() => {
     loadAllData();
@@ -66,7 +102,7 @@ const SalesTab = () => {
     return () => {
       supabase.removeChannel(subscription);
     };
-  }, [selectedPeriod]);
+  }, [selectedPeriod, selectedMonthKey]);
 
   const loadAllData = async () => {
     setLoading(true);
@@ -85,7 +121,9 @@ const SalesTab = () => {
 
   const loadSalesData = async () => {
     try {
-      const summaryRes = await adminAPI.getSalesSummary();
+      const activeMonthKey = selectedPeriod === 'month' ? selectedMonthKey : null;
+      const selectedMonthRange = selectedPeriod === 'month' ? getMonthRange(selectedMonthKey) : null;
+      const summaryRes = await adminAPI.getSalesSummary({ monthKey: activeMonthKey });
       if (summaryRes.error) throw summaryRes.error;
       const summary = summaryRes.data;
 
@@ -100,7 +138,7 @@ const SalesTab = () => {
       });
 
       // Process data for chart
-      const chartRes = await adminAPI.getSalesChartData();
+      const chartRes = await adminAPI.getSalesChartData(selectedPeriod, activeMonthKey);
       if (chartRes.error) throw chartRes.error;
       const allSales = chartRes.data || [];
 
@@ -141,19 +179,18 @@ const SalesTab = () => {
         });
         data = Array.from(dailyData.values());
 
-      } else if (selectedPeriod === 'month') {
-        labels = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
-        data = [0, 0, 0, 0];
-        const now = new Date();
+      } else if (selectedPeriod === 'month' && selectedMonthRange) {
+        const totalDays = Math.max(1, Math.ceil((selectedMonthRange.end - selectedMonthRange.start) / (1000 * 60 * 60 * 24)));
+        const weekCount = Math.max(4, Math.ceil(totalDays / 7));
+        labels = Array.from({ length: weekCount }, (_, index) => `Week ${index + 1}`);
+        data = Array(weekCount).fill(0);
 
         allSales.forEach(sale => {
           const saleDate = new Date(sale.sale_date);
-          const diffDays = Math.floor((now - saleDate) / (1000 * 60 * 60 * 24));
-          if (diffDays >= 0 && diffDays < 28) {
-            const weekIndex = Math.floor(diffDays / 7);
-            if (weekIndex >= 0 && weekIndex < 4) {
-              data[weekIndex] += parseFloat(sale.total_amount || 0);
-            }
+          if (saleDate >= selectedMonthRange.start && saleDate < selectedMonthRange.end) {
+            const diffDays = Math.floor((saleDate - selectedMonthRange.start) / (1000 * 60 * 60 * 24));
+            const weekIndex = Math.min(weekCount - 1, Math.floor(diffDays / 7));
+            data[weekIndex] += parseFloat(sale.total_amount || 0);
           }
         });
       } else {
@@ -194,7 +231,7 @@ const SalesTab = () => {
 
   const loadBestSellers = async () => {
     try {
-      const res = await adminAPI.getBestSellingProducts();
+      const res = await adminAPI.getBestSellingProducts(selectedPeriod === 'month' ? selectedMonthKey : null);
       setBestSellers(res.data || []);
     } catch (error) {
       console.error('Error loading best sellers:', error);
@@ -204,7 +241,10 @@ const SalesTab = () => {
 
   const loadTransactions = async () => {
     try {
-      const res = await adminAPI.getTransactionHistory(selectedPeriod);
+      const res = await adminAPI.getTransactionHistory(
+        selectedPeriod,
+        selectedPeriod === 'month' ? selectedMonthKey : null
+      );
       setTransactions(res.data || []);
     } catch (error) {
       console.error('Error loading transactions:', error);
@@ -258,7 +298,8 @@ const SalesTab = () => {
     setExportModalVisible(false); // Close modal
     setExporting(true);
 
-    const { summary, bestSellers: showBestSellers, transactions: showTransactions, period } = exportOptions;
+    const { summary, bestSellers: showBestSellers, transactions: showTransactions } = exportOptions;
+    const period = selectedPeriod;
 
     try {
       const currentSales = period === 'today' ? salesData.todaySales :
@@ -266,7 +307,9 @@ const SalesTab = () => {
           period === 'month' ? salesData.monthSales :
             salesData.totalSales;
 
-      const periodLabel = period.charAt(0).toUpperCase() + period.slice(1);
+      const periodLabel = period === 'month' && selectedMonthOption
+        ? selectedMonthOption.fullLabel
+        : period.charAt(0).toUpperCase() + period.slice(1);
       const dateGenerated = new Date().toLocaleDateString('en-PH', {
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
         hour: '2-digit', minute: '2-digit',
@@ -412,6 +455,11 @@ const SalesTab = () => {
     selectedPeriod === 'week' ? salesData.weekSales :
       selectedPeriod === 'month' ? salesData.monthSales :
         salesData.totalSales;
+  const currentSalesLabel = selectedPeriod === 'all'
+    ? 'Total Sales'
+    : selectedPeriod === 'month' && selectedMonthOption
+      ? `Sales (${selectedMonthOption.fullLabel})`
+      : `Sales (${selectedPeriod.charAt(0).toUpperCase() + selectedPeriod.slice(1)})`;
 
   return (
     <>
@@ -473,6 +521,31 @@ const SalesTab = () => {
           </ScrollView>
         </View>
 
+        {selectedPeriod === 'month' && (
+          <View style={styles.filterContainer}>
+            <Text style={styles.filterLabel}>Month:</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
+              {monthOptions.map((monthOption) => (
+                <TouchableOpacity
+                  key={monthOption.key}
+                  style={[
+                    styles.categoryChip,
+                    selectedMonthKey === monthOption.key && styles.categoryChipActive
+                  ]}
+                  onPress={() => setSelectedMonthKey(monthOption.key)}
+                >
+                  <Text style={[
+                    styles.categoryChipText,
+                    selectedMonthKey === monthOption.key && styles.categoryChipTextActive
+                  ]}>
+                    {monthOption.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
         {/* Sales Chart */}
         <View style={{
           marginVertical: 8,
@@ -515,9 +588,7 @@ const SalesTab = () => {
           <View style={styles.salesCard}>
             <Ionicons name="cash" size={32} color="#4CAF50" />
             <Text style={styles.salesCardValue}>{formatCurrency(currentSales)}</Text>
-            <Text style={styles.salesCardLabel}>
-              {selectedPeriod === 'all' ? 'Total Sales' : `Sales (${selectedPeriod.charAt(0).toUpperCase() + selectedPeriod.slice(1)})`}
-            </Text>
+            <Text style={styles.salesCardLabel}>{currentSalesLabel}</Text>
           </View>
 
           <View style={styles.salesCard}>
@@ -746,21 +817,13 @@ const SalesTab = () => {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Export Options</Text>
 
-            <Text style={{ marginTop: 10, marginBottom: 5, fontWeight: 'bold' }}>Period</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              {['today', 'week', 'month', 'year'].map(p => (
-                <TouchableOpacity
-                  key={p}
-                  onPress={() => setExportOptions(prev => ({ ...prev, period: p }))}
-                  style={{
-                    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
-                    backgroundColor: exportOptions.period === p ? '#ec4899' : '#f3f4f6'
-                  }}
-                >
-                  <Text style={{ color: exportOptions.period === p ? '#fff' : '#333', textTransform: 'capitalize' }}>{p}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <Text style={{ marginTop: 10, marginBottom: 10, color: '#6B7280' }}>
+              Exporting the current dashboard filter:
+              {' '}
+              <Text style={{ fontWeight: '700', color: '#111827' }}>
+                {selectedPeriod === 'month' && selectedMonthOption ? selectedMonthOption.fullLabel : selectedPeriod}
+              </Text>
+            </Text>
 
             <Text style={{ marginTop: 15, marginBottom: 5, fontWeight: 'bold' }}>Include Sections</Text>
 

@@ -364,6 +364,13 @@ const OrderCustomizedTracking = () => {
         updatedAt: request?.updated_at
     });
     const customizedTrackingItems = getCustomizedTrackingItems(request);
+    const cancellationReason = request?.cancellation_reason
+        || request?.status_timestamps?.cancellation_reason
+        || request?.status_timestamps?.cancel_reason
+        || request?.requestData?.cancellation_reason
+        || request?.requestData?.decline_feedback
+        || request?.requestData?.declineFeedback
+        || null;
     const isPickup = request?.deliveryMethod === 'pickup';
     const isFinalStep = currentStep >= trackingSteps.length && currentStep !== -1;
     const isDeclinedOrCancelled = currentStep === -1;
@@ -467,7 +474,11 @@ const OrderCustomizedTracking = () => {
                             <div className="expected-delivery">
                                 {!isFinalStep && !isDeclinedOrCancelled && `Expected resolution by: ${getExpectedResolutionDate()}`}
 
-                                {isDeclinedOrCancelled && (request.status === 'declined' ? 'Request not fulfilled.' : 'Request cancelled by user.')}
+                                {isDeclinedOrCancelled && (
+                                    cancellationReason
+                                        ? `${request.status === 'declined' ? 'Declined' : 'Cancelled'}: ${cancellationReason}`
+                                        : (request.status === 'declined' ? 'Request not fulfilled.' : 'Request cancelled by user.')
+                                )}
                             </div>
                         </div>
                     </div>
@@ -550,6 +561,7 @@ const OrderCustomizedTracking = () => {
                                         <div className="timeline-content">
                                             <h5>Request {request.status === 'declined' ? 'Declined' : 'Cancelled'}</h5>
                                             <p>{request.status === 'declined' ? 'Your request could not be fulfilled.' : 'You have cancelled this request.'}</p>
+                                            <p className="mb-1"><strong>Reason:</strong> {cancellationReason || (request.status === 'cancelled' ? 'Cancelled by customer' : 'No decline feedback provided.')}</p>
                                             <div className="timeline-date">{new Date(request.date).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
                                         </div>
                                     </div>
@@ -654,7 +666,7 @@ const OrderCustomizedTracking = () => {
                                     <span>{request.requestData.subtotal ? `₱${request.requestData.subtotal.toLocaleString()}` : 'N/A'}</span>
                                 </div>
                                 <div className="d-flex justify-content-between mb-3 small text-muted">
-                                    <span>Shipping Fee</span>
+                                    <span>Delivery Fee</span>
                                     <span>
                                         {request.deliveryMethod === 'pickup'
                                             ? 'FREE'

@@ -89,6 +89,7 @@ CREATE TABLE orders (
   pickup_time VARCHAR(50),
   receipt_url VARCHAR(255),
   notes TEXT,
+  cancellation_reason TEXT,
   status order_status NOT NULL,
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id),
@@ -117,6 +118,7 @@ CREATE TABLE requests (
   contact_number VARCHAR(20),
   photo_url VARCHAR(255),
   notes TEXT,
+  cancellation_reason TEXT,
   final_price DECIMAL(10, 2),
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id)

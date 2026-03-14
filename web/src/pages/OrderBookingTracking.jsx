@@ -314,6 +314,13 @@ const OrderBookingTracking = () => {
         createdAt: request?.date,
         updatedAt: request?.updated_at
     });
+    const cancellationReason = request?.cancellation_reason
+        || request?.status_timestamps?.cancellation_reason
+        || request?.status_timestamps?.cancel_reason
+        || request?.requestData?.cancellation_reason
+        || request?.requestData?.decline_feedback
+        || request?.requestData?.declineFeedback
+        || null;
     const isPickup = request?.deliveryMethod === 'pickup';
     const isFinalStep = currentStep >= trackingSteps.length && currentStep !== -1;
     const isDeclinedOrCancelled = currentStep === -1;
@@ -422,11 +429,9 @@ const OrderBookingTracking = () => {
                                         `Expected resolution by: ${getExpectedResolutionDate()}`
                                 )}
 
-                                {isDeclinedOrCancelled && (request.status === 'declined'
-                                    ? ((request.requestData?.decline_feedback || request.requestData?.declineFeedback)
-                                        ? `Declined: ${request.requestData?.decline_feedback || request.requestData?.declineFeedback}`
-                                        : 'Request not fulfilled.')
-                                    : 'Request cancelled by user.')}
+                                {isDeclinedOrCancelled && (cancellationReason
+                                    ? `${request.status === 'declined' ? 'Declined' : 'Cancelled'}: ${cancellationReason}`
+                                    : (request.status === 'declined' ? 'Request not fulfilled.' : 'Request cancelled by user.'))}
                             </div>
                         </div>
                     </div>
@@ -522,9 +527,7 @@ const OrderBookingTracking = () => {
                                             <div className="timeline-content">
                                                 <h5>Request {request.status === 'declined' ? 'Declined' : 'Cancelled'}</h5>
                                                 <p>{request.status === 'declined' ? 'Your request could not be fulfilled.' : 'You have cancelled this request.'}</p>
-                                                {request.status === 'declined' && (request.requestData?.decline_feedback || request.requestData?.declineFeedback) && (
-                                                    <p className="mb-1"><strong>Reason:</strong> {request.requestData?.decline_feedback || request.requestData?.declineFeedback}</p>
-                                                )}
+                                                <p className="mb-1"><strong>Reason:</strong> {cancellationReason || (request.status === 'cancelled' ? 'Cancelled by customer' : 'No decline feedback provided.')}</p>
                                                 <div className="timeline-date">{new Date(request.date).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
                                             </div>
                                         </div>
@@ -711,7 +714,7 @@ const OrderBookingTracking = () => {
                                             <span className="fw-semibold">₱{subtotal.toLocaleString()}</span>
                                         </div>
                                         <div className="d-flex justify-content-between small">
-                                            <span>Shipping Fee</span>
+                                        <span>Delivery Fee</span>
                                             <span className="fw-semibold">₱{shipping.toLocaleString()}</span>
                                         </div>
                                         <div className="d-flex justify-content-between fw-bold mt-1" style={{ color: 'var(--shop-pink)' }}>

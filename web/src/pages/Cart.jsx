@@ -285,7 +285,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                 <span>₱{productTotal.toLocaleString()}</span>
             </div>
             <div className="d-flex justify-content-between mb-2">
-                <span className="text-muted">Shipping Fee</span>
+                                        <span className="text-muted">Delivery Fee</span>
                 <span className="fst-italic text-muted small mt-1">Calculated at checkout</span>
             </div>
             <hr />
@@ -310,7 +310,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                 <span>₱{customizedTotal.toLocaleString()}</span>
             </div>
             <div className="d-flex justify-content-between mb-2">
-                <span className="text-muted">Shipping Fee</span>
+                                            <span className="text-muted">Delivery Fee</span>
                 <span className="fst-italic text-muted small mt-1">Calculated at checkout</span>
             </div>
             <hr />

@@ -43,7 +43,7 @@ const TrackingPaymentDetails = ({
                         </div>
                         {shippingFee > 0 && (
                             <div className="d-flex justify-content-between mb-1">
-                                <span className="small text-muted">Shipping Fee:</span>
+                <span className="small text-muted">Delivery Fee:</span>
                                 <span className="fw-bold">₱{shippingFee.toLocaleString()}</span>
                             </div>
                         )}
