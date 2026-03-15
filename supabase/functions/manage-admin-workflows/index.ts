@@ -17,7 +17,9 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "
 const GMAIL_USER = Deno.env.get("GMAIL_USER") ?? "";
 const GMAIL_APP_PASSWORD = Deno.env.get("GMAIL_APP_PASSWORD") ?? "";
 const ALLOWED_ROLES = new Set(["admin", "employee"]);
+const CUSTOMER_REFUND_ACTIONS = new Set(["create_refund_request", "submit_refund_gcash_details"]);
 const MULTI_DELIVERY_NOTES_PREFIX = "[multi_delivery_v1]";
+const ACTIVE_REFUND_STATUSES = ["requested", "approved", "gcash_submitted", "processing"];
 
 const transporter = GMAIL_USER && GMAIL_APP_PASSWORD
   ? nodemailer.createTransport({
@@ -180,6 +182,144 @@ const insertNotificationSafely = async (
   if (error) {
     console.error("Failed to insert notification:", error);
   }
+};
+
+const insertNotificationsSafely = async (
+  adminClient: ReturnType<typeof createClient>,
+  notifications: Record<string, unknown>[],
+) => {
+  const payload = notifications.filter(Boolean);
+  if (!payload.length) {
+    return;
+  }
+
+  const { error } = await adminClient.from("notifications").insert(payload);
+
+  if (error) {
+    console.error("Failed to insert notifications:", error);
+  }
+};
+
+const getUsersByRoles = async (
+  adminClient: ReturnType<typeof createClient>,
+  roles: string[],
+) => {
+  const { data, error } = await adminClient
+    .from("users")
+    .select("id, role")
+    .in("role", roles);
+
+  if (error) {
+    console.error("Failed to load users for refund notifications:", error);
+    return [];
+  }
+
+  return Array.isArray(data) ? data : [];
+};
+
+const parseAmount = (value: unknown, fallback = 0) => {
+  const parsed = Number.parseFloat(String(value ?? fallback));
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const getEntityRefundDetails = async (
+  adminClient: ReturnType<typeof createClient>,
+  entityType: "order" | "request",
+  entityId: unknown,
+) => {
+  if (entityType === "order") {
+    const { data: order, error } = await adminClient
+      .from("orders")
+      .select("id, order_number, user_id, payment_method, payment_status, amount_received, total, status")
+      .eq("id", entityId)
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    const amountReceived = parseAmount(order?.amount_received);
+    const defaultRefundAmount = amountReceived > 0 ? amountReceived : parseAmount(order?.total);
+
+    return {
+      entityType,
+      entityId: order.id,
+      referenceNumber: String(order.order_number ?? order.id),
+      customerId: order.user_id,
+      paymentMethod: String(order.payment_method ?? "").trim().toLowerCase(),
+      paymentStatus: String(order.payment_status ?? "").trim().toLowerCase(),
+      amountReceived,
+      defaultRefundAmount,
+      sourceStatus: String(order.status ?? "").trim().toLowerCase(),
+    };
+  }
+
+  const { data: request, error } = await adminClient
+    .from("requests")
+    .select("id, request_number, user_id, payment_status, amount_received, final_price, status, data")
+    .eq("id", entityId)
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  const requestData = parseMaybeJson(request?.data);
+  const paymentMethod = String(
+    requestData?.payment_method
+      ?? "gcash"
+  ).trim().toLowerCase();
+  const amountReceived = parseAmount(request?.amount_received);
+  const defaultRefundAmount = amountReceived > 0 ? amountReceived : parseAmount(request?.final_price);
+
+  return {
+    entityType,
+    entityId: request.id,
+    referenceNumber: String(request.request_number ?? request.id),
+    customerId: request.user_id,
+    paymentMethod,
+    paymentStatus: String(request.payment_status ?? "").trim().toLowerCase(),
+    amountReceived,
+    defaultRefundAmount,
+    sourceStatus: String(request.status ?? "").trim().toLowerCase(),
+  };
+};
+
+const validateRefundEligibility = (entity: Record<string, unknown>) => {
+  const paymentStatus = String(entity.paymentStatus ?? "").trim().toLowerCase();
+  const amountReceived = parseAmount(entity.amountReceived);
+  const defaultRefundAmount = parseAmount(entity.defaultRefundAmount);
+
+  if (paymentStatus !== "paid" && amountReceived <= 0) {
+    throw new Error("Refunds can only be requested for orders or requests with a recorded payment.");
+  }
+
+  if (defaultRefundAmount <= 0) {
+    throw new Error("There is no refundable amount available for this transaction.");
+  }
+};
+
+const findActiveRefund = async (
+  adminClient: ReturnType<typeof createClient>,
+  entityType: "order" | "request",
+  entityId: unknown,
+) => {
+  const query = adminClient
+    .from("refund_requests")
+    .select("*")
+    .in("status", ACTIVE_REFUND_STATUSES)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  const { data, error } = await (entityType === "order"
+    ? query.eq("order_id", entityId)
+    : query.eq("request_id", entityId));
+
+  if (error) {
+    throw error;
+  }
+
+  return Array.isArray(data) && data.length ? data[0] : null;
 };
 
 const sendAssignmentEmailSafely = async ({
@@ -407,6 +547,9 @@ serve(async (req) => {
       return json(401, { error: "Unauthorized request." });
     }
 
+    const body = await req.json();
+    const action = String(body?.action ?? "").trim();
+
     const { data: callerProfile, error: profileError } = await adminClient
       .from("users")
       .select("role")
@@ -414,18 +557,142 @@ serve(async (req) => {
       .single();
 
     const callerRole = callerProfile?.role ?? caller.user_metadata?.role ?? null;
-    if (profileError && !callerRole) {
+    const isStaffCaller = Boolean(callerRole && ALLOWED_ROLES.has(callerRole));
+    const isCustomerRefundAction = CUSTOMER_REFUND_ACTIONS.has(action);
+
+    if (profileError && !callerRole && !isCustomerRefundAction) {
       return json(403, { error: "Could not verify caller role." });
     }
 
-    if (!callerRole || !ALLOWED_ROLES.has(callerRole)) {
+    if (!isCustomerRefundAction && !isStaffCaller) {
       return json(403, { error: "Only admin and employee accounts can perform this action." });
     }
 
-    const body = await req.json();
-    const action = String(body?.action ?? "").trim();
-
     switch (action) {
+      case "create_refund_request": {
+        const entityType = body?.entityType === "request" ? "request" : "order";
+        const entityId = body?.entityId ?? body?.orderId ?? body?.requestId;
+        const customerReason = String(body?.reason ?? "").trim();
+
+        if (!entityId || !customerReason) {
+          return json(400, { error: "A refund target and reason are required." });
+        }
+
+        const entity = await getEntityRefundDetails(adminClient, entityType, entityId);
+        if (String(entity.customerId) !== String(caller.id)) {
+          return json(403, { error: "You can only request refunds for your own transactions." });
+        }
+
+        validateRefundEligibility(entity);
+
+        const existingRefund = await findActiveRefund(adminClient, entityType, entity.entityId);
+        if (existingRefund) {
+          return json(409, { error: "A refund request is already in progress for this transaction." });
+        }
+
+        const requestedRefundAmount = parseAmount(body?.refundAmount, parseAmount(entity.defaultRefundAmount));
+        const cappedRefundAmount = Math.min(requestedRefundAmount, parseAmount(entity.defaultRefundAmount));
+
+        const insertPayload = {
+          entity_type: entityType,
+          order_id: entityType === "order" ? entity.entityId : null,
+          request_id: entityType === "request" ? entity.entityId : null,
+          customer_id: caller.id,
+          status: "requested",
+          refund_amount: cappedRefundAmount,
+          customer_reason: customerReason,
+          updated_at: new Date().toISOString(),
+        };
+
+        const { data: refundRequest, error: insertError } = await adminClient
+          .from("refund_requests")
+          .insert([insertPayload])
+          .select()
+          .single();
+
+        if (insertError) {
+          throw insertError;
+        }
+
+        const adminUsers = await getUsersByRoles(adminClient, ["admin"]);
+        await insertNotificationsSafely(
+          adminClient,
+          adminUsers.map((adminUser) => ({
+            user_id: adminUser.id,
+            title: "Refund request submitted",
+            message: `A customer requested a refund for ${entityType} #${entity.referenceNumber}.`,
+            type: "refund_request",
+            link: entityType === "order" ? `orders/${entity.entityId}` : `requests/${entity.entityId}`,
+          })),
+        );
+
+        return json(200, { success: true, refundRequest });
+      }
+
+      case "submit_refund_gcash_details": {
+        const refundId = body?.refundId;
+        const gcashName = String(body?.gcashName ?? "").trim();
+        const normalizedGcashNumber = String(body?.gcashNumber ?? "").replace(/\D/g, "");
+
+        if (!refundId || !gcashName || normalizedGcashNumber.length < 10) {
+          return json(400, { error: "Please provide the GCash account name and a valid GCash number." });
+        }
+
+        const { data: existingRefund, error: fetchError } = await adminClient
+          .from("refund_requests")
+          .select("*")
+          .eq("id", refundId)
+          .single();
+
+        if (fetchError) {
+          throw fetchError;
+        }
+
+        if (String(existingRefund.customer_id) !== String(caller.id)) {
+          return json(403, { error: "You can only update your own refund request." });
+        }
+
+        if (!["approved", "gcash_submitted"].includes(String(existingRefund.status ?? ""))) {
+          return json(400, { error: "GCash details can only be submitted after admin approval." });
+        }
+
+        const { data: refundRequest, error: updateError } = await adminClient
+          .from("refund_requests")
+          .update({
+            gcash_name: gcashName,
+            gcash_number: normalizedGcashNumber,
+            status: "gcash_submitted",
+            gcash_submitted_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", refundId)
+          .select()
+          .single();
+
+        if (updateError) {
+          throw updateError;
+        }
+
+        const staffUsers = await getUsersByRoles(adminClient, ["admin", "employee"]);
+        const referenceNumber = refundRequest.entity_type === "request"
+          ? refundRequest.request_id
+          : refundRequest.order_id;
+        await insertNotificationsSafely(
+          adminClient,
+          staffUsers.map((staffUser) => ({
+            user_id: staffUser.id,
+            title: "Refund details submitted",
+            message: `Customer GCash details are ready for refund request #${refundRequest.id}.`,
+            type: "refund_request",
+            link: refundRequest.entity_type === "order"
+              ? `orders/${refundRequest.order_id ?? referenceNumber}`
+              : `requests/${refundRequest.request_id ?? referenceNumber}`,
+          })),
+        );
+
+        return json(200, { success: true, refundRequest });
+      }
+
       case "update_order_status":
       case "accept_order":
       case "decline_order": {
@@ -858,6 +1125,190 @@ serve(async (req) => {
         await notifyAssignedRequestStopRiders(adminClient, request, updatedDestinations);
 
         return json(200, { success: true, request });
+      }
+
+      case "approve_refund_request": {
+        if (callerRole !== "admin") {
+          return json(403, { error: "Only admin accounts can approve refund requests." });
+        }
+
+        const refundId = body?.refundId;
+        const adminNote = String(body?.adminNote ?? "").trim() || null;
+        if (!refundId) {
+          return json(400, { error: "Refund request id is required." });
+        }
+
+        const { data: existingRefund, error: fetchError } = await adminClient
+          .from("refund_requests")
+          .select("*")
+          .eq("id", refundId)
+          .single();
+
+        if (fetchError) {
+          throw fetchError;
+        }
+
+        if (String(existingRefund.status ?? "") !== "requested") {
+          return json(400, { error: "Only newly requested refunds can be approved." });
+        }
+
+        const approvedAmount = parseAmount(body?.refundAmount, parseAmount(existingRefund.refund_amount));
+        const { data: refundRequest, error: updateError } = await adminClient
+          .from("refund_requests")
+          .update({
+            status: "approved",
+            refund_amount: approvedAmount,
+            admin_note: adminNote,
+            rejection_reason: null,
+            approved_by: caller.id,
+            approved_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", refundId)
+          .select()
+          .single();
+
+        if (updateError) {
+          throw updateError;
+        }
+
+        await insertNotificationSafely(adminClient, {
+          user_id: refundRequest.customer_id,
+          title: "Refund approved",
+          message: "Your refund request was approved. Please submit your GCash account details so our staff can process it.",
+          type: "refund_request",
+          link: "/profile",
+        });
+
+        return json(200, { success: true, refundRequest });
+      }
+
+      case "reject_refund_request": {
+        if (callerRole !== "admin") {
+          return json(403, { error: "Only admin accounts can reject refund requests." });
+        }
+
+        const refundId = body?.refundId;
+        const rejectionReason = String(body?.rejectionReason ?? "").trim() || "Refund request was not approved.";
+        if (!refundId) {
+          return json(400, { error: "Refund request id is required." });
+        }
+
+        const { data: refundRequest, error: updateError } = await adminClient
+          .from("refund_requests")
+          .update({
+            status: "rejected",
+            rejection_reason: rejectionReason,
+            admin_note: String(body?.adminNote ?? "").trim() || null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", refundId)
+          .select()
+          .single();
+
+        if (updateError) {
+          throw updateError;
+        }
+
+        await insertNotificationSafely(adminClient, {
+          user_id: refundRequest.customer_id,
+          title: "Refund request rejected",
+          message: rejectionReason,
+          type: "refund_request",
+          link: "/profile",
+        });
+
+        return json(200, { success: true, refundRequest });
+      }
+
+      case "start_refund_processing": {
+        const refundId = body?.refundId;
+        if (!refundId) {
+          return json(400, { error: "Refund request id is required." });
+        }
+
+        const { data: existingRefund, error: fetchError } = await adminClient
+          .from("refund_requests")
+          .select("*")
+          .eq("id", refundId)
+          .single();
+
+        if (fetchError) {
+          throw fetchError;
+        }
+
+        if (String(existingRefund.status ?? "") !== "gcash_submitted") {
+          return json(400, { error: "Customer GCash details must be submitted before processing a refund." });
+        }
+
+        const { data: refundRequest, error: updateError } = await adminClient
+          .from("refund_requests")
+          .update({
+            status: "processing",
+            processing_started_by: caller.id,
+            processing_started_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", refundId)
+          .select()
+          .single();
+
+        if (updateError) {
+          throw updateError;
+        }
+
+        return json(200, { success: true, refundRequest });
+      }
+
+      case "complete_refund_request": {
+        const refundId = body?.refundId;
+        const refundReference = String(body?.refundReference ?? "").trim() || null;
+        if (!refundId) {
+          return json(400, { error: "Refund request id is required." });
+        }
+
+        const { data: existingRefund, error: fetchError } = await adminClient
+          .from("refund_requests")
+          .select("*")
+          .eq("id", refundId)
+          .single();
+
+        if (fetchError) {
+          throw fetchError;
+        }
+
+        if (!["gcash_submitted", "processing"].includes(String(existingRefund.status ?? ""))) {
+          return json(400, { error: "This refund request is not ready to be marked as refunded." });
+        }
+
+        const { data: refundRequest, error: updateError } = await adminClient
+          .from("refund_requests")
+          .update({
+            status: "refunded",
+            refund_reference: refundReference,
+            processed_by: caller.id,
+            processed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", refundId)
+          .select()
+          .single();
+
+        if (updateError) {
+          throw updateError;
+        }
+
+        await insertNotificationSafely(adminClient, {
+          user_id: refundRequest.customer_id,
+          title: "Refund completed",
+          message: refundReference
+            ? `Your refund has been completed. Reference: ${refundReference}.`
+            : "Your refund has been completed.",
+          type: "refund_request",
+          link: "/profile",
+        });
+
+        return json(200, { success: true, refundRequest });
       }
 
       default:

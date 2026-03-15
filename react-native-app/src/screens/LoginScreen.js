@@ -1,11 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   SafeAreaView,
   ActivityIndicator,
 } from 'react-native';
@@ -20,6 +19,51 @@ const LoginScreen = () => {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
+  useEffect(() => {
+    let isActive = true;
+
+    const restoreSession = async () => {
+      setLoading(true);
+
+      try {
+        const response = await authAPI.restoreStaffSession();
+
+        if (!isActive) {
+          return;
+        }
+
+        if (!response.data) {
+          await AsyncStorage.multiRemove(['token', 'currentUser']);
+          return;
+        }
+
+        const { user, token } = response.data;
+        await AsyncStorage.multiSet([
+          ['token', token],
+          ['currentUser', JSON.stringify(user)],
+        ]);
+
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'AdminDashboard' }],
+        });
+      } catch (error) {
+        console.error('Session restore error:', error?.message || error);
+        await AsyncStorage.multiRemove(['token', 'currentUser']);
+      } finally {
+        if (isActive) {
+          setLoading(false);
+        }
+      }
+    };
+
+    restoreSession();
+
+    return () => {
+      isActive = false;
+    };
+  }, [navigation]);
+
   const handleLogin = async () => {
     if (!email || !password) {
       setErrorMessage('Please enter email and password');
@@ -30,29 +74,36 @@ const LoginScreen = () => {
     setErrorMessage('');
 
     try {
-      const response = await authAPI.adminLogin({ email, password });
+      const response = await authAPI.staffLogin({ email: email.trim(), password });
       const { user, token } = response.data;
 
       // Save token and user data
-      await AsyncStorage.setItem('token', token);
-      await AsyncStorage.setItem('currentUser', JSON.stringify(user));
+      await AsyncStorage.multiSet([
+        ['token', token],
+        ['currentUser', JSON.stringify(user)],
+      ]);
 
       // Navigate to dashboard
-      navigation.navigate('AdminDashboard');
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'AdminDashboard' }],
+      });
     } catch (error) {
-      console.error('Login error:', error.message);
+      console.error('Login error:', error?.message || error);
 
       let errMsg = 'Could not connect to server.';
+      const message = error?.message || '';
+      const lowerMessage = message.toLowerCase();
 
       // Check for specific Supabase error messages or custom errors from authAPI
-      if (error.message.toLowerCase().includes('email not confirmed')) {
+      if (lowerMessage.includes('email not confirmed')) {
         errMsg = 'Please confirm your email address before logging in.';
-      } else if (error.message.includes('AuthApiError')) {
+      } else if (message.includes('AuthApiError')) {
         // Supabase authentication errors
-        errMsg = error.message.replace('AuthApiError: ', '');
-      } else if (error.message.includes('Access Denied')) {
+        errMsg = message.replace('AuthApiError: ', '');
+      } else if (message.includes('Access Denied')) {
         // Custom error for role-based access denied
-        errMsg = error.message;
+        errMsg = message;
       } else if (error.response) {
         // Server responded with error (e.g., from an API call)
         errMsg = error.response.data?.message || 'Invalid email or password.';
@@ -74,9 +125,8 @@ const LoginScreen = () => {
       <View style={styles.content}>
         <View style={styles.logoContainer}>
           <Text style={styles.shopName}>Jocerry's Flower Shop</Text>
-          <Text style={styles.title}>Login</Text>
         </View>
-        <Text style={styles.subtitle}>FlowerForge Admin and Employee Login</Text>
+        <Text style={styles.subtitle}>Sign in with an admin or employee account.</Text>
 
         {errorMessage ? (
           <View style={styles.errorContainer}>
@@ -117,7 +167,7 @@ const LoginScreen = () => {
               <Text style={[styles.buttonText, { marginLeft: 10 }]}>Please wait...</Text>
             </View>
           ) : (
-            <Text style={styles.buttonText}>Login</Text>
+            <Text style={styles.buttonText}>Sign In</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -157,7 +207,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#6c757d',
     textAlign: 'center',
-    marginBottom: 40,
+    marginBottom: 32,
   },
   input: {
     borderWidth: 1,

@@ -409,7 +409,7 @@ const buildRequestPreview = (request) => {
   };
 };
 
-const NotificationsTab = ({ currentUser, setActiveTab, refreshUnreadCount }) => {
+const NotificationsTab = ({ currentUser, setActiveTab, setFocusedEntityTarget, refreshUnreadCount }) => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(false);
   const [expandedNotificationId, setExpandedNotificationId] = useState(null);
@@ -555,6 +555,10 @@ const NotificationsTab = ({ currentUser, setActiveTab, refreshUnreadCount }) => 
         notification.type === 'rider_assignment' &&
         Boolean(target.entityId) &&
         (target.entityType === 'order' || target.entityType === 'request');
+      const isRefundTarget =
+        notification.type === 'refund_request' &&
+        Boolean(target.entityId) &&
+        (target.entityType === 'order' || target.entityType === 'request');
 
       if (isExpandableAssignment) {
         const isCollapsing = expandedNotificationId === notification.id;
@@ -566,7 +570,19 @@ const NotificationsTab = ({ currentUser, setActiveTab, refreshUnreadCount }) => 
         return;
       }
 
+      if (isRefundTarget) {
+        setFocusedEntityTarget?.({
+          entityType: target.entityType,
+          entityId: target.entityId,
+          source: 'refund_notification',
+          notificationId: notification.id,
+        });
+        setActiveTab?.(target.tab);
+        return;
+      }
+
       if (target.tab) {
+        setFocusedEntityTarget?.(null);
         setActiveTab?.(target.tab);
       } else {
         await loadNotifications({ silent: true });

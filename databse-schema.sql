@@ -1,6 +1,7 @@
 -- Enum Types
 CREATE TYPE user_role AS ENUM ('customer', 'admin', 'employee');
 CREATE TYPE payment_status AS ENUM ('to_pay', 'waiting_for_confirmation', 'paid', 'failed');
+CREATE TYPE refund_status AS ENUM ('requested', 'approved', 'gcash_submitted', 'processing', 'refunded', 'rejected');
 CREATE TYPE delivery_method AS ENUM ('delivery', 'pickup');
 CREATE TYPE order_status AS ENUM ('pending', 'processing', 'ready_for_pickup', 'out_for_delivery', 'completed', 'cancelled');
 CREATE TYPE request_type AS ENUM ('booking', 'customized', 'special_order');
@@ -260,3 +261,32 @@ CREATE TRIGGER on_request_complete
 AFTER UPDATE ON requests
 FOR EACH ROW
 EXECUTE PROCEDURE record_request_sale();
+
+-- Refund Requests
+CREATE TABLE refund_requests (
+  id SERIAL PRIMARY KEY,
+  entity_type VARCHAR(20) NOT NULL, -- 'order' or 'request'
+  order_id INT,
+  request_id INT,
+  customer_id INT NOT NULL,
+  status refund_status NOT NULL DEFAULT 'requested',
+  refund_amount DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  customer_reason TEXT NOT NULL,
+  admin_note TEXT,
+  rejection_reason TEXT,
+  gcash_name VARCHAR(255),
+  gcash_number VARCHAR(20),
+  refund_reference VARCHAR(255),
+  approved_by INT,
+  approved_at TIMESTAMPTZ,
+  gcash_submitted_at TIMESTAMPTZ,
+  processing_started_by INT,
+  processing_started_at TIMESTAMPTZ,
+  processed_by INT,
+  processed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+  FOREIGN KEY (request_id) REFERENCES requests(id) ON DELETE CASCADE,
+  FOREIGN KEY (customer_id) REFERENCES users(id) ON DELETE CASCADE
+);

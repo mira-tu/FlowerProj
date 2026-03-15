@@ -1184,16 +1184,16 @@ const Profile = ({ user, logout }) => {
                                 {(order.deliveryMethod || order.address) && (
                                     <div className="mt-3 pt-3 border-top">
                                         {order.deliveryMethod === 'pickup' ? (
-                                            <div className="d-flex align-items-start gap-2">
-                                                <i className="fas fa-store mt-1" style={{ color: 'var(--shop-pink)', fontSize: '0.9rem' }}></i>
-                                                <div className="flex-grow-1">
-                                                    <div className="small fw-bold mb-1">Pickup Order</div>
-                                                    {order.pickupTime && (
-                                                        <div className="small text-muted mb-1">
-                                                            <i className="fas fa-clock me-1"></i>
+                                                <div className="d-flex align-items-start gap-2">
+                                                    <i className="fas fa-store mt-1" style={{ color: 'var(--shop-pink)', fontSize: '0.9rem' }}></i>
+                                                    <div className="flex-grow-1">
+                                                        <div className="small fw-bold mb-1">Pickup Order</div>
+                                                        {order.pickupTime && (
+                                                            <div className="small text-muted mb-1">
+                                                                <i className="fas fa-clock me-1"></i>
                                                             Pickup Time: {order.pickupTime}
-                                                        </div>
-                                                    )}
+                                                            </div>
+                                                        )}
                                                     <div className="small text-muted">
                                                         <i className="fas fa-map-marker-alt me-1"></i>
                                                         Jocerry's Flower Shop, 63 San Jose Road, Zamboanga City
@@ -1253,7 +1253,7 @@ const Profile = ({ user, logout }) => {
                                             )}
 
                                             {/* TRACK BUTTONS */}
-                                            {!['cancelled', 'declined'].includes(order.status) && order.type && (
+                                            {order.status !== 'declined' && order.type && (
                                                 <button
                                                     className="btn-order-action primary"
                                                     onClick={() => navigate(
@@ -1265,7 +1265,7 @@ const Profile = ({ user, logout }) => {
                                                     Track Request
                                                 </button>
                                             )}
-                                            {!['cancelled', 'declined'].includes(order.status) && !order.type && (
+                                            {order.status !== 'declined' && !order.type && (
                                                 <button
                                                     className="btn-order-action primary"
                                                     onClick={() => navigate(`/order-tracking/${order.order_number}`)}

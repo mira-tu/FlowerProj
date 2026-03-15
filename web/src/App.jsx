@@ -396,7 +396,7 @@ function AppContent() {
         <Route path="/checkout" element={<Checkout setCart={setCart} user={user} />} />
         <Route path="/order-success/:orderNumber" element={<OrderSuccess />} />
         <Route path="/request-tracking/:requestNumber" element={<OrderBookingTracking />} />
-        <Route path="/customized-request-tracking/:requestNumber" element={<OrderCustomizedTracking />} />
+        <Route path="/customized-request-tracking/:requestNumber" element={<OrderCustomizedTracking user={user} />} />
         <Route path="/order-tracking/:orderNumber" element={<OrderTracking user={user} />} />
         <Route path="/profile" element={<Profile user={user} logout={logout} />} />
         <Route path="/notifications" element={<Notifications />} />

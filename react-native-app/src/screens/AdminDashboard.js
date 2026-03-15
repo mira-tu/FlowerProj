@@ -40,6 +40,7 @@ const AdminDashboard = () => {
   const [unreadMessageCount, setUnreadMessageCount] = useState(0);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [customerToMessage, setCustomerToMessage] = useState(null);
+  const [focusedEntityTarget, setFocusedEntityTarget] = useState(null);
 
   const refreshUnreadNotificationCount = async (userId = currentUser?.id) => {
     if (!userId) return;
@@ -165,11 +166,27 @@ const AdminDashboard = () => {
       case 'catalogue':
         return <CatalogueTab />;
       case 'orders':
-        return <OrdersTab setActiveTab={setActiveTab} handleSelectCustomerForMessage={handleSelectCustomerForMessage} />;
+        return (
+          <OrdersTab
+            currentUser={currentUser}
+            setActiveTab={setActiveTab}
+            handleSelectCustomerForMessage={handleSelectCustomerForMessage}
+            focusedEntityTarget={focusedEntityTarget}
+            clearFocusedEntityTarget={() => setFocusedEntityTarget(null)}
+          />
+        );
       case 'stock':
         return <StockTab />;
       case 'requests':
-        return <RequestsTab setActiveTab={setActiveTab} handleSelectCustomerForMessage={handleSelectCustomerForMessage} />;
+        return (
+          <RequestsTab
+            currentUser={currentUser}
+            setActiveTab={setActiveTab}
+            handleSelectCustomerForMessage={handleSelectCustomerForMessage}
+            focusedEntityTarget={focusedEntityTarget}
+            clearFocusedEntityTarget={() => setFocusedEntityTarget(null)}
+          />
+        );
       case 'fees':
         return <DeliveryFeesTab />;
       case 'messaging':
@@ -179,6 +196,7 @@ const AdminDashboard = () => {
           <NotificationsTab
             currentUser={currentUser}
             setActiveTab={setActiveTab}
+            setFocusedEntityTarget={setFocusedEntityTarget}
             refreshUnreadCount={() => refreshUnreadNotificationCount(currentUser?.id)}
           />
         );

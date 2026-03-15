@@ -741,6 +741,175 @@ const assignRequestStopRidersDirect = async (requestId, stopAssignments = []) =>
     return { success: true, request: requestRecord };
 };
 
+const getRefundRequestMap = async (fieldName, ids = []) => {
+    const normalizedIds = Array.from(new Set((Array.isArray(ids) ? ids : []).filter(Boolean)));
+    if (!normalizedIds.length) {
+        return new Map();
+    }
+
+    const { data, error } = await supabase
+        .from('refund_requests')
+        .select('*')
+        .in(fieldName, normalizedIds)
+        .order('created_at', { ascending: false });
+
+    if (error) {
+        if (error.code === '42P01') {
+            return new Map();
+        }
+        throw error;
+    }
+
+    return (Array.isArray(data) ? data : []).reduce((refundMap, refundRequest) => {
+        const key = refundRequest?.[fieldName];
+        if (key != null && !refundMap.has(key)) {
+            refundMap.set(key, refundRequest);
+        }
+        return refundMap;
+    }, new Map());
+};
+
+const insertRefundNotificationDirect = async ({ userId, title, message, link }) => {
+    if (!userId) {
+        return;
+    }
+
+    const { error } = await supabase
+        .from('notifications')
+        .insert([{
+            user_id: userId,
+            title,
+            message,
+            type: 'refund_request',
+            link: link || '/profile',
+        }]);
+
+    if (error) {
+        console.error('Failed to create refund notification:', error);
+    }
+};
+
+const approveRefundRequestDirect = async (refundId, options = {}) => {
+    const actorId = options?.actorId || null;
+    const adminNote = typeof options?.adminNote === 'string' ? options.adminNote.trim() : '';
+    const refundAmount = Number.parseFloat(options?.refundAmount);
+
+    const updatePayload = {
+        status: 'approved',
+        admin_note: adminNote || null,
+        rejection_reason: null,
+        approved_by: actorId,
+        approved_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+    };
+
+    if (Number.isFinite(refundAmount) && refundAmount > 0) {
+        updatePayload.refund_amount = refundAmount;
+    }
+
+    const { data, error } = await supabase
+        .from('refund_requests')
+        .update(updatePayload)
+        .eq('id', refundId)
+        .select()
+        .single();
+
+    if (error) {
+        throw error;
+    }
+
+    await insertRefundNotificationDirect({
+        userId: data.customer_id,
+        title: 'Refund approved',
+        message: 'Your refund request was approved. Please submit your GCash account details so our staff can process it.',
+    });
+
+    return { success: true, refundRequest: data };
+};
+
+const rejectRefundRequestDirect = async (refundId, options = {}) => {
+    const rejectionReason = typeof options?.rejectionReason === 'string' && options.rejectionReason.trim()
+        ? options.rejectionReason.trim()
+        : 'Refund request was not approved.';
+
+    const { data, error } = await supabase
+        .from('refund_requests')
+        .update({
+            status: 'rejected',
+            rejection_reason: rejectionReason,
+            admin_note: typeof options?.adminNote === 'string' ? options.adminNote.trim() || null : null,
+            updated_at: new Date().toISOString(),
+        })
+        .eq('id', refundId)
+        .select()
+        .single();
+
+    if (error) {
+        throw error;
+    }
+
+    await insertRefundNotificationDirect({
+        userId: data.customer_id,
+        title: 'Refund request rejected',
+        message: rejectionReason,
+    });
+
+    return { success: true, refundRequest: data };
+};
+
+const startRefundProcessingDirect = async (refundId, options = {}) => {
+    const { data, error } = await supabase
+        .from('refund_requests')
+        .update({
+            status: 'processing',
+            processing_started_by: options?.actorId || null,
+            processing_started_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+        })
+        .eq('id', refundId)
+        .select()
+        .single();
+
+    if (error) {
+        throw error;
+    }
+
+    return { success: true, refundRequest: data };
+};
+
+const completeRefundRequestDirect = async (refundId, options = {}) => {
+    const refundReference = typeof options?.refundReference === 'string'
+        ? options.refundReference.trim()
+        : '';
+
+    const { data, error } = await supabase
+        .from('refund_requests')
+        .update({
+            status: 'refunded',
+            refund_reference: refundReference || null,
+            processed_by: options?.actorId || null,
+            processed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+        })
+        .eq('id', refundId)
+        .select()
+        .single();
+
+    if (error) {
+        throw error;
+    }
+
+    await insertRefundNotificationDirect({
+        userId: data.customer_id,
+        title: 'Refund completed',
+        message: refundReference
+            ? `Your refund has been completed. Reference: ${refundReference}.`
+            : 'Your refund has been completed.',
+    });
+
+    return { success: true, refundRequest: data };
+};
+
 // Products API
 export const productAPI = {
     getAll: async (params) => {
@@ -1030,10 +1199,89 @@ export const orderAPI = {
     }
 };
 
+const STAFF_ROLES = new Set(['admin', 'employee']);
+
+const isStaffRole = (role) => STAFF_ROLES.has(role);
+
+const buildFallbackStaffProfile = (user) => {
+    const fallbackRole = user?.user_metadata?.role;
+
+    if (!isStaffRole(fallbackRole)) {
+        return null;
+    }
+
+    return {
+        role: fallbackRole,
+        name: user.user_metadata?.name || user.email,
+        phone: user.user_metadata?.phone || null,
+    };
+};
+
+const restoreMissingStaffProfile = async (user, profile) => {
+    const { error: upsertError } = await supabase
+        .from('users')
+        .upsert({
+            id: user.id,
+            name: profile.name,
+            email: user.email,
+            phone: profile.phone,
+            role: profile.role,
+        }, { onConflict: 'id' });
+
+    if (upsertError) {
+        console.warn('Non-blocking: failed to restore missing staff profile row:', upsertError);
+    }
+};
+
+const getStaffProfile = async (user, { restoreMissingProfile = false } = {}) => {
+    const { data: profile, error: profileError } = await supabase
+        .from('users')
+        .select('role, name, phone')
+        .eq('id', user.id)
+        .maybeSingle();
+
+    if (profileError) {
+        console.error('Error fetching user profile:', profileError);
+    }
+
+    if (profile) {
+        return profile;
+    }
+
+    const fallbackProfile = buildFallbackStaffProfile(user);
+
+    if (fallbackProfile && restoreMissingProfile) {
+        await restoreMissingStaffProfile(user, fallbackProfile);
+    }
+
+    return fallbackProfile;
+};
+
+const buildStaffSessionPayload = async (session) => {
+    const profile = await getStaffProfile(session.user, { restoreMissingProfile: true });
+
+    if (!profile) {
+        await supabase.auth.signOut();
+        throw new Error('Could not verify user role. Your account might not be set up correctly.');
+    }
+
+    if (!isStaffRole(profile.role)) {
+        await supabase.auth.signOut();
+        throw new Error('Access Denied: You do not have permission to access this dashboard.');
+    }
+
+    return {
+        token: session.access_token,
+        user: {
+            ...session.user,
+            ...profile,
+        },
+    };
+};
+
 // Auth API - using Supabase for real authentication
 export const authAPI = {
-    adminLogin: async ({ email, password }) => {
-        // 1. Sign in with Supabase Auth
+    staffLogin: async ({ email, password }) => {
         const { data: sessionData, error: signInError } = await supabase.auth.signInWithPassword({
             email,
             password,
@@ -1044,83 +1292,26 @@ export const authAPI = {
             throw signInError;
         }
 
-        if (!sessionData.user) {
+        if (!sessionData.user || !sessionData.session) {
             throw new Error('Login failed: No user data returned.');
         }
 
-        const { user, session } = sessionData;
-
-        // 2. Fetch user profile from 'users' table to check role
-        let { data: profile, error: profileError } = await supabase
-            .from('users')
-            .select('role, name, phone')
-            .eq('id', user.id)
-            .single();
-
-        if (profileError) {
-            console.error('Error fetching user profile:', profileError);
-
-            const fallbackRole = user.user_metadata?.role;
-            if (fallbackRole === 'admin' || fallbackRole === 'employee') {
-                profile = {
-                    role: fallbackRole,
-                    name: user.user_metadata?.name || user.email,
-                    phone: user.user_metadata?.phone || null,
-                };
-
-                const { error: upsertError } = await supabase
-                    .from('users')
-                    .upsert({
-                        id: user.id,
-                        name: profile.name,
-                        email: user.email,
-                        phone: profile.phone,
-                        role: fallbackRole,
-                    }, { onConflict: 'id' });
-
-                if (upsertError) {
-                    console.warn('Non-blocking: failed to restore missing admin/employee profile row:', upsertError);
-                }
-            } else {
-                // Sign out the user as we can't verify their role
-                await supabase.auth.signOut();
-                throw new Error('Could not verify user role. Your account might not be set up correctly.');
-            }
-        }
-
-        // 3. Check the role
-        if (profile.role !== 'admin' && profile.role !== 'employee') {
-            // Sign out the user because they don't have the required role
-            await supabase.auth.signOut();
-            throw new Error('Access Denied: You do not have permission to access this dashboard.');
-        }
-
-        // 4. Combine auth user data with public profile data
-        const fullUser = {
-            ...user,
-            ...profile, // This will add 'role' and 'name' to the user object
-        };
-
-        // 5. Return data in the format expected by LoginScreen.js
         return {
-            data: {
-                token: session.access_token,
-                user: fullUser,
-            }
+            data: await buildStaffSessionPayload(sessionData.session),
         };
     },
+
+    adminLogin: async (credentials) => authAPI.staffLogin(credentials),
 
     logout: async () => {
         const { error } = await supabase.auth.signOut();
         if (error) {
             console.error('Error logging out from Supabase:', error);
         }
-        // AsyncStorage cleanup will be handled in the component
         return { data: { success: true } };
     },
 
     changePassword: async (data) => {
-        // This would be implemented using supabase.auth.updateUser
         return { data: { success: true, message: 'Password changed successfully' } };
     },
 
@@ -1128,15 +1319,31 @@ export const authAPI = {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return { data: null };
 
-        // Also fetch profile to get role
-        const { data: profile } = await supabase
-            .from('users')
-            .select('role, name')
-            .eq('id', user.id)
-            .single();
+        const profile = await getStaffProfile(user, { restoreMissingProfile: true });
+
+        if (!profile || !isStaffRole(profile.role)) {
+            await supabase.auth.signOut();
+            return { data: null };
+        }
 
         return { data: { ...user, ...profile } };
-    }
+    },
+
+    restoreStaffSession: async () => {
+        const { data: sessionData, error } = await supabase.auth.getSession();
+
+        if (error) {
+            throw error;
+        }
+
+        if (!sessionData.session?.user) {
+            return { data: null };
+        }
+
+        return {
+            data: await buildStaffSessionPayload(sessionData.session),
+        };
+    },
 };
 
 // Admin API - AsyncStorage-based admin operations
@@ -1251,7 +1458,19 @@ export const adminAPI = {
             };
         });
 
-        return { data: formattedOrders };
+        let refundMap = new Map();
+        try {
+            refundMap = await getRefundRequestMap('order_id', formattedOrders.map((order) => order.id));
+        } catch (refundError) {
+            console.warn('Unable to load refund requests for orders:', refundError.message);
+        }
+
+        return {
+            data: formattedOrders.map((order) => ({
+                ...order,
+                refund_request: refundMap.get(order.id) || null,
+            })),
+        };
     },
 
     updateOrderStatus: async (id, status, options = {}) => {
@@ -1340,6 +1559,50 @@ export const adminAPI = {
             if (!shouldFallbackToDirectWorkflow(error)) throw error;
             console.warn('Falling back to direct delivery stop assignment:', error.message);
             return { data: await assignOrderStopRidersDirect(orderId, stopAssignments) };
+        }
+    },
+
+    approveRefundRequest: async (refundId, options = {}) => {
+        try {
+            const data = await invokeAdminWorkflow('approve_refund_request', { refundId, ...options });
+            return { data };
+        } catch (error) {
+            if (!shouldFallbackToDirectWorkflow(error)) throw error;
+            console.warn('Falling back to direct refund approval:', error.message);
+            return { data: await approveRefundRequestDirect(refundId, options) };
+        }
+    },
+
+    rejectRefundRequest: async (refundId, options = {}) => {
+        try {
+            const data = await invokeAdminWorkflow('reject_refund_request', { refundId, ...options });
+            return { data };
+        } catch (error) {
+            if (!shouldFallbackToDirectWorkflow(error)) throw error;
+            console.warn('Falling back to direct refund rejection:', error.message);
+            return { data: await rejectRefundRequestDirect(refundId, options) };
+        }
+    },
+
+    startRefundProcessing: async (refundId, options = {}) => {
+        try {
+            const data = await invokeAdminWorkflow('start_refund_processing', { refundId, ...options });
+            return { data };
+        } catch (error) {
+            if (!shouldFallbackToDirectWorkflow(error)) throw error;
+            console.warn('Falling back to direct refund processing start:', error.message);
+            return { data: await startRefundProcessingDirect(refundId, options) };
+        }
+    },
+
+    completeRefundRequest: async (refundId, options = {}) => {
+        try {
+            const data = await invokeAdminWorkflow('complete_refund_request', { refundId, ...options });
+            return { data };
+        } catch (error) {
+            if (!shouldFallbackToDirectWorkflow(error)) throw error;
+            console.warn('Falling back to direct refund completion:', error.message);
+            return { data: await completeRefundRequestDirect(refundId, options) };
         }
     },
 
@@ -1717,7 +1980,21 @@ export const adminAPI = {
             };
         });
 
-        return { data: { requests: formattedRequests } };
+        let refundMap = new Map();
+        try {
+            refundMap = await getRefundRequestMap('request_id', formattedRequests.map((request) => request.id));
+        } catch (refundError) {
+            console.warn('Unable to load refund requests for requests:', refundError.message);
+        }
+
+        return {
+            data: {
+                requests: formattedRequests.map((request) => ({
+                    ...request,
+                    refund_request: refundMap.get(request.id) || null,
+                })),
+            },
+        };
     },
 
     provideQuote: async (id, price, shippingFee = 0, quoteBreakdown = null) => {

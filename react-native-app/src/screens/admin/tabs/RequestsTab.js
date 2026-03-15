@@ -674,7 +674,37 @@ const getCustomizedRequestItems = (request) => {
       cardMessage: firstNonEmpty(item?.card_message, item?.cardMessage, item?.message, requestData.message),
       materialsSummary,
     };
-  });
+    });
+};
+
+const getRefundStatusLabel = (status) => {
+  switch (String(status || '').trim().toLowerCase()) {
+    case 'requested':
+      return 'Pending Admin Review';
+    case 'approved':
+      return 'Approved';
+    case 'gcash_submitted':
+      return 'GCash Details Submitted';
+    case 'processing':
+      return 'Processing';
+    case 'refunded':
+      return 'Refunded';
+    case 'rejected':
+      return 'Rejected';
+    default:
+      return 'No Refund';
+  }
+};
+
+const maskGcashNumber = (value) => {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) {
+    return 'Not submitted';
+  }
+
+  return digits.length <= 4
+    ? digits
+    : `${'*'.repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}`;
 };
 
 const getNormalizedRequestPaymentMethod = (request) => {
@@ -696,7 +726,7 @@ const resolveAcceptedRequestStatus = (request) => {
   return 'accepted';
 };
 
-const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
+const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, focusedEntityTarget, clearFocusedEntityTarget }) => {
   const getCustomerInitials = (name) => {
     if (!name) return '??';
     const names = name.trim().split(' ');
@@ -874,6 +904,18 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     }
     return result;
   }, [requestsWithRiderDetails, statusFilter]);
+
+  const focusedRequest = React.useMemo(() => {
+    if (focusedEntityTarget?.entityType !== 'request' || !focusedEntityTarget?.entityId) {
+      return null;
+    }
+
+    return requestsWithRiderDetails.find(
+      (request) => String(request.id) === String(focusedEntityTarget.entityId)
+    ) || null;
+  }, [focusedEntityTarget, requestsWithRiderDetails]);
+
+  const displayedRequests = focusedRequest ? [focusedRequest] : filteredRequests;
 
   const requestStatusFilters = ['All', 'Pending', 'Quoted / Acc', 'Processing', 'Delivery/Pickup', 'Completed', 'Cancelled'];
 
@@ -1665,6 +1707,76 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
     }
   };
 
+  const handleApproveRefund = async (requestItem) => {
+    if (!requestItem?.refund_request) return;
+
+    try {
+      await adminAPI.approveRefundRequest(requestItem.refund_request.id, {
+        actorId: currentUser?.id,
+        refundAmount: requestItem.amount_received || requestItem.final_price || requestItem.refund_request.refund_amount,
+      });
+      Toast.show({ type: 'success', text1: 'Refund Approved' });
+      loadRequests();
+    } catch (error) {
+      console.error('Error approving refund:', error);
+      const errorMessage = error?.message || 'Failed to approve refund.';
+      Toast.show({ type: 'error', text1: 'Approval Failed', text2: errorMessage });
+      Alert.alert('Approval Failed', errorMessage);
+    }
+  };
+
+  const handleRejectRefund = async (requestItem) => {
+    if (!requestItem?.refund_request) return;
+
+    try {
+      await adminAPI.rejectRefundRequest(requestItem.refund_request.id, {
+        actorId: currentUser?.id,
+        rejectionReason: 'Refund request was not approved by admin.',
+      });
+      Toast.show({ type: 'success', text1: 'Refund Rejected' });
+      loadRequests();
+    } catch (error) {
+      console.error('Error rejecting refund:', error);
+      const errorMessage = error?.message || 'Failed to reject refund.';
+      Toast.show({ type: 'error', text1: 'Rejection Failed', text2: errorMessage });
+      Alert.alert('Rejection Failed', errorMessage);
+    }
+  };
+
+  const handleStartRefundProcessing = async (requestItem) => {
+    if (!requestItem?.refund_request) return;
+
+    try {
+      await adminAPI.startRefundProcessing(requestItem.refund_request.id, {
+        actorId: currentUser?.id,
+      });
+      Toast.show({ type: 'success', text1: 'Refund Processing Started' });
+      loadRequests();
+    } catch (error) {
+      console.error('Error starting refund processing:', error);
+      const errorMessage = error?.message || 'Failed to start refund processing.';
+      Toast.show({ type: 'error', text1: 'Processing Failed', text2: errorMessage });
+      Alert.alert('Processing Failed', errorMessage);
+    }
+  };
+
+  const handleCompleteRefund = async (requestItem) => {
+    if (!requestItem?.refund_request) return;
+
+    try {
+      await adminAPI.completeRefundRequest(requestItem.refund_request.id, {
+        actorId: currentUser?.id,
+      });
+      Toast.show({ type: 'success', text1: 'Refund Completed' });
+      loadRequests();
+    } catch (error) {
+      console.error('Error completing refund:', error);
+      const errorMessage = error?.message || 'Failed to complete refund.';
+      Toast.show({ type: 'error', text1: 'Completion Failed', text2: errorMessage });
+      Alert.alert('Completion Failed', errorMessage);
+    }
+  };
+
   const EnhancedRequestCard = ({ item, onMessageCustomer, onPhoneCall, openDetailsModal, openReceiptModal, handleUpdatePaymentStatus, onAssignRider, onUpdateStatus, onProvidePrice, onDecline, onPrintReceipt, onOpenCustomizedItem }) => {
     const isCustomizedRequest = item.type === 'customized';
     const customizedItems = isCustomizedRequest ? getCustomizedRequestItems(item) : [];
@@ -1911,6 +2023,97 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
           />
         )}
 
+        {item.refund_request ? (
+          <View style={styles.eoSection}>
+            <View style={styles.eoSectionHeader}>
+              <Ionicons name="refresh-circle-outline" size={16} color="#DB2777" />
+              <Text style={styles.eoSectionTitle}>Refund Request</Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+              <View style={[styles.eoPaymentStatus, { backgroundColor: '#FCE7F3' }]}>
+                <Text style={[styles.eoPaymentStatusText, { color: '#BE185D' }]}>
+                  {getRefundStatusLabel(item.refund_request.status)}
+                </Text>
+              </View>
+              <Text style={[styles.eoInfoText, { color: '#6B7280' }]}>
+                PHP {Number(item.refund_request.refund_amount || 0).toLocaleString()}
+              </Text>
+            </View>
+            <Text style={styles.eoInstructionsText}>{item.refund_request.customer_reason}</Text>
+
+            {item.refund_request.admin_note ? (
+              <Text style={[styles.eoInfoText, { marginTop: 8 }]}>Admin note: {item.refund_request.admin_note}</Text>
+            ) : null}
+
+            {item.refund_request.rejection_reason ? (
+              <Text style={[styles.eoInfoText, { marginTop: 8, color: '#DC2626' }]}>
+                Decision: {item.refund_request.rejection_reason}
+              </Text>
+            ) : null}
+
+            {(item.refund_request.gcash_name || item.refund_request.gcash_number) ? (
+              <View style={{ marginTop: 10, gap: 4 }}>
+                <Text style={styles.eoInfoTextBold}>GCash Details</Text>
+                <Text style={styles.eoInfoText}>Name: {item.refund_request.gcash_name || 'Not submitted'}</Text>
+                <Text style={styles.eoInfoText}>
+                  Number: {['processing', 'refunded'].includes(item.refund_request.status)
+                    ? (item.refund_request.gcash_number || 'Not submitted')
+                    : maskGcashNumber(item.refund_request.gcash_number)}
+                </Text>
+              </View>
+            ) : null}
+
+            {item.refund_request.refund_reference ? (
+              <Text style={[styles.eoInfoText, { marginTop: 8 }]}>
+                Refund reference: {item.refund_request.refund_reference}
+              </Text>
+            ) : null}
+
+            <View style={{ marginTop: 12, gap: 10 }}>
+              {currentUser?.role === 'admin' && item.refund_request.status === 'requested' ? (
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <TouchableOpacity
+                    style={[styles.eoMainBtn, { backgroundColor: '#10B981', flex: 1 }]}
+                    onPress={() => handleApproveRefund(item)}
+                  >
+                    <Text style={styles.eoMainBtnText}>Approve Refund</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.eoMainBtn, { backgroundColor: '#EF4444', flex: 1 }]}
+                    onPress={() => handleRejectRefund(item)}
+                  >
+                    <Text style={styles.eoMainBtnText}>Reject Refund</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+              {item.refund_request.status === 'approved' ? (
+                <Text style={[styles.eoInfoText, { color: '#92400E' }]}>
+                  Waiting for the customer to submit their GCash details.
+                </Text>
+              ) : null}
+
+              {['admin', 'employee'].includes(currentUser?.role) && item.refund_request.status === 'gcash_submitted' ? (
+                <TouchableOpacity
+                  style={[styles.eoMainBtn, { backgroundColor: '#2563EB' }]}
+                  onPress={() => handleStartRefundProcessing(item)}
+                >
+                  <Text style={styles.eoMainBtnText}>Start Refund Processing</Text>
+                </TouchableOpacity>
+              ) : null}
+
+              {['admin', 'employee'].includes(currentUser?.role) && item.refund_request.status === 'processing' ? (
+                <TouchableOpacity
+                  style={[styles.eoMainBtn, { backgroundColor: '#7C3AED' }]}
+                  onPress={() => handleCompleteRefund(item)}
+                >
+                  <Text style={styles.eoMainBtnText}>Mark Refunded</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
+
 
         {/* Action to open full details */}
         <View style={styles.eoFooter}>
@@ -2027,8 +2230,47 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
         </ScrollView>
       </View>
 
+      {focusedEntityTarget?.entityType === 'request' ? (
+        <View
+          style={{
+            marginHorizontal: 16,
+            marginBottom: 14,
+            padding: 14,
+            borderRadius: 16,
+            backgroundColor: '#FFF1F6',
+            borderWidth: 1,
+            borderColor: '#F9A8D4',
+            gap: 10,
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Ionicons name="locate-outline" size={18} color="#DB2777" />
+            <Text style={{ flex: 1, fontSize: 14, fontWeight: '700', color: '#9D174D' }}>
+              Showing the refund target request only
+            </Text>
+          </View>
+          <Text style={{ fontSize: 13, color: '#6B7280' }}>
+            {focusedRequest
+              ? `Request #${focusedRequest.request_number} is ready for review below.`
+              : 'That request was not found in the current list.'}
+          </Text>
+          <TouchableOpacity
+            onPress={clearFocusedEntityTarget}
+            style={{
+              alignSelf: 'flex-start',
+              paddingVertical: 8,
+              paddingHorizontal: 14,
+              borderRadius: 999,
+              backgroundColor: '#DB2777',
+            }}
+          >
+            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Back to all requests</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
       <FlatList
-        data={filteredRequests}
+        data={displayedRequests}
         renderItem={({ item }) => <EnhancedRequestCard
           item={item}
           onMessageCustomer={handleMessageCustomer}
@@ -2046,7 +2288,11 @@ const RequestsTab = ({ setActiveTab, handleSelectCustomerForMessage }) => {
         keyExtractor={item => item.id.toString()}
         contentContainerStyle={{ paddingBottom: 20, paddingHorizontal: 16 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ec4899']} />}
-        ListEmptyComponent={<Text style={styles.emptyText}>No requests found</Text>}
+        ListEmptyComponent={
+          <Text style={styles.emptyText}>
+            {focusedEntityTarget?.entityType === 'request' ? 'That request could not be found' : 'No requests found'}
+          </Text>
+        }
       />
 
       <Modal visible={modalVisible} animationType="slide" transparent>
