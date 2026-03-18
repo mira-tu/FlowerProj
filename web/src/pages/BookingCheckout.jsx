@@ -1,10 +1,86 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import InfoModal from '../components/InfoModal';
+import CheckoutAddressSelection from '../components/CheckoutAddressSelection';
+import MultiAddressDeliverySection from '../components/MultiAddressDeliverySection';
 import '../styles/Shop.css';
 import { supabase } from '../config/supabase';
+import {
+    buildAddressFeeMap,
+    buildMultiDeliveryDestinations,
+    calculateDeliveryFee,
+    createDeliveryAssignments,
+    syncDeliveryAssignments,
+} from '../utils/deliveryDestinations';
 
 const pickupTimes = ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM'];
+const DEFAULT_SHIPPING_FEE = 100;
+
+const getBookingItemTitle = (item = {}) => (
+    item.name
+    || item.arrangementSummary
+    || item.arrangementType
+    || (Array.isArray(item.arrangementTypes) ? item.arrangementTypes.join(', ') : '')
+    || `${item.occasion || 'Custom Order'} Arrangement`
+);
+
+const normalizeInquiryItems = (items = []) => (
+    (Array.isArray(items) ? items : []).map((item, index) => ({
+        ...item,
+        id: item?.id || `booking-${index + 1}`,
+        qty: 1,
+        name: getBookingItemTitle(item),
+    }))
+);
+
+const buildBookingAssignments = (items = [], fallbackAddressId = null) => (
+    createDeliveryAssignments(items, fallbackAddressId).map((assignment) => ({
+        ...assignment,
+        addressId: items?.[assignment.itemIndex]?.address_id ?? assignment.addressId ?? fallbackAddressId ?? '',
+    }))
+);
+
+const syncBookingAssignments = (items = [], existingAssignments = [], fallbackAddressId = null) => {
+    const syncedAssignments = syncDeliveryAssignments(items, existingAssignments, fallbackAddressId);
+    const existingByKey = new Map((existingAssignments || []).map((assignment) => [assignment.unitKey, assignment]));
+
+    return syncedAssignments.map((assignment) => ({
+        ...assignment,
+        addressId:
+            existingByKey.get(assignment.unitKey)?.addressId
+            ?? items?.[assignment.itemIndex]?.address_id
+            ?? assignment.addressId
+            ?? fallbackAddressId
+            ?? '',
+    }));
+};
+
+const buildBookingSummary = (items = []) => {
+    const normalizedItems = Array.isArray(items) ? items : [];
+    const combinedOccasions = Array.from(
+        new Set(
+            normalizedItems
+                .map((item) => String(item?.occasion || '').trim())
+                .filter(Boolean)
+        )
+    );
+    const combinedDates = Array.from(
+        new Set(
+            normalizedItems
+                .map((item) => String(item?.eventDate || '').trim())
+                .filter(Boolean)
+        )
+    );
+
+    return {
+        itemCount: normalizedItems.length,
+        combinedOccasions,
+        combinedDates,
+        summaryLabel: normalizedItems.length > 1
+            ? `${normalizedItems.length} custom order items`
+            : (normalizedItems[0]?.occasion || 'Custom Order'),
+    };
+};
 
 const BookingCheckout = ({ user }) => {
     const navigate = useNavigate();
@@ -13,237 +89,361 @@ const BookingCheckout = ({ user }) => {
     const [selectedPickupDate, setSelectedPickupDate] = useState('');
     const [selectedPickupTime, setSelectedPickupTime] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
-    const [isAddressReady, setIsAddressReady] = useState(false);
-    const [dynamicShippingFee, setDynamicShippingFee] = useState(100);
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: '', linkText: '' });
-
-    // Unified state for the inquiry's address
-    const [inquiryAddress, setInquiryAddress] = useState({
-        label: '', name: '', phone: '', street: '', barangay: '', city: '', province: ''
+    const [address, setAddress] = useState({
+        name: '',
+        phone: '',
+        street: '',
+        barangay: '',
+        city: '',
+        province: ''
     });
+    const [selectedAddressId, setSelectedAddressId] = useState(null);
+    const [savedAddresses, setSavedAddresses] = useState([]);
+    const [barangayFees, setBarangayFees] = useState([]);
+    const [multiAddressEnabled, setMultiAddressEnabled] = useState(false);
+    const [deliveryAssignments, setDeliveryAssignments] = useState([]);
 
-    // Helper to parse an address string
-    const parseAddress = useCallback((addressString) => {
-        if (!addressString) return {};
-        const parts = addressString.split(',').map(p => p.trim());
-        let street = '', barangay = '', city = '', province = '';
-
-        if (parts.length >= 3) {
-            province = parts[3] || '';
-            city = parts[2];
-            barangay = parts[1];
-            street = parts[0];
-        } else {
-            street = addressString; // Fallback for incomplete addresses
-        }
-        return { street, barangay, city, province };
-    }, []);
+    const showInfoModal = (title, message, linkTo = '', linkText = '') => {
+        setInfoModal({ show: true, title, message, linkTo, linkText });
+    };
 
     useEffect(() => {
-        const savedInquiry = localStorage.getItem('bookingCart');
-        if (savedInquiry) {
-            const parsedItems = JSON.parse(savedInquiry);
+        const cartKey = `bookingCart_${user?.id || 'guest'}`;
+        const savedInquiry = localStorage.getItem('bookingCart') || localStorage.getItem(cartKey);
 
-            if (parsedItems.length === 0) {
+        if (!savedInquiry) {
+            navigate('/');
+            return;
+        }
+
+        try {
+            const parsedItems = JSON.parse(savedInquiry);
+            const normalizedItems = normalizeInquiryItems(parsedItems);
+
+            if (!normalizedItems.length) {
                 navigate('/');
                 return;
             }
 
-            setInquiryItems(parsedItems);
-
-            // Use the first item's venue for delivery estimates if available
-            const firstItem = parsedItems[0];
-            const addressString = firstItem?.venue || '';
-
-            if (user && addressString) {
-                const parsedAddress = parseAddress(addressString);
-                setInquiryAddress({
-                    label: 'Delivery Address',
-                    name: user.user_metadata?.name || '',
-                    phone: firstItem.contactNumber || user.user_metadata?.phone || '',
-                    ...parsedAddress
-                });
-                setIsAddressReady(true);
-            }
-        } else {
+            setInquiryItems(normalizedItems);
+        } catch (error) {
+            console.error('Error parsing booking checkout items:', error);
             navigate('/');
         }
-    }, [navigate, user, parseAddress]);
+    }, [navigate, user]);
 
     useEffect(() => {
-        const fetchFee = async () => {
-            if (deliveryMethod === 'delivery' && inquiryAddress.barangay) {
+        const fetchBarangayFees = async () => {
+            try {
                 const { data, error } = await supabase
                     .from('barangay_fee')
-                    .select('barangay_name, delivery_fee')
-                    .ilike('barangay_name', `%${inquiryAddress.barangay}%`);
+                    .select('barangay_name, delivery_fee');
 
-                if (error) {
-                    console.error('Error fetching fee for barangay:', inquiryAddress.barangay, error);
-                    setDynamicShippingFee(100); // Fallback on error
-                } else if (data && data.length > 0) {
-                    // Try to find an exact match first (case-insensitive)
-                    const exactMatch = data.find(
-                        item => item.barangay_name.toLowerCase() === inquiryAddress.barangay.toLowerCase()
-                    );
-
-                    if (exactMatch) {
-                        setDynamicShippingFee(exactMatch.delivery_fee);
-                    } else {
-                        // Fallback to the first partial match
-                        setDynamicShippingFee(data[0].delivery_fee);
-                    }
-                } else {
-                    console.warn(`No fee found for barangay: ${inquiryAddress.barangay}. Using default fee.`);
-                    setDynamicShippingFee(100); // Fallback if no match found
-                }
-            } else if (deliveryMethod === 'pickup') {
-                setDynamicShippingFee(0);
+                if (error) throw error;
+                setBarangayFees(data || []);
+            } catch (error) {
+                console.error('Error fetching barangay fees:', error);
+                setBarangayFees([]);
             }
         };
 
-        fetchFee();
-    }, [inquiryAddress.barangay, deliveryMethod]);
-    const handleSubmitInquiry = async () => {
-        if (!user) {
-            setInfoModal({ show: true, title: 'Login Required', message: 'You must be logged in to submit an inquiry.', linkTo: '/login', linkText: 'Log In' });
+        fetchBarangayFees();
+    }, []);
+
+    useEffect(() => {
+        if (deliveryMethod !== 'delivery') {
+            setMultiAddressEnabled(false);
             return;
         }
-        if (deliveryMethod === 'pickup' && (!selectedPickupDate || !selectedPickupTime)) {
-            setInfoModal({ show: true, title: 'Missing Information', message: 'Please select a pickup date and time.' });
+
+        setDeliveryAssignments((prevAssignments) => {
+            if (!prevAssignments.length) {
+                return buildBookingAssignments(inquiryItems, selectedAddressId);
+            }
+
+            return syncBookingAssignments(inquiryItems, prevAssignments, selectedAddressId);
+        });
+    }, [deliveryMethod, inquiryItems, selectedAddressId]);
+
+    useEffect(() => {
+        if (deliveryMethod !== 'delivery') {
             return;
+        }
+
+        const presetAddressIds = Array.from(
+            new Set(
+                inquiryItems
+                    .map((item) => String(item?.address_id || '').trim())
+                    .filter(Boolean)
+            )
+        );
+
+        if (presetAddressIds.length > 1) {
+            setMultiAddressEnabled(true);
+        }
+    }, [deliveryMethod, inquiryItems]);
+
+    const addressFeeMap = useMemo(
+        () => buildAddressFeeMap(savedAddresses, barangayFees),
+        [savedAddresses, barangayFees]
+    );
+
+    const dynamicShippingFee = useMemo(() => {
+        if (!selectedAddressId) {
+            return DEFAULT_SHIPPING_FEE;
+        }
+
+        return addressFeeMap[String(selectedAddressId)] ?? DEFAULT_SHIPPING_FEE;
+    }, [addressFeeMap, selectedAddressId]);
+
+    const shippingFee = useMemo(() => calculateDeliveryFee({
+        deliveryMethod,
+        subtotal: 0,
+        freeShippingThreshold: Number.POSITIVE_INFINITY,
+        selectedAddressId,
+        multiAddressEnabled,
+        assignments: deliveryAssignments,
+        addressFeeMap: Object.keys(addressFeeMap).length
+            ? addressFeeMap
+            : (selectedAddressId ? { [selectedAddressId]: dynamicShippingFee } : {}),
+    }), [addressFeeMap, deliveryAssignments, deliveryMethod, dynamicShippingFee, multiAddressEnabled, selectedAddressId]);
+
+    const inquirySummary = useMemo(() => buildBookingSummary(inquiryItems), [inquiryItems]);
+
+    const handleSubmitInquiry = async () => {
+        if (!user) {
+            showInfoModal('Login Required', 'You must be logged in to submit a custom order.', '/login', 'Log In');
+            return;
+        }
+
+        if (deliveryMethod === 'pickup' && (!selectedPickupDate || !selectedPickupTime)) {
+            showInfoModal('Missing Information', 'Please select a pickup date and time.');
+            return;
+        }
+
+        if (deliveryMethod === 'delivery' && !selectedAddressId) {
+            showInfoModal('Missing Address', 'Please select a saved address before submitting your custom order.');
+            return;
+        }
+
+        if (deliveryMethod === 'delivery' && multiAddressEnabled) {
+            const hasIncompleteAssignment = deliveryAssignments.some((assignment) => !assignment.addressId);
+            if (hasIncompleteAssignment) {
+                showInfoModal('Incomplete Delivery Stops', 'Please assign an address to every custom order item before submitting.');
+                return;
+            }
         }
 
         setIsProcessing(true);
 
         try {
-            if (deliveryMethod === 'delivery') {
-                if (!isAddressReady) {
-                    setInfoModal({ show: true, title: 'Missing Address', message: 'An address for delivery is not available for this inquiry.' });
-                    throw new Error('Address not ready');
-                }
-            }
+            const multiDeliveryDestinations = deliveryMethod === 'delivery' && multiAddressEnabled
+                ? buildMultiDeliveryDestinations({
+                    assignments: deliveryAssignments,
+                    addresses: savedAddresses,
+                    addressFeeMap: Object.keys(addressFeeMap).length
+                        ? addressFeeMap
+                        : (selectedAddressId ? { [selectedAddressId]: dynamicShippingFee } : {}),
+                })
+                : [];
 
-            const request_number = `REQ-${user.id.substring(0, 4)}-${Date.now()}`;
+            const uploadedItems = await Promise.all(inquiryItems.map(async (item, index) => {
+                let uploadedImageUrl = item.image_url || null;
 
-            // Create submissions for every item in the cart
-            const submissions = [];
-            for (let index = 0; index < inquiryItems.length; index++) {
-                const item = inquiryItems[index];
-
-                // Upload inspiration image to Supabase Storage if it exists (base64)
-                let uploadedImageUrl = null;
-                if (item.inspirationImageBase64) {
+                if (item.inspirationImageBase64?.startsWith?.('data:image')) {
                     try {
-                        // Convert base64 to blob
-                        const base64Data = item.inspirationImageBase64;
-                        const response = await fetch(base64Data);
+                        const response = await fetch(item.inspirationImageBase64);
                         const blob = await response.blob();
                         const fileExt = blob.type.split('/')[1] || 'png';
-                        const fileName = `inquiries/${user.id}-${Date.now()}-${index}.${fileExt}`;
+                        const fileName = `booking-inspirations/${user.id}-${Date.now()}-${index}.${fileExt}`;
 
                         const { error: uploadError } = await supabase.storage
-                            .from('receipts')
-                            .upload(fileName, blob);
+                            .from('request-images')
+                            .upload(fileName, blob, { contentType: blob.type || 'image/png' });
 
-                        if (!uploadError) {
-                            const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(fileName);
-                            uploadedImageUrl = urlData.publicUrl;
+                        if (uploadError) {
+                            console.error('Error uploading booking inspiration image:', uploadError);
                         } else {
-                            console.error('Error uploading inspiration image:', uploadError);
+                            const { data: urlData } = supabase.storage.from('request-images').getPublicUrl(fileName);
+                            uploadedImageUrl = urlData?.publicUrl || null;
                         }
-                    } catch (imgErr) {
-                        console.error('Error processing inspiration image:', imgErr);
+                    } catch (imageError) {
+                        console.error('Error preparing booking inspiration image:', imageError);
                     }
                 }
 
-                // Strip the large base64 from data to keep payload small
-                const { inspirationImageBase64, ...cleanDetails } = item;
+                const { inspirationImageBase64, deliveryAddress, ...cleanItem } = item;
 
-                submissions.push({
-                    request_number: `${request_number}-${index + 1}`,
-                    user_id: user.id,
-                    type: item.serviceType === "Event/Special Request" ? "booking" : item.serviceType,
-                    contact_number: item.contactNumber,
-                    status: 'pending',
-                    delivery_method: deliveryMethod,
-                    pickup_time: deliveryMethod === 'pickup' ? `${selectedPickupDate} - ${selectedPickupTime}` : null,
-                    shipping_fee: deliveryMethod === 'pickup' ? 0 : dynamicShippingFee,
-                    data: { ...cleanDetails, image_url: uploadedImageUrl },
+                return {
+                    ...cleanItem,
                     image_url: uploadedImageUrl,
-                    notes: item.specialInstructions || null,
-                });
-            }
+                    deliveryAddress: deliveryAddress || null,
+                };
+            }));
 
-            const { error } = await supabase.from('requests').insert(submissions);
+            const requestNumber = `REQ-${user.id.substring(0, 4)}-${Date.now()}`;
+            const primaryDestination = multiDeliveryDestinations[0] || null;
+            const firstItem = uploadedItems[0] || {};
+            const pickupDateTime = deliveryMethod === 'pickup'
+                ? `${selectedPickupDate} - ${selectedPickupTime}`
+                : null;
+            const commonNotes = uploadedItems
+                .map((item) => String(item?.specialInstructions || '').trim())
+                .filter(Boolean)
+                .join('\n\n');
+
+            const newRequest = {
+                request_number: requestNumber,
+                user_id: user.id,
+                type: 'booking',
+                status: 'pending',
+                contact_number: primaryDestination?.recipient_phone || firstItem.contactNumber || address.phone || null,
+                delivery_method: deliveryMethod,
+                pickup_time: pickupDateTime,
+                shipping_fee: shippingFee,
+                image_url: firstItem.image_url || null,
+                notes: commonNotes || null,
+                data: {
+                    items: uploadedItems,
+                    item_count: uploadedItems.length,
+                    summary_label: inquirySummary.summaryLabel,
+                    combined_occasions: inquirySummary.combinedOccasions,
+                    combined_dates: inquirySummary.combinedDates,
+                    recipientName: firstItem.recipientName || null,
+                    occasion: firstItem.occasion || null,
+                    eventDate: firstItem.eventDate || null,
+                    eventTime: firstItem.eventTime || null,
+                    venue: firstItem.venue || null,
+                    arrangementSummary: firstItem.arrangementSummary || firstItem.arrangementType || null,
+                    arrangementSelections: Array.isArray(firstItem.arrangementSelections) ? firstItem.arrangementSelections : [],
+                    selectedFlowers: firstItem.selectedFlowers || [],
+                    flowers: firstItem.flowers || null,
+                    colorPreference: firstItem.colorPreference || null,
+                    specialInstructions: firstItem.specialInstructions || null,
+                    address: deliveryMethod === 'delivery' ? address : null,
+                    address_id: deliveryMethod === 'delivery' ? (primaryDestination?.address_id || selectedAddressId) : null,
+                    multi_delivery_destinations: multiDeliveryDestinations,
+                    delivery_method: deliveryMethod,
+                    pickup_time: pickupDateTime,
+                    shipping_fee: shippingFee,
+                },
+            };
+
+            const { error } = await supabase.from('requests').insert([newRequest]);
             if (error) throw error;
 
-            localStorage.removeItem('bookingCart');
-            localStorage.removeItem(`bookingCart_${user.id}`);
+            try {
+                await supabase
+                    .from('notifications')
+                    .insert([{
+                        user_id: user.id,
+                        type: 'request',
+                        title: 'Custom Order Submitted',
+                        message: `Your custom order request #${requestNumber} has been submitted and is waiting for review.`,
+                        link: `/request-tracking/${requestNumber}`,
+                    }]);
+            } catch (notificationError) {
+                console.error('Error creating booking notification:', notificationError);
+            }
 
-            // Add notification for inquiry submission
             const notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
             const newNotification = {
                 id: `notif-${Date.now()}`,
                 type: 'request',
-                title: 'Inquiry Submitted Successfully!',
-                message: `You successfully submitted ${inquiryItems.length} Custom Order(s). Your inquiry has been submitted and is pending review.`,
+                title: 'Custom Order Submitted',
+                message: `Your request #${requestNumber} has been submitted and is pending review.`,
                 icon: 'fa-file-alt',
                 timestamp: new Date().toISOString(),
                 read: false,
-                link: `/profile?menu=orders`
+                link: `/request-tracking/${requestNumber}`
             };
             localStorage.setItem('notifications', JSON.stringify([newNotification, ...notifications]));
 
-            navigate(`/profile?menu=orders`);
+            localStorage.removeItem('bookingCart');
+            localStorage.removeItem(`bookingCart_${user.id}`);
+            localStorage.removeItem(`bookSelection_${user.id}`);
+
+            navigate(`/request-tracking/${requestNumber}`);
         } catch (error) {
-            console.error('Error submitting inquiry:', error);
+            console.error('Error submitting custom order:', error);
+            showInfoModal('Submission Failed', error.message || 'There was an error submitting your custom order. Please try again.');
         } finally {
             setIsProcessing(false);
         }
     };
 
-    if (inquiryItems.length === 0) {
+    if (inquiryItems.length === 0 && !isProcessing) {
         return (
-            <div className="checkout-container"><div className="container text-center py-5"><div className="spinner-border text-primary"></div></div></div>
+            <div className="checkout-container">
+                <div className="container">
+                    <div className="empty-state">
+                        <div className="empty-state-icon">
+                            <i className="fas fa-file-invoice"></i>
+                        </div>
+                        <h3>No custom orders selected</h3>
+                        <p>Please add custom orders to your cart first.</p>
+                        <Link to="/book-event" className="btn-shop-now">Create a Custom Order</Link>
+                    </div>
+                </div>
+            </div>
         );
     }
 
     return (
         <div className="checkout-container">
             <div className="container">
-                <div className="checkout-header"><i className="fas fa-file-invoice fa-lg"></i><h1>Confirm Inquiry</h1></div>
+                <div className="checkout-header">
+                    <i className="fas fa-file-invoice fa-lg"></i>
+                    <h1>Confirm Custom Order</h1>
+                </div>
+
                 <div className="row g-4">
                     <div className="col-lg-8">
                         <div className="checkout-section">
-                            <h5 className="section-title"><i className="fas fa-truck"></i> Delivery / Pickup Preference</h5>
+                            <h5 className="section-title">
+                                <i className="fas fa-truck"></i> Delivery / Pickup Preference
+                            </h5>
+
                             <div className="d-flex gap-3 mb-3">
-                                <div className={`payment-option flex-grow-1 ${deliveryMethod === 'delivery' ? 'selected' : ''}`} onClick={() => setDeliveryMethod('delivery')} style={{ cursor: 'pointer' }}>
+                                <div
+                                    className={`payment-option flex-grow-1 ${deliveryMethod === 'delivery' ? 'selected' : ''}`}
+                                    onClick={() => setDeliveryMethod('delivery')}
+                                    style={{ cursor: 'pointer' }}
+                                >
                                     <div className="payment-icon"><i className="fas fa-truck"></i></div>
                                     <div className="payment-info"><h6>Delivery</h6><p>Deliver to an address</p></div>
                                     <div className="form-check ms-auto"><input type="radio" className="form-check-input" checked={deliveryMethod === 'delivery'} readOnly /></div>
                                 </div>
-                                <div className={`payment-option flex-grow-1 ${deliveryMethod === 'pickup' ? 'selected' : ''}`} onClick={() => setDeliveryMethod('pickup')} style={{ cursor: 'pointer' }}>
+                                <div
+                                    className={`payment-option flex-grow-1 ${deliveryMethod === 'pickup' ? 'selected' : ''}`}
+                                    onClick={() => setDeliveryMethod('pickup')}
+                                    style={{ cursor: 'pointer' }}
+                                >
                                     <div className="payment-icon"><i className="fas fa-store"></i></div>
                                     <div className="payment-info"><h6>Pick Up</h6><p>Pick up at our store</p></div>
                                     <div className="form-check ms-auto"><input type="radio" className="form-check-input" checked={deliveryMethod === 'pickup'} readOnly /></div>
                                 </div>
                             </div>
+
                             {deliveryMethod === 'pickup' && (
                                 <div className="mt-3 p-3 rounded" style={{ background: '#f8f9fa' }}>
-                                    <label className="form-label fw-bold"><i className="fas fa-clock me-2" style={{ color: 'var(--shop-pink)' }}></i> Select Pickup Date & Time</label>
+                                    <label className="form-label fw-bold">
+                                        <i className="fas fa-clock me-2" style={{ color: 'var(--shop-pink)' }}></i>
+                                        Select Pickup Date & Time
+                                    </label>
                                     <input
                                         type="date"
                                         className="form-control mb-3"
                                         value={selectedPickupDate}
                                         min={new Date().toISOString().split('T')[0]}
-                                        onKeyDown={(e) => e.preventDefault()}
-                                        onChange={(e) => {
-                                            const selected = e.target.value;
+                                        onKeyDown={(event) => event.preventDefault()}
+                                        onChange={(event) => {
+                                            const selected = event.target.value;
                                             const date = new Date(selected);
                                             const day = date.getUTCDay();
                                             if (day === 0 || day === 6) {
-                                                setInfoModal({ show: true, title: 'Invalid Date', message: 'Pickup is only available on weekdays (Monday to Friday).' });
+                                                showInfoModal('Invalid Date', 'Pickup is only available on weekdays (Monday to Friday).');
                                                 setSelectedPickupDate('');
                                             } else {
                                                 setSelectedPickupDate(selected);
@@ -251,35 +451,48 @@ const BookingCheckout = ({ user }) => {
                                         }}
                                     />
                                     <div className="d-flex flex-wrap gap-2">
-                                        {pickupTimes.map(time => (<button key={time} type="button" className={`btn btn-sm rounded-pill px-3 ${selectedPickupTime === time ? 'btn-primary' : 'btn-outline-secondary'}`} style={selectedPickupTime === time ? { background: 'var(--shop-pink)', border: 'none' } : {}} onClick={() => setSelectedPickupTime(time)}>{time}</button>))}
+                                        {pickupTimes.map((time) => (
+                                            <button
+                                                key={time}
+                                                type="button"
+                                                className={`btn btn-sm rounded-pill px-3 ${selectedPickupTime === time ? 'btn-primary' : 'btn-outline-secondary'}`}
+                                                style={selectedPickupTime === time ? { background: 'var(--shop-pink)', border: 'none' } : {}}
+                                                onClick={() => setSelectedPickupTime(time)}
+                                            >
+                                                {time}
+                                            </button>
+                                        ))}
                                     </div>
-                                    <small className="text-muted mt-2 d-block"><i className="fas fa-map-marker-alt me-1"></i>Pickup Location: Jocerry's Flower Shop, 63 San Jose Road, Zamboanga City</small>
+                                    <small className="text-muted mt-2 d-block">
+                                        <i className="fas fa-map-marker-alt me-1"></i>
+                                        Pickup Location: Jocerry&apos;s Flower Shop, 63 San Jose Road, Zamboanga City
+                                    </small>
                                 </div>
                             )}
                         </div>
 
                         {deliveryMethod === 'delivery' && (
-                            <div className="checkout-section">
-                                <h5 className="section-title mb-3"><i className="fas fa-map-marker-alt"></i> Delivery Address</h5>
-                                {user ? (
-                                    isAddressReady ? (
-                                        <div className="p-3 rounded" style={{ background: '#f8f9fa' }}>
-                                            <p className='mb-1'><strong>Customer Name:</strong> {inquiryAddress.name}</p>
-                                            <p className='mb-1'><strong>Phone:</strong> {inquiryAddress.phone}</p>
-                                            <p className='mb-0'><strong>Address:</strong> {`${inquiryAddress.street}, ${inquiryAddress.barangay}, ${inquiryAddress.city}`}</p>
-                                        </div>
-                                    ) : (
-                                        <div className="alert alert-warning">
-                                            An address was not provided for this inquiry. Please go back and add an address to use the delivery option.
-                                        </div>
-                                    )
-                                ) : (
-                                    <div className="alert alert-danger">
-                                        <i className="fas fa-exclamation-triangle me-2"></i>
-                                        Please <Link to="/login" style={{ color: 'var(--shop-pink)' }}>log in</Link> to use the delivery option.
-                                    </div>
-                                )}
-                            </div>
+                            <>
+                                <CheckoutAddressSelection
+                                    user={user}
+                                    address={address}
+                                    setAddress={setAddress}
+                                    selectedAddressId={selectedAddressId}
+                                    setSelectedAddressId={setSelectedAddressId}
+                                    showInfoModal={showInfoModal}
+                                    onAddressesLoaded={setSavedAddresses}
+                                />
+
+                                <MultiAddressDeliverySection
+                                    checkoutItems={inquiryItems}
+                                    savedAddresses={savedAddresses}
+                                    selectedAddressId={selectedAddressId}
+                                    enabled={multiAddressEnabled}
+                                    setEnabled={setMultiAddressEnabled}
+                                    assignments={deliveryAssignments}
+                                    setAssignments={setDeliveryAssignments}
+                                />
+                            </>
                         )}
 
                         <div className="checkout-section">
@@ -289,16 +502,16 @@ const BookingCheckout = ({ user }) => {
                                     <div key={item.id || idx} className="mb-4 pb-3 border-bottom">
                                         <div className="d-flex align-items-center mb-3">
                                             <img
-                                                src={item.inspirationImageBase64 || 'https://via.placeholder.com/80?text=No+Ref'}
+                                                src={item.inspirationImageBase64 || item.image_url || 'https://via.placeholder.com/80?text=No+Ref'}
                                                 alt={item.serviceType}
                                                 className="rounded me-3"
                                                 style={{ width: '60px', height: '60px', objectFit: 'cover' }}
                                             />
                                             <div>
-                                                <h6 className="mb-0 fw-bold">{item.occasion} - {(item.arrangementSummary || item.arrangementType || (Array.isArray(item.arrangementTypes) ? item.arrangementTypes.join(', ') : 'Custom Arrangement'))}</h6>
-                                                <small className="text-muted d-block">
-                                                    {item.serviceType}
-                                                </small>
+                                                <h6 className="mb-0 fw-bold">
+                                                    {item.occasion} - {item.arrangementSummary || item.arrangementType || (Array.isArray(item.arrangementTypes) ? item.arrangementTypes.join(', ') : 'Custom Arrangement')}
+                                                </h6>
+                                                <small className="text-muted d-block">{item.serviceType}</small>
                                             </div>
                                         </div>
 
@@ -308,7 +521,7 @@ const BookingCheckout = ({ user }) => {
                                             <strong>Event Date:</strong> {item.eventDate}
                                             {item.eventTime && ` at ${item.eventTime}`}
                                         </p>
-                                        <p className="mb-1"><strong>Location/Venue:</strong> {item.venue}</p>
+                                        <p className="mb-1"><strong>Event Venue / Location:</strong> {item.venue}</p>
                                         <p className="mb-1"><strong>Total Quantity:</strong> {item.arrangementQuantity || 1}</p>
                                         {item.flowerQuantity && <p className="mb-1"><strong>No. of Flower Pieces:</strong> {item.flowerQuantity}</p>}
                                         {item.flowers && <p className="mb-1"><strong>Preferred Flowers:</strong> {item.flowers}</p>}
@@ -319,16 +532,17 @@ const BookingCheckout = ({ user }) => {
                             </div>
                         </div>
                     </div>
+
                     <div className="col-lg-4">
                         <div className="order-summary-card">
                             <h5 className="fw-bold mb-4">Summary</h5>
                             <div className="summary-row">
-                                <span>Inquiry Item</span>
-                                <span>1</span>
+                                <span>Inquiry Items</span>
+                                <span>{inquiryItems.length}</span>
                             </div>
                             <div className="summary-row">
-                                    <span>{deliveryMethod === 'pickup' ? 'Pickup' : 'Delivery Fee'}</span>
-                                <span>{deliveryMethod === 'pickup' ? 'FREE' : `₱${dynamicShippingFee.toLocaleString()}`}</span>
+                                <span>{deliveryMethod === 'pickup' ? 'Pickup' : 'Delivery Fee'}</span>
+                                <span>{deliveryMethod === 'pickup' ? 'FREE' : `PHP ${shippingFee.toLocaleString()}`}</span>
                             </div>
                             <hr />
                             <div className="summary-row total">
@@ -338,7 +552,7 @@ const BookingCheckout = ({ user }) => {
                             <button
                                 className="btn-place-order"
                                 onClick={handleSubmitInquiry}
-                                disabled={isProcessing || (deliveryMethod === 'delivery' && !isAddressReady)}
+                                disabled={isProcessing || (deliveryMethod === 'delivery' && !selectedAddressId)}
                             >
                                 {isProcessing ? 'Submitting...' : 'Submit Inquiry'}
                             </button>
@@ -355,9 +569,8 @@ const BookingCheckout = ({ user }) => {
                 linkTo={infoModal.linkTo}
                 linkText={infoModal.linkText}
             />
-        </div >
+        </div>
     );
 };
 
 export default BookingCheckout;
-

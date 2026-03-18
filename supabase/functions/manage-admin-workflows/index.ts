@@ -556,7 +556,7 @@ serve(async (req) => {
       .eq("id", caller.id)
       .single();
 
-    const callerRole = callerProfile?.role ?? caller.user_metadata?.role ?? null;
+    const callerRole = callerProfile?.role ?? null;
     const isStaffCaller = Boolean(callerRole && ALLOWED_ROLES.has(callerRole));
     const isCustomerRefundAction = CUSTOMER_REFUND_ACTIONS.has(action);
 
@@ -1194,6 +1194,20 @@ serve(async (req) => {
           return json(400, { error: "Refund request id is required." });
         }
 
+        const { data: existingRefund, error: fetchError } = await adminClient
+          .from("refund_requests")
+          .select("*")
+          .eq("id", refundId)
+          .single();
+
+        if (fetchError) {
+          throw fetchError;
+        }
+
+        if (String(existingRefund.status ?? "") !== "requested") {
+          return json(400, { error: "Only newly requested refunds can be rejected." });
+        }
+
         const { data: refundRequest, error: updateError } = await adminClient
           .from("refund_requests")
           .update({
@@ -1222,6 +1236,10 @@ serve(async (req) => {
       }
 
       case "start_refund_processing": {
+        if (callerRole !== "admin") {
+          return json(403, { error: "Only admin accounts can start refund processing." });
+        }
+
         const refundId = body?.refundId;
         if (!refundId) {
           return json(400, { error: "Refund request id is required." });
@@ -1261,6 +1279,10 @@ serve(async (req) => {
       }
 
       case "complete_refund_request": {
+        if (callerRole !== "admin") {
+          return json(403, { error: "Only admin accounts can complete refund requests." });
+        }
+
         const refundId = body?.refundId;
         const refundReference = String(body?.refundReference ?? "").trim() || null;
         if (!refundId) {

@@ -1962,10 +1962,17 @@ export const adminAPI = {
 
             const deliveryMethodFromData = requestData?.delivery_method;
             const pickupTimeFromData = requestData?.pickup_time;
+            const derivedPrimaryImage = req.image_url
+                || (Array.isArray(requestData?.items)
+                    ? requestData.items.find((item) => item?.image_url)?.image_url || null
+                    : null)
+                || requestData?.image_url
+                || null;
 
             return {
                 ...req,
                 status: req.status,
+                image_url: derivedPrimaryImage,
                 payment_status: paymentStatusToUse,
                 payment_method: paymentMethodToUse,
                 receipt_url: receiptUrlToUse,

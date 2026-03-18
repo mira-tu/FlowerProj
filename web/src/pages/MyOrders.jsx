@@ -62,6 +62,11 @@ const MyOrders = () => {
     const [totalUnreadMessages, setTotalUnreadMessages] = useState(0);
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null });
 
+    const getNotificationStorageKey = async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        return session?.user?.id ? `notifications_${session.user.id}` : 'notifications';
+    };
+
     useEffect(() => {
         const checkUser = async () => {
             const { data: { session } } = await supabase.auth.getSession();
@@ -388,7 +393,8 @@ const MyOrders = () => {
             }
 
             // Create cancellation notification
-            const notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
+            const notificationStorageKey = await getNotificationStorageKey();
+            const notifications = JSON.parse(localStorage.getItem(notificationStorageKey) || '[]');
             const orderTypeLabel = orderToCancel.isFromBooking ? 'Custom Order' :
                 orderToCancel.type
                     ? (orderToCancel.type === 'booking' ? 'Custom Order'
@@ -410,7 +416,7 @@ const MyOrders = () => {
                 read: false,
                 link: '/my-orders'
             };
-            localStorage.setItem('notifications', JSON.stringify([newNotification, ...notifications]));
+            localStorage.setItem(notificationStorageKey, JSON.stringify([newNotification, ...notifications]));
 
             // Reload orders from Supabase
             const { data: { session } } = await supabase.auth.getSession();

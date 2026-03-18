@@ -399,6 +399,7 @@ function AppContent() {
         <Route path="/customized-request-tracking/:requestNumber" element={<OrderCustomizedTracking user={user} />} />
         <Route path="/order-tracking/:orderNumber" element={<OrderTracking user={user} />} />
         <Route path="/profile" element={<Profile user={user} logout={logout} />} />
+        <Route path="/my-orders" element={<MyOrders />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/events" element={<div className="container py-5"><h2>Events Page</h2></div>} />
       </Routes>

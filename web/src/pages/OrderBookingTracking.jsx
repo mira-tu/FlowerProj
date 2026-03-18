@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { supabase } from '../config/supabase';
 import TrackingPaymentDetails from '../components/TrackingPaymentDetails';
+import DeliveryDestinationsSummary from '../components/DeliveryDestinationsSummary';
 import InfoModal from '../components/InfoModal';
 import { buildTimelineTimestampMap, formatTimelineTimestamp } from '../utils/timelineTimestamps';
 import '../styles/Shop.css';
@@ -26,6 +27,72 @@ const requestPickupSteps = [
     { id: 5, status: 'ready_for_pickup', title: 'Ready for Pickup', description: 'Your request is ready for pickup', icon: 'fa-store' },
     { id: 6, status: 'completed', title: 'Picked up', description: 'Your request has been picked up', icon: 'fa-check-circle' },
 ];
+
+const getBookingItems = (requestData = {}) => {
+    if (!requestData || typeof requestData !== 'object') {
+        return [];
+    }
+
+    const items = Array.isArray(requestData.items) && requestData.items.length
+        ? requestData.items
+        : [requestData];
+
+    return items.filter((item) => item && typeof item === 'object' && Object.keys(item).length);
+};
+
+const formatBookingArrangement = (item = {}) => {
+    const arrangementSelections = Array.isArray(item.arrangementSelections) ? item.arrangementSelections : [];
+    if (arrangementSelections.length) {
+        return arrangementSelections
+            .map((selection) => {
+                const label = selection?.arrangement_label || selection?.arrangementLabel || selection?.arrangement_type || selection?.arrangementType;
+                const quantity = Number(selection?.quantity || selection?.arrangement_quantity || 1);
+                return label ? `${label} x${quantity}` : null;
+            })
+            .filter(Boolean)
+            .join(', ');
+    }
+
+    if (item.arrangementType === 'Other') {
+        return item.otherArrangementType || null;
+    }
+
+    return item.arrangementSummary || item.arrangementType || (Array.isArray(item.arrangementTypes) ? item.arrangementTypes.join(', ') : null);
+};
+
+const formatBookingFlowers = (item = {}) => {
+    if (Array.isArray(item.selectedFlowers) && item.selectedFlowers.length) {
+        let flowers = item.selectedFlowers.map((flower) => flower?.label || flower?.value || flower).filter(Boolean).join(', ');
+        if (flowers.includes('Others') && item.otherFlowersText) {
+            flowers = flowers.replace('Others', item.otherFlowersText);
+        }
+        return flowers;
+    }
+
+    if (item.selectedFlowers) {
+        return String(item.selectedFlowers);
+    }
+
+    if (item.flowers) {
+        return String(item.flowers);
+    }
+
+    return '';
+};
+
+const buildBookingOverview = (requestData = {}) => {
+    const items = getBookingItems(requestData);
+    const uniqueValues = (values = []) => Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
+
+    return {
+        items,
+        itemCount: items.length,
+        occasionText: uniqueValues(requestData.combined_occasions || items.map((item) => item.occasion)).join(', '),
+        eventDateText: uniqueValues(requestData.combined_dates || items.map((item) => item.eventDate || item.event_date)).join(', '),
+        recipientText: uniqueValues(items.map((item) => item.recipientName || item.recipient_name)).join(', '),
+        venueText: uniqueValues(items.map((item) => item.venue || item.deliveryAddress)).join(', '),
+    };
+};
 
 const OrderBookingTracking = () => {
     const navigate = useNavigate();
@@ -59,13 +126,22 @@ const OrderBookingTracking = () => {
                 return;
             }
 
+            let normalizedRequestData = foundRequest.data;
+            if (typeof normalizedRequestData === 'string') {
+                try {
+                    normalizedRequestData = JSON.parse(normalizedRequestData);
+                } catch (error) {
+                    normalizedRequestData = {};
+                }
+            }
+
             let finalAddress = null;
             // Step 2: If the request has an address_id, fetch the address
-            if (foundRequest.data?.address_id) {
+            if (normalizedRequestData?.address_id) {
                 const { data: foundAddress, error: addressError } = await supabase
                     .from('addresses')
                     .select('*')
-                    .eq('id', foundRequest.data.address_id)
+                    .eq('id', normalizedRequestData.address_id)
                     .single();
 
                 if (addressError) {
@@ -96,15 +172,7 @@ const OrderBookingTracking = () => {
                 };
             }
 
-            // Step 3: Combine data and set state
-            let normalizedRequestData = foundRequest.data;
-            if (typeof normalizedRequestData === 'string') {
-                try {
-                    normalizedRequestData = JSON.parse(normalizedRequestData);
-                } catch (error) {
-                    normalizedRequestData = {};
-                }
-            }
+            const primaryBookingItem = getBookingItems(normalizedRequestData)[0] || null;
 
             const transformedRequest = {
                 ...foundRequest,
@@ -115,7 +183,7 @@ const OrderBookingTracking = () => {
                 address: finalAddress, // Attach the fetched address
                 type: foundRequest.type,
                 requestData: normalizedRequestData,
-                imageUrl: foundRequest.image_url,
+                imageUrl: foundRequest.image_url || primaryBookingItem?.image_url || null,
                 finalPrice: foundRequest.final_price,
             };
             setRequest(transformedRequest);
@@ -324,6 +392,13 @@ const OrderBookingTracking = () => {
     const isPickup = request?.deliveryMethod === 'pickup';
     const isFinalStep = currentStep >= trackingSteps.length && currentStep !== -1;
     const isDeclinedOrCancelled = currentStep === -1;
+    const bookingOverview = useMemo(
+        () => buildBookingOverview(request?.requestData || {}),
+        [request]
+    );
+    const bookingDestinations = Array.isArray(request?.requestData?.multi_delivery_destinations)
+        ? request.requestData.multi_delivery_destinations
+        : [];
 
     if (loading) {
         return (
@@ -559,11 +634,34 @@ const OrderBookingTracking = () => {
                                 <>
                                     <div className="delivery-info-row">
                                         <div className="delivery-label">Occasion</div>
-                                        <div className="delivery-value">{request.requestData?.occasion || 'N/A'}</div>
+                                        <div className="delivery-value">{bookingOverview.occasionText || request.requestData?.occasion || 'N/A'}</div>
                                     </div>
+                                    {bookingOverview.itemCount > 1 && (
+                                        <div className="delivery-info-row">
+                                            <div className="delivery-label">Custom Order Items</div>
+                                            <div className="delivery-value">{bookingOverview.itemCount}</div>
+                                        </div>
+                                    )}
+                                    {bookingOverview.eventDateText && (
+                                        <div className="delivery-info-row">
+                                            <div className="delivery-label">Event Date</div>
+                                            <div className="delivery-value">{bookingOverview.eventDateText}</div>
+                                        </div>
+                                    )}
+                                    {bookingOverview.venueText && (
+                                        <div className="delivery-info-row">
+                                            <div className="delivery-label">Venue</div>
+                                            <div className="delivery-value">{bookingOverview.venueText}</div>
+                                        </div>
+                                    )}
+                                    {bookingDestinations.length > 0 && (
+                                        <div className="mt-4">
+                                            <DeliveryDestinationsSummary destinations={bookingDestinations} title="Assigned Delivery Stops" fallbackRider={request.rider} />
+                                        </div>
+                                    )}
                                     <div className="delivery-info-row">
                                         <div className="delivery-label">Recipient</div>
-                                        <div className="delivery-value">{request.address?.name || request.requestData?.recipient_name || request.requestData?.fullName}</div>
+                                        <div className="delivery-value">{request.address?.name || bookingOverview.recipientText || request.requestData?.recipient_name || request.requestData?.fullName}</div>
                                     </div>
                                     <div className="delivery-info-row">
                                         <div className="delivery-label">Phone</div>
@@ -613,51 +711,50 @@ const OrderBookingTracking = () => {
                                     if (typeof reqData === 'string') {
                                         try { reqData = JSON.parse(reqData); } catch (e) { reqData = {}; }
                                     }
-
-                                    const arrangementSelections = Array.isArray(reqData.arrangementSelections) ? reqData.arrangementSelections : [];
-                                    const arrangement = reqData.arrangementSummary || (
-                                        arrangementSelections.length
-                                            ? arrangementSelections.map((selection) => {
-                                                const label = selection?.arrangement_label || selection?.arrangementLabel || selection?.arrangement_type || selection?.arrangementType;
-                                                const quantity = Number(selection?.quantity || selection?.arrangement_quantity || 1);
-                                                return label ? `${label} x${quantity}` : null;
-                                            }).filter(Boolean).join(', ')
-                                            : (reqData.arrangementType === 'Other' ? reqData.otherArrangementType : reqData.arrangementType)
-                                    );
-                                    const totalArrangementQuantity = reqData.arrangementQuantity || (
-                                        arrangementSelections.length
-                                            ? arrangementSelections.reduce((sum, selection) => sum + Number(selection?.quantity || 1), 0)
-                                            : null
-                                    );
-
-                                    let flowers = '';
-                                    if (reqData.selectedFlowers && Array.isArray(reqData.selectedFlowers)) {
-                                        flowers = reqData.selectedFlowers.map(f => f.label || f.value || f).join(', ');
-                                        if (flowers.includes('Others') && reqData.otherFlowersText) {
-                                            flowers = flowers.replace('Others', reqData.otherFlowersText);
-                                        }
-                                    } else if (reqData.selectedFlowers) {
-                                        flowers = String(reqData.selectedFlowers);
-                                    } else if (reqData.flowers) {
-                                        flowers = String(reqData.flowers);
-                                    }
-
-                                    const colorTheme = reqData.colorPreference === 'Others' ? reqData.otherColorPreference : reqData.colorPreference;
+                                    const items = getBookingItems(reqData);
 
                                     return (
                                         <>
-                                            {(reqData.recipientName || reqData.recipient_name) && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Recipient</span><span className="fw-bold text-dark">{reqData.recipientName || reqData.recipient_name}</span></div>}
-                                            {reqData.occasion && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Occasion</span><span className="fw-bold text-dark">{reqData.occasion === 'Other' ? reqData.otherOccasion : reqData.occasion}</span></div>}
-                                            {request.delivery_method !== 'pickup' && (reqData.eventDate || reqData.event_date) && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Event Date</span><span className="fw-bold text-dark">{reqData.eventDate || reqData.event_date}</span></div>}
-                                            {request.delivery_method !== 'pickup' && reqData.eventTime && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Event Time</span><span className="fw-bold text-dark">{reqData.eventTime}</span></div>}
-                                            {request.delivery_method !== 'pickup' && reqData.venue && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Venue</span><span className="fw-bold text-dark">{reqData.venue}</span></div>}
+                                            {items.length > 1 && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Custom Order Items</span><span className="fw-bold text-dark">{items.length}</span></div>}
                                             {request.delivery_method === 'pickup' && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Pickup Location</span><span className="fw-bold text-dark">Jocerry's Flower Shop, 63 San Jose Road, Zamboanga City</span></div>}
                                             {request.delivery_method === 'pickup' && request.pickupTime && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Pickup Time</span><span className="fw-bold text-dark">{request.pickupTime}</span></div>}
-                                            {arrangement && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Arrangement</span><span className="fw-bold text-dark">{arrangement}</span></div>}
-                                            {totalArrangementQuantity && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Quantity</span><span className="fw-bold text-dark">{totalArrangementQuantity}</span></div>}
-                                            {flowers && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Preferred Flowers</span><span className="fw-bold text-dark">{flowers}</span></div>}
-                                            {colorTheme && <div className="d-flex flex-column"><span className="text-muted small fw-medium">Color Theme</span><span className="fw-bold text-dark">{colorTheme}</span></div>}
-                                            {(reqData.specialInstructions || request.notes) && <div className="d-flex flex-column mt-2"><span className="text-muted small fw-medium">Special Instructions</span><span className="text-dark bg-light p-3 rounded-3 mt-1 fs-6">{reqData.specialInstructions || request.notes}</span></div>}
+                                            {items.map((item, index) => {
+                                                const arrangement = formatBookingArrangement(item);
+                                                const flowers = formatBookingFlowers(item);
+                                                const colorTheme = item.colorPreference === 'Others' ? item.otherColorPreference : item.colorPreference;
+                                                const arrangementSelections = Array.isArray(item.arrangementSelections) ? item.arrangementSelections : [];
+                                                const totalArrangementQuantity = item.arrangementQuantity || (
+                                                    arrangementSelections.length
+                                                        ? arrangementSelections.reduce((sum, selection) => sum + Number(selection?.quantity || 1), 0)
+                                                        : null
+                                                );
+
+                                                return (
+                                                    <div key={item.id || `booking-item-${index}`} className="p-3 rounded-3 border" style={{ background: '#f8f9fa', borderColor: '#f0d7e1' }}>
+                                                        {items.length > 1 && (
+                                                            <div className="text-muted small text-uppercase fw-bold mb-2">
+                                                                Item {index + 1}
+                                                            </div>
+                                                        )}
+                                                        {(item.recipientName || item.recipient_name) && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Recipient</span><span className="fw-bold text-dark">{item.recipientName || item.recipient_name}</span></div>}
+                                                        {item.occasion && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Occasion</span><span className="fw-bold text-dark">{item.occasion === 'Other' ? item.otherOccasion : item.occasion}</span></div>}
+                                                        {request.delivery_method !== 'pickup' && (item.eventDate || item.event_date) && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Event Date</span><span className="fw-bold text-dark">{item.eventDate || item.event_date}</span></div>}
+                                                        {request.delivery_method !== 'pickup' && item.eventTime && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Event Time</span><span className="fw-bold text-dark">{item.eventTime}</span></div>}
+                                                        {request.delivery_method !== 'pickup' && item.venue && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Venue</span><span className="fw-bold text-dark">{item.venue}</span></div>}
+                                                        {arrangement && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Arrangement</span><span className="fw-bold text-dark">{arrangement}</span></div>}
+                                                        {totalArrangementQuantity && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Quantity</span><span className="fw-bold text-dark">{totalArrangementQuantity}</span></div>}
+                                                        {flowers && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Preferred Flowers</span><span className="fw-bold text-dark">{flowers}</span></div>}
+                                                        {colorTheme && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Color Theme</span><span className="fw-bold text-dark">{colorTheme}</span></div>}
+                                                        {item.specialInstructions && <div className="d-flex flex-column mt-2"><span className="text-muted small fw-medium">Special Instructions</span><span className="text-dark bg-white p-3 rounded-3 mt-1 fs-6">{item.specialInstructions}</span></div>}
+                                                    </div>
+                                                );
+                                            })}
+                                            {!items.some((item) => item?.specialInstructions) && request.notes && (
+                                                <div className="d-flex flex-column mt-2">
+                                                    <span className="text-muted small fw-medium">Special Instructions</span>
+                                                    <span className="text-dark bg-light p-3 rounded-3 mt-1 fs-6">{request.notes}</span>
+                                                </div>
+                                            )}
                                         </>
                                     );
                                 })()}

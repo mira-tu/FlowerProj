@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import Select from 'react-select';
 import { formatPhoneNumber } from '../utils/format';
 import InfoModal from '../components/InfoModal';
-import CheckoutAddressSelection from '../components/CheckoutAddressSelection';
 import '../styles/BookEvent.css'; // Reusing event styling basics
 import '../styles/Shop.css';
 
@@ -215,17 +214,7 @@ const BookEvent = ({ user }) => {
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null });
     const [dateError, setDateError] = useState('');
     const [timeError, setTimeError] = useState('');
-    const [deliveryAddress, setDeliveryAddress] = useState(null);
-    const [selectedAddressId, setSelectedAddressId] = useState(null);
     const [validated, setValidated] = useState(false);
-
-    // Sync selected address to venue field
-    useEffect(() => {
-        if (deliveryAddress) {
-            const venueStr = `${deliveryAddress.street || ''}, ${deliveryAddress.barangay || ''}, ${deliveryAddress.city || ''}, ${deliveryAddress.province || ''}`.replace(/, ,/g, ',').replace(/^, |, $/g, '');
-            setFormData(prev => ({ ...prev, venue: venueStr }));
-        }
-    }, [deliveryAddress]);
 
     const navigate = useNavigate();
 
@@ -488,6 +477,7 @@ const BookEvent = ({ user }) => {
         const newCartItem = {
             id: Date.now(),
             serviceType: "Event/Special Request",
+            name: arrangementSummary || selectedArrangementOptions.map((option) => option.label).join(', ') || 'Custom Order',
             customerName: formData.customerName,
             email: formData.email,
             contactNumber: formData.contactNumber,
@@ -496,8 +486,6 @@ const BookEvent = ({ user }) => {
             eventDate: formData.eventDate,
             eventTime: formData.eventTime,
             venue: formData.venue,
-            address_id: selectedAddressId || null,
-            deliveryAddress: deliveryAddress || null,
             arrangementType: arrangementSummary || selectedArrangementOptions.map((option) => option.label).join(', '),
             arrangementTypes: selectedArrangementOptions.map((option) => option.value === 'Other' ? (formData.otherArrangementType?.trim() || option.label) : option.label),
             arrangementTypeValues: selectedArrangementOptions.map((option) => option.value),
@@ -511,6 +499,7 @@ const BookEvent = ({ user }) => {
             colorPreference: formData.colorPreference === 'Others' ? formData.otherColorPreference : formData.colorPreference,
             specialInstructions: formData.specialInstructions,
             inspirationImageBase64: imagePreview,
+            qty: 1,
             price: null
         };
 
@@ -635,19 +624,19 @@ const BookEvent = ({ user }) => {
                                         </div>
 
                                         <div className="col-12">
-                                            <label className="form-label fw-semibold">Venue / Delivery Address <span className="text-danger">*</span></label>
-                                            {user ? (
-                                                <CheckoutAddressSelection
-                                                    user={user}
-                                                    address={deliveryAddress}
-                                                    setAddress={setDeliveryAddress}
-                                                    selectedAddressId={selectedAddressId}
-                                                    setSelectedAddressId={setSelectedAddressId}
-                                                    showInfoModal={(title, message) => setInfoModal({ show: true, title, message })}
-                                                />
-                                            ) : (
-                                                <input type="text" name="venue" className="form-control bg-light border-0 py-3" placeholder="Enter complete address..." value={formData.venue} onChange={handleChange} required />
-                                            )}
+                                            <label className="form-label fw-semibold">Event Venue / Location Reference <span className="text-danger">*</span></label>
+                                            <input
+                                                type="text"
+                                                name="venue"
+                                                className="form-control bg-light border-0 py-3"
+                                                placeholder="Enter the event venue, landmark, or location reference..."
+                                                value={formData.venue}
+                                                onChange={handleChange}
+                                                required
+                                            />
+                                            <div className="form-text small">
+                                                Delivery addresses are chosen during checkout, including multiple addresses if needed.
+                                            </div>
                                         </div>
 
                                         <div className="col-md-6">
@@ -958,7 +947,7 @@ const BookEvent = ({ user }) => {
                                 <span className="fw-semibold text-end">{formData.occasion === 'Other' ? formData.otherOccasion : formData.occasion}</span>
                             </div>
                             <div className="d-flex justify-content-between mb-2">
-                                <span className="text-muted">Venue:</span>
+                                <span className="text-muted">Event Venue:</span>
                                 <span className="fw-semibold text-end" style={{ maxWidth: '60%' }}>{formData.venue}</span>
                             </div>
                             <div className="d-flex justify-content-between mb-2">

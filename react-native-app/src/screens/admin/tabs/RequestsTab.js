@@ -141,6 +141,42 @@ const normalizeArrangementSelections = (requestData = {}) => {
     .filter(Boolean);
 };
 
+const getBookingItemsFromData = (requestData = {}) => {
+  if (!requestData || typeof requestData !== 'object') {
+    return [];
+  }
+
+  const items = Array.isArray(requestData.items) && requestData.items.length
+    ? requestData.items
+    : [requestData];
+
+  return items.filter((item) => item && typeof item === 'object' && Object.keys(item).length);
+};
+
+const mergeArrangementSelections = (selections = []) => {
+  const merged = new Map();
+
+  (Array.isArray(selections) ? selections : []).forEach((selection) => {
+    const arrangementLabel = String(selection?.arrangementLabel || '').trim();
+    if (!arrangementLabel) return;
+
+    if (!merged.has(arrangementLabel)) {
+      merged.set(arrangementLabel, {
+        arrangementLabel,
+        quantity: 0,
+        flowersPerArrangement: selection?.flowersPerArrangement || getArrangementFlowerCount(arrangementLabel),
+        totalFlowers: 0,
+      });
+    }
+
+    const current = merged.get(arrangementLabel);
+    current.quantity += toPositiveInt(selection?.quantity, 0);
+    current.totalFlowers += toPositiveInt(selection?.totalFlowers, 0);
+  });
+
+  return Array.from(merged.values());
+};
+
 const buildFlowerPricingContext = (request) => {
   let requestData = request?.data || {};
   if (typeof requestData === 'string') {
@@ -151,14 +187,26 @@ const buildFlowerPricingContext = (request) => {
     }
   }
 
-  const arrangementSelections = normalizeArrangementSelections(requestData);
+  const bookingItems = getBookingItemsFromData(requestData);
+  const pricingSources = bookingItems.length ? bookingItems : [requestData];
+  const arrangementSelections = mergeArrangementSelections(
+    pricingSources.flatMap((item) => normalizeArrangementSelections(item))
+  );
 
-  const fallbackArrangementType =
-    requestData.arrangementSummary ||
-    requestData.arrangementType ||
-    requestData.arrangement_type ||
-    requestData.arrangement ||
-    (Array.isArray(requestData.arrangementTypes) ? requestData.arrangementTypes.join(', ') : 'N/A');
+  const fallbackArrangementType = Array.from(
+    new Set(
+      pricingSources
+        .map((item) => (
+          item.arrangementSummary ||
+          item.arrangementType ||
+          item.arrangement_type ||
+          item.arrangement ||
+          (Array.isArray(item.arrangementTypes) ? item.arrangementTypes.join(', ') : null)
+        ))
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    )
+  ).join(' | ') || 'N/A';
 
   const arrangementType = arrangementSelections.length
     ? arrangementSelections.map((selection) => `${selection.arrangementLabel} x${selection.quantity}`).join(', ')
@@ -166,15 +214,20 @@ const buildFlowerPricingContext = (request) => {
 
   const arrangementQuantity = arrangementSelections.length
     ? arrangementSelections.reduce((sum, selection) => sum + selection.quantity, 0)
-    : toPositiveInt(requestData.arrangementQuantity || requestData.arrangement_quantity, 1);
+    : pricingSources.reduce(
+      (sum, item) => sum + toPositiveInt(item.arrangementQuantity || item.arrangement_quantity, 1),
+      0
+    );
 
-  let totalFlowers = toPositiveInt(
-    requestData.totalFlowers ||
-    requestData.total_flower_count ||
-    requestData.flowerQuantity ||
-    requestData.flower_quantity,
-    0
-  );
+  let totalFlowers = pricingSources.reduce((sum, item) => (
+    sum + toPositiveInt(
+      item.totalFlowers ||
+      item.total_flower_count ||
+      item.flowerQuantity ||
+      item.flower_quantity,
+      0
+    )
+  ), 0);
 
   if (!totalFlowers && arrangementSelections.length) {
     totalFlowers = arrangementSelections.reduce((sum, selection) => sum + (selection.totalFlowers || 0), 0);
@@ -187,31 +240,39 @@ const buildFlowerPricingContext = (request) => {
     }
   }
 
-  const flowerTypes = normalizeFlowerNames(
-    requestData.selectedFlowers?.length ? requestData.selectedFlowers : requestData.flowers,
-    requestData.otherFlowersText
+  const flowerTypes = Array.from(
+    new Set(
+      pricingSources.flatMap((item) => normalizeFlowerNames(
+        item.selectedFlowers?.length ? item.selectedFlowers : item.flowers,
+        item.otherFlowersText
+      ))
+    )
   );
 
   const explicitFlowerQuantities = {};
-  const quantitySources = [requestData.flowerQuantities, requestData.flower_quantities, requestData.flowerBreakdown];
+  pricingSources.forEach((item) => {
+    const quantitySources = [item.flowerQuantities, item.flower_quantities, item.flowerBreakdown];
 
-  quantitySources.forEach((source) => {
-    if (source && typeof source === 'object' && !Array.isArray(source)) {
-      Object.entries(source).forEach(([name, qty]) => {
-        const trimmedName = String(name || '').trim();
-        if (!trimmedName) return;
-        explicitFlowerQuantities[trimmedName] = toPositiveInt(qty, 0);
-      });
-    }
+    quantitySources.forEach((source) => {
+      if (source && typeof source === 'object' && !Array.isArray(source)) {
+        Object.entries(source).forEach(([name, qty]) => {
+          const trimmedName = String(name || '').trim();
+          if (!trimmedName) return;
+          explicitFlowerQuantities[trimmedName] = (explicitFlowerQuantities[trimmedName] || 0) + toPositiveInt(qty, 0);
+        });
+      }
+    });
   });
 
   const normalizedFlowerTypes = flowerTypes.length
     ? flowerTypes
     : Object.keys(explicitFlowerQuantities);
 
-  if (!normalizedFlowerTypes.length && requestData.flower?.name) {
-    normalizedFlowerTypes.push(requestData.flower.name);
-  }
+  pricingSources.forEach((item) => {
+    if (!normalizedFlowerTypes.length && item.flower?.name) {
+      normalizedFlowerTypes.push(item.flower.name);
+    }
+  });
 
   const flowerQuantities = {};
   normalizedFlowerTypes.forEach((flowerName) => {
@@ -251,6 +312,7 @@ const buildFlowerPricingContext = (request) => {
     arrangementSelections,
     flowerTypes: normalizedFlowerTypes,
     flowerQuantities,
+    itemCount: bookingItems.length || 1,
   };
 };
 const formatCurrency = (value) => {
@@ -294,6 +356,13 @@ const quoteStyles = StyleSheet.create({
     lineHeight: 24,
     color: '#7c2d12',
     marginBottom: 14,
+  },
+  quoteHeroSubtitle: {
+    marginTop: -4,
+    marginBottom: 14,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#9a3412',
   },
   quoteMetricsRow: {
     flexDirection: 'row',
@@ -580,6 +649,88 @@ const formatAddressParts = (address = {}) => (
     .filter(Boolean)
     .join(', ')
 );
+
+const getBookingArrangementText = (item = {}) => {
+  const arrangementSelections = Array.isArray(item?.arrangementSelections) ? item.arrangementSelections : [];
+
+  if (arrangementSelections.length) {
+    return arrangementSelections
+      .map((selection) => {
+        const label = selection?.arrangement_label || selection?.arrangementLabel || selection?.arrangement_type || selection?.arrangementType;
+        const quantity = toPositiveInt(selection?.quantity || selection?.arrangement_quantity, 1);
+        return label ? `${label} x${quantity}` : null;
+      })
+      .filter(Boolean)
+      .join(', ');
+  }
+
+  if (item?.arrangementType === 'Other') {
+    return item?.otherArrangementType || null;
+  }
+
+  return firstNonEmpty(
+    item?.arrangementSummary,
+    item?.arrangementType,
+    item?.arrangement_type,
+    Array.isArray(item?.arrangementTypes) ? item.arrangementTypes.join(', ') : null
+  );
+};
+
+const getBookingFlowerText = (item = {}) => firstNonEmpty(
+  Array.isArray(item?.selectedFlowers)
+    ? item.selectedFlowers
+      .map((flower) => flower?.label || flower?.name || flower?.value || flower)
+      .filter(Boolean)
+      .join(', ')
+    : null,
+  item?.flowers
+);
+
+const getBookingRequestItems = (request) => {
+  const requestData = normalizeRequestData(request);
+  const sourceItems = getBookingItemsFromData(requestData);
+  const multiDeliveryDestinations = Array.isArray(requestData.multi_delivery_destinations)
+    ? requestData.multi_delivery_destinations
+    : [];
+  const sharedAddressText = formatAddressParts(requestData.address || {});
+
+  return sourceItems.map((item, index) => {
+    const itemDestinations = multiDeliveryDestinations.filter(
+      (destination) => String(destination?.item_index ?? '') === String(index)
+    );
+    const primaryDestination = itemDestinations[0] || null;
+    const assignedRiderIds = Array.from(
+      new Set(
+        itemDestinations
+          .map((destination) => String(destination?.assigned_rider_id || '').trim())
+          .filter(Boolean)
+      )
+    );
+
+    const destinationSummary = primaryDestination
+      ? [
+        firstNonEmpty(primaryDestination.recipient_name, primaryDestination.address_label),
+        formatAddressParts(primaryDestination.address_snapshot || {}),
+      ].filter(Boolean).join(' - ')
+      : sharedAddressText;
+
+    return {
+      ...item,
+      key: String(item?.id || `${request?.id || 'booking'}-${index}`),
+      itemIndex: index,
+      label: `Custom Order ${index + 1}`,
+      title: firstNonEmpty(item?.name, getBookingArrangementText(item), item?.occasion) || `Custom Order ${index + 1}`,
+      imageUri: toAbsoluteImageUrl(item?.image_url || item?.image || request?.image_url),
+      arrangementText: getBookingArrangementText(item),
+      preferredFlowers: getBookingFlowerText(item),
+      eventDateText: firstNonEmpty(item?.eventDate, item?.event_date),
+      eventTimeText: firstNonEmpty(item?.eventTime, item?.event_time),
+      venueText: firstNonEmpty(item?.venue, item?.delivery_address),
+      destinationSummary,
+      assignedRiderIds,
+    };
+  });
+};
 
 const getCustomizedRequestItems = (request) => {
   const requestData = normalizeRequestData(request);
@@ -974,68 +1125,98 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
 
   const renderBookingDetails = (request) => {
     const requestData = normalizeRequestData(request);
-
-    const recipientName = firstNonEmpty(requestData.recipientName, requestData.recipient_name);
-    const occasion = firstNonEmpty(requestData.occasion, requestData.otherOccasion);
-    const venue = firstNonEmpty(
-      requestData.venue,
-      typeof requestData.deliveryAddress === 'string' ? requestData.deliveryAddress : null,
-      requestData.delivery_address
-    );
-    const eventDate = firstNonEmpty(requestData.eventDate, requestData.event_date);
-    const eventTime = firstNonEmpty(requestData.eventTime, requestData.event_time);
-    const arrangementSelections = Array.isArray(requestData.arrangementSelections) ? requestData.arrangementSelections : [];
-    const arrangementType = firstNonEmpty(
-      requestData.arrangementSummary,
-      arrangementSelections.length
-        ? arrangementSelections.map((selection) => {
-          const label = selection?.arrangement_label || selection?.arrangementLabel || selection?.arrangement_type || selection?.arrangementType;
-          const quantity = toPositiveInt(selection?.quantity || selection?.arrangement_quantity, 1);
-          return label ? `${label} x${quantity}` : null;
-        }).filter(Boolean).join(', ')
-        : null,
-      requestData.arrangementType,
-      requestData.arrangement_type,
-      (Array.isArray(requestData.arrangementTypes) ? requestData.arrangementTypes.join(', ') : null)
-    );
-    const arrangementQuantity = firstNonEmpty(
-      requestData.arrangementQuantity,
-      arrangementSelections.length ? arrangementSelections.reduce((sum, selection) => sum + toPositiveInt(selection?.quantity, 1), 0) : null,
-      requestData.arrangement_quantity
-    );
-    const colorTheme = firstNonEmpty(requestData.colorPreference, requestData.color_preference);
-    const specialInstructions = firstNonEmpty(requestData.specialInstructions, request.notes);
+    const bookingItems = getBookingItemsFromData(requestData);
+    const normalizedItems = bookingItems.length ? bookingItems : [requestData];
+    const uniqueValues = (values = []) => Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
     const declineFeedback = firstNonEmpty(requestData.decline_feedback, requestData.declineFeedback);
-
-    const preferredFlowers = firstNonEmpty(
-      Array.isArray(requestData.selectedFlowers)
-        ? requestData.selectedFlowers
-          .map((flower) => flower?.label || flower?.name || flower?.value || flower)
-          .filter(Boolean)
-          .join(', ')
-        : null,
-      requestData.flowers
-    );
+    const multiDeliveryCount = Array.isArray(requestData.multi_delivery_destinations) ? requestData.multi_delivery_destinations.length : 0;
+    const combinedOccasion = uniqueValues(normalizedItems.map((item) => item.occasion || item.otherOccasion)).join(', ');
+    const combinedVenue = uniqueValues(
+      normalizedItems.map((item) => (
+        item.venue ||
+        (typeof item.deliveryAddress === 'string' ? item.deliveryAddress : null) ||
+        item.delivery_address
+      ))
+    ).join(', ');
+    const combinedEventDate = uniqueValues(normalizedItems.map((item) => item.eventDate || item.event_date)).join(', ');
+    const combinedRecipients = uniqueValues(normalizedItems.map((item) => item.recipientName || item.recipient_name)).join(', ');
 
     return (
       <>
-        <DetailSection label="Occasion:" value={occasion} />
-        <DetailSection label="Venue:" value={venue} />
         <DetailSection label="Type:" value={getStatusLabel(request.type)} />
         <DetailSection label="Submitted:" value={formatTimestamp(request.created_at)} />
         <DetailSection label="Request Number:" value={request.request_number} />
         <DetailSection label="Customer Name:" value={request.user_name} />
         <DetailSection label="Customer Email:" value={request.user_email} />
         <DetailSection label="Contact Number:" value={request.contact_number} />
-        <DetailSection label="Recipient:" value={recipientName} />
-        <DetailSection label="Event Date:" value={eventDate} />
-        <DetailSection label="Event Time:" value={eventTime} />
-        <DetailSection label="Arrangement:" value={arrangementType} />
-        <DetailSection label="Quantity:" value={arrangementQuantity ? String(arrangementQuantity) : null} />
-        <DetailSection label="Preferred Flowers:" value={preferredFlowers} />
-        <DetailSection label="Color Theme:" value={colorTheme} />
-        <DetailSection label="Special Instructions:" value={specialInstructions} />
+        {normalizedItems.length <= 1 && <DetailSection label="Occasion:" value={combinedOccasion} />}
+        {normalizedItems.length <= 1 && <DetailSection label="Venue:" value={combinedVenue} />}
+        {normalizedItems.length <= 1 && <DetailSection label="Recipient:" value={combinedRecipients} />}
+        {normalizedItems.length <= 1 && <DetailSection label="Event Date:" value={combinedEventDate} />}
+        <DetailSection label="Custom Order Items:" value={normalizedItems.length > 1 ? String(normalizedItems.length) : null} />
+        <DetailSection label="Delivery Stops:" value={multiDeliveryCount ? String(multiDeliveryCount) : null} />
         <DetailSection label="Decline Feedback:" value={declineFeedback} />
+        {normalizedItems.map((item, index) => {
+          const arrangementSelections = Array.isArray(item.arrangementSelections) ? item.arrangementSelections : [];
+          const arrangementType = firstNonEmpty(
+            item.arrangementSummary,
+            arrangementSelections.length
+              ? arrangementSelections.map((selection) => {
+                const label = selection?.arrangement_label || selection?.arrangementLabel || selection?.arrangement_type || selection?.arrangementType;
+                const quantity = toPositiveInt(selection?.quantity || selection?.arrangement_quantity, 1);
+                return label ? `${label} x${quantity}` : null;
+              }).filter(Boolean).join(', ')
+              : null,
+            item.arrangementType,
+            item.arrangement_type,
+            (Array.isArray(item.arrangementTypes) ? item.arrangementTypes.join(', ') : null)
+          );
+          const arrangementQuantity = firstNonEmpty(
+            item.arrangementQuantity,
+            arrangementSelections.length ? arrangementSelections.reduce((sum, selection) => sum + toPositiveInt(selection?.quantity, 1), 0) : null,
+            item.arrangement_quantity
+          );
+          const colorTheme = firstNonEmpty(item.colorPreference, item.color_preference);
+          const preferredFlowers = firstNonEmpty(
+            Array.isArray(item.selectedFlowers)
+              ? item.selectedFlowers
+                .map((flower) => flower?.label || flower?.name || flower?.value || flower)
+                .filter(Boolean)
+                .join(', ')
+              : null,
+            item.flowers
+          );
+
+          return (
+            <View key={item.id || `booking-item-${index}`} style={styles.customizedRequestDetailCard}>
+              <Text style={styles.customizedRequestItemMeta}>
+                {normalizedItems.length > 1 ? `Custom Order Item ${index + 1}` : 'Custom Order Details'}
+              </Text>
+              {toAbsoluteImageUrl(item.image_url || item.image || request.image_url) ? (
+                <View style={styles.imageSection}>
+                  <Image
+                    source={{ uri: toAbsoluteImageUrl(item.image_url || item.image || request.image_url) }}
+                    style={styles.fullImage}
+                    resizeMode="contain"
+                  />
+                </View>
+              ) : null}
+              <Text style={styles.customizedRequestDetailTitle}>
+                {item.name || item.arrangementSummary || item.arrangementType || item.occasion || 'Custom Order'}
+              </Text>
+              <DetailSection label="Recipient:" value={firstNonEmpty(item.recipientName, item.recipient_name)} />
+              <DetailSection label="Occasion:" value={firstNonEmpty(item.occasion, item.otherOccasion)} />
+              <DetailSection label="Event Date:" value={firstNonEmpty(item.eventDate, item.event_date)} />
+              <DetailSection label="Event Time:" value={firstNonEmpty(item.eventTime, item.event_time)} />
+              <DetailSection label="Venue:" value={firstNonEmpty(item.venue, item.delivery_address)} />
+              <DetailSection label="Arrangement:" value={arrangementType} />
+              <DetailSection label="Quantity:" value={arrangementQuantity ? String(arrangementQuantity) : null} />
+              <DetailSection label="Preferred Flowers:" value={preferredFlowers} />
+              <DetailSection label="Color Theme:" value={colorTheme} />
+              <DetailSection label="Special Instructions:" value={firstNonEmpty(item.specialInstructions, request.notes)} />
+            </View>
+          );
+        })}
         {renderPickupTimeSection(request)}
       </>
     );
@@ -1398,6 +1579,10 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
   const quoteTotalToPay = quoteFlowerSubtotal + quoteShippingValue;
   const quoteArrangementSelections = quoteFlowerContext?.arrangementSelections || [];
   const quoteFlowerTypes = quoteFlowerContext?.flowerTypes || [];
+  const quoteCustomOrderItems = React.useMemo(
+    () => requestToQuote?.type === 'booking' ? getBookingRequestItems(requestToQuote) : [],
+    [requestToQuote]
+  );
   const quoteBreakdownLookup = React.useMemo(() => {
     return quoteBreakdownRows.reduce((accumulator, row) => {
       accumulator[row.flowerName] = row;
@@ -1779,7 +1964,9 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
 
   const EnhancedRequestCard = ({ item, onMessageCustomer, onPhoneCall, openDetailsModal, openReceiptModal, handleUpdatePaymentStatus, onAssignRider, onUpdateStatus, onProvidePrice, onDecline, onPrintReceipt, onOpenCustomizedItem }) => {
     const isCustomizedRequest = item.type === 'customized';
+    const isBookingRequest = item.type === 'booking';
     const customizedItems = isCustomizedRequest ? getCustomizedRequestItems(item) : [];
+    const bookingItems = isBookingRequest ? getBookingRequestItems(item) : [];
     const groupedDestinations = item.delivery_method === 'delivery' ? getGroupedDestinations(item) : [];
 
     return (
@@ -1963,8 +2150,77 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
           </View>
         )}
 
+        {isBookingRequest && bookingItems.length > 0 && (
+          <View style={styles.eoSection}>
+            <View style={styles.eoSectionHeader}>
+              <Ionicons name="images-outline" size={16} color="#6B7280" />
+              <Text style={styles.eoSectionTitle}>Custom Order Items ({bookingItems.length})</Text>
+            </View>
+            {bookingItems.map((bookingItem, index) => {
+              const assignedRiderNames = bookingItem.assignedRiderIds
+                .map((riderId) => riderLookup[String(riderId)]?.name)
+                .filter(Boolean);
+
+              return (
+                <TouchableOpacity
+                  key={bookingItem.key}
+                  activeOpacity={0.9}
+                  style={[styles.eoItemCard, index > 0 && { marginTop: 8 }]}
+                  onPress={() => openDetailsModal(item)}
+                >
+                  <View style={styles.eoItemImage}>
+                    {bookingItem.imageUri ? (
+                      <Image
+                        source={{ uri: bookingItem.imageUri }}
+                        style={{ width: '100%', height: '100%', resizeMode: 'cover' }}
+                      />
+                    ) : (
+                      <Ionicons name="image-outline" size={24} color="#666" />
+                    )}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.customizedRequestItemMeta}>{bookingItem.label}</Text>
+                    <Text style={styles.eoItemName}>{bookingItem.title}</Text>
+                    {bookingItem.arrangementText ? (
+                      <Text style={styles.eoItemQuantity} numberOfLines={2}>
+                        Arrangement: {bookingItem.arrangementText}
+                      </Text>
+                    ) : null}
+                    {bookingItem.preferredFlowers ? (
+                      <Text style={styles.eoItemQuantity} numberOfLines={2}>
+                        Flowers: {bookingItem.preferredFlowers}
+                      </Text>
+                    ) : null}
+                    {bookingItem.eventDateText ? (
+                      <Text style={styles.eoItemQuantity}>
+                        Date: {bookingItem.eventDateText}{bookingItem.eventTimeText ? ` at ${bookingItem.eventTimeText}` : ''}
+                      </Text>
+                    ) : null}
+                    {bookingItem.venueText ? (
+                      <Text style={styles.eoItemQuantity} numberOfLines={2}>
+                        Venue: {bookingItem.venueText}
+                      </Text>
+                    ) : null}
+                    {bookingItem.destinationSummary ? (
+                      <Text style={styles.customizedRequestDestination} numberOfLines={2}>
+                        Delivery: {bookingItem.destinationSummary}
+                      </Text>
+                    ) : null}
+                    {assignedRiderNames.length ? (
+                      <Text style={styles.customizedRequestAssignedRider} numberOfLines={1}>
+                        Rider: {assignedRiderNames.join(', ')}
+                      </Text>
+                    ) : null}
+                    <Text style={styles.customizedRequestTapHint}>Tap to view full custom order details</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+
         {/* Request Image Preview */}
-        {item.image_url && (
+        {item.image_url && !isCustomizedRequest && !isBookingRequest && (
           <View style={styles.eoSection}>
             <Text style={styles.eoSectionTitle}>Attachment</Text>
             <Image
@@ -2325,7 +2581,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                 {selectedRequest.type === 'customized' && renderCustomizedDetails(selectedRequest)}
 
 
-                {selectedRequest.image_url && (
+                {selectedRequest.image_url && selectedRequest.type !== 'booking' && (
                   <View style={styles.imageSection}>
                     <Text style={styles.detailLabel}>Inspiration Photo:</Text>
                     <Image
@@ -2550,6 +2806,9 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                       <Text style={quoteStyles.quoteBadgeText}>Custom Order</Text>
                     </View>
                     <Text style={quoteStyles.quoteHeroTitle}>{quoteFlowerContext?.arrangementType || 'Arrangement details unavailable'}</Text>
+                    <Text style={quoteStyles.quoteHeroSubtitle}>
+                      {(quoteFlowerContext?.itemCount || quoteCustomOrderItems.length || 1)} custom order item{(quoteFlowerContext?.itemCount || quoteCustomOrderItems.length || 1) > 1 ? 's are' : ' is'} included in this request.
+                    </Text>
 
                     <View style={quoteStyles.quoteMetricsRow}>
                       <View style={quoteStyles.quoteMetricCard}>
@@ -2565,6 +2824,29 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                         <Text style={quoteStyles.quoteMetricLabel}>Stems</Text>
                       </View>
                     </View>
+
+                    {quoteCustomOrderItems.length ? (
+                      <View style={quoteStyles.quoteBreakdownSection}>
+                        <Text style={quoteStyles.quoteSectionLabel}>Included Custom Orders</Text>
+                        {quoteCustomOrderItems.map((customOrderItem, index) => (
+                          <View key={customOrderItem.key} style={quoteStyles.quoteBreakdownRow}>
+                            <View style={quoteStyles.quoteBreakdownIndex}>
+                              <Text style={quoteStyles.quoteBreakdownIndexText}>{index + 1}</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={quoteStyles.quoteBreakdownTitle}>{customOrderItem.title}</Text>
+                              <Text style={quoteStyles.quoteBreakdownMeta}>
+                                {[
+                                  customOrderItem.arrangementText ? `Arrangement: ${customOrderItem.arrangementText}` : null,
+                                  customOrderItem.eventDateText ? `Date: ${customOrderItem.eventDateText}${customOrderItem.eventTimeText ? ` at ${customOrderItem.eventTimeText}` : ''}` : null,
+                                  customOrderItem.venueText ? `Venue: ${customOrderItem.venueText}` : null,
+                                ].filter(Boolean).join('\n')}
+                              </Text>
+                            </View>
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
 
                     {quoteArrangementSelections.length ? (
                       <View style={quoteStyles.quoteBreakdownSection}>
