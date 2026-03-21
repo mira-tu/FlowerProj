@@ -51,7 +51,9 @@ import Wishlist from './pages/Wishlist'
 import Cart from './pages/Cart'
 import BookingCheckout from './pages/BookingCheckout'
 import Customized from './pages/Customized'
-import BookEvent from './pages/BookEvent'
+import CustomOrderV2 from './pages/CustomOrderV2'
+import CustomOrderV4 from './pages/CustomOrderV4'
+import CustomOrderV4Form from './pages/CustomOrderV4Form'
 import ProductDetail from './pages/ProductDetail'
 import Checkout from './pages/Checkout'
 import OrderSuccess from './pages/OrderSuccess'
@@ -390,7 +392,9 @@ function AppContent() {
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/privacy" element={<Privacy />} />
-        <Route path="/book-event" element={<BookEvent user={user} />} />
+        <Route path="/custom-order" element={<CustomOrderV4 />} />
+        <Route path="/custom-order/request" element={<CustomOrderV4Form user={user} />} />
+        <Route path="/custom-order-v2" element={<CustomOrderV2 user={user} />} />
         <Route path="/customized" element={<Customized addToCart={addToCart} />} />
         <Route path="/product/:productId" element={<ProductDetail addToCart={addToCart} user={user} />} />
         <Route path="/checkout" element={<Checkout setCart={setCart} user={user} />} />

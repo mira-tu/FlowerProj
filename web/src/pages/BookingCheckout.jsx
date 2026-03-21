@@ -5,6 +5,7 @@ import CheckoutAddressSelection from '../components/CheckoutAddressSelection';
 import MultiAddressDeliverySection from '../components/MultiAddressDeliverySection';
 import '../styles/Shop.css';
 import { supabase } from '../config/supabase';
+import { formatCustomOrderV4Currency, getSelectedEstimateFromItem, isCustomOrderV4Item } from '../utils/customOrderV4';
 import {
     buildAddressFeeMap,
     buildMultiDeliveryDestinations,
@@ -210,6 +211,12 @@ const BookingCheckout = ({ user }) => {
     }), [addressFeeMap, deliveryAssignments, deliveryMethod, dynamicShippingFee, multiAddressEnabled, selectedAddressId]);
 
     const inquirySummary = useMemo(() => buildBookingSummary(inquiryItems), [inquiryItems]);
+    const estimatedInquiryTotal = useMemo(() => (
+        inquiryItems.reduce((sum, item) => sum + (getSelectedEstimateFromItem(item)?.estimatedPrice || item.estimatedPrice || 0), 0)
+    ), [inquiryItems]);
+    const hasEstimatedInquiryTotal = useMemo(() => (
+        inquiryItems.some((item) => !!(getSelectedEstimateFromItem(item)?.estimatedPrice || item.estimatedPrice))
+    ), [inquiryItems]);
 
     const handleSubmitInquiry = async () => {
         if (!user) {
@@ -273,7 +280,7 @@ const BookingCheckout = ({ user }) => {
                     }
                 }
 
-                const { inspirationImageBase64, deliveryAddress, ...cleanItem } = item;
+                const { inspirationImageBase64: _inspirationImageBase64, deliveryAddress, ...cleanItem } = item;
 
                 return {
                     ...cleanItem,
@@ -306,6 +313,16 @@ const BookingCheckout = ({ user }) => {
                 notes: commonNotes || null,
                 data: {
                     items: uploadedItems,
+                    requestVariant: uploadedItems.some((item) => item.custom_order_version === 4)
+                        ? 'custom_order_v4'
+                        : uploadedItems.some((item) => item.custom_order_version === 2)
+                            ? 'custom_order_v2'
+                            : null,
+                    custom_order_version: uploadedItems.some((item) => item.custom_order_version === 4)
+                        ? 4
+                        : uploadedItems.some((item) => item.custom_order_version === 2)
+                            ? 2
+                            : null,
                     item_count: uploadedItems.length,
                     summary_label: inquirySummary.summaryLabel,
                     combined_occasions: inquirySummary.combinedOccasions,
@@ -319,6 +336,7 @@ const BookingCheckout = ({ user }) => {
                     arrangementSelections: Array.isArray(firstItem.arrangementSelections) ? firstItem.arrangementSelections : [],
                     selectedFlowers: firstItem.selectedFlowers || [],
                     flowers: firstItem.flowers || null,
+                    estimated_total: hasEstimatedInquiryTotal ? estimatedInquiryTotal : null,
                     colorPreference: firstItem.colorPreference || null,
                     specialInstructions: firstItem.specialInstructions || null,
                     address: deliveryMethod === 'delivery' ? address : null,
@@ -383,7 +401,7 @@ const BookingCheckout = ({ user }) => {
                         </div>
                         <h3>No custom orders selected</h3>
                         <p>Please add custom orders to your cart first.</p>
-                        <Link to="/book-event" className="btn-shop-now">Create a Custom Order</Link>
+                        <Link to="/custom-order/request" className="btn-shop-now">Create a Custom Order</Link>
                     </div>
                 </div>
             </div>
@@ -525,6 +543,14 @@ const BookingCheckout = ({ user }) => {
                                         <p className="mb-1"><strong>Total Quantity:</strong> {item.arrangementQuantity || 1}</p>
                                         {item.flowerQuantity && <p className="mb-1"><strong>No. of Flower Pieces:</strong> {item.flowerQuantity}</p>}
                                         {item.flowers && <p className="mb-1"><strong>Preferred Flowers:</strong> {item.flowers}</p>}
+                                        {isCustomOrderV4Item(item) && (
+                                            <>
+                                                <p className="mb-1"><strong>Original Target Price:</strong> {formatCustomOrderV4Currency(item.originalEstimatedPrice || 0)}</p>
+                                                <p className="mb-1"><strong>Customer Budget:</strong> {formatCustomOrderV4Currency(item.customerBudget || 0)}</p>
+                                                <p className="mb-1"><strong>Preferred Version:</strong> {item.selectedOptionLabel || 'Original target design'}</p>
+                                                <p className="mb-1"><strong>Rough Estimate:</strong> {formatCustomOrderV4Currency(getSelectedEstimateFromItem(item)?.estimatedPrice || item.estimatedPrice || 0)}</p>
+                                            </>
+                                        )}
                                         {item.colorPreference && <p className="mb-1"><strong>Color Theme:</strong> {item.colorPreference}</p>}
                                         {item.specialInstructions && <p className="mb-1 mt-2"><strong>Details:</strong> {item.specialInstructions}</p>}
                                     </div>
@@ -540,6 +566,12 @@ const BookingCheckout = ({ user }) => {
                                 <span>Inquiry Items</span>
                                 <span>{inquiryItems.length}</span>
                             </div>
+                            {hasEstimatedInquiryTotal && (
+                                <div className="summary-row">
+                                    <span>Current rough estimate</span>
+                                    <span>{formatCustomOrderV4Currency(estimatedInquiryTotal)}</span>
+                                </div>
+                            )}
                             <div className="summary-row">
                                 <span>{deliveryMethod === 'pickup' ? 'Pickup' : 'Delivery Fee'}</span>
                                 <span>{deliveryMethod === 'pickup' ? 'FREE' : `PHP ${shippingFee.toLocaleString()}`}</span>
@@ -547,8 +579,13 @@ const BookingCheckout = ({ user }) => {
                             <hr />
                             <div className="summary-row total">
                                 <span>Total</span>
-                                <span className="fw-bold fs-5">For Discussion</span>
+                                <span className="fw-bold fs-5">{hasEstimatedInquiryTotal ? `Guide: ${formatCustomOrderV4Currency(estimatedInquiryTotal)}` : 'For Discussion'}</span>
                             </div>
+                            {hasEstimatedInquiryTotal && (
+                                <div className="small text-muted mb-3">
+                                    Final pricing will still be confirmed after our team reviews your request.
+                                </div>
+                            )}
                             <button
                                 className="btn-place-order"
                                 onClick={handleSubmitInquiry}

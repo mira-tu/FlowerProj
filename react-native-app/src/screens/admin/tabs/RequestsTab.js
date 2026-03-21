@@ -1186,6 +1186,11 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
               : null,
             item.flowers
           );
+          const customOrderVersion = item.custom_order_version || requestData.custom_order_version;
+          const isBudgetAwareCustomOrder = customOrderVersion === 2 || customOrderVersion === 4;
+          const selectedAlternative = Array.isArray(item.suggestedAlternatives)
+            ? item.suggestedAlternatives.find((alternative) => alternative.id === item.selectedAlternativeId)
+            : null;
 
           return (
             <View key={item.id || `booking-item-${index}`} style={styles.customizedRequestDetailCard}>
@@ -1201,6 +1206,30 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                   />
                 </View>
               ) : null}
+              {isBudgetAwareCustomOrder && (toAbsoluteImageUrl(item.originalPreviewImage) || toAbsoluteImageUrl(item.selectedPreviewImage)) ? (
+                <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
+                  {toAbsoluteImageUrl(item.originalPreviewImage) ? (
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.detailLabel}>Original Preview</Text>
+                      <Image
+                        source={{ uri: toAbsoluteImageUrl(item.originalPreviewImage) }}
+                        style={[styles.fullImage, { height: 120, marginTop: 4 }]}
+                        resizeMode="cover"
+                      />
+                    </View>
+                  ) : null}
+                  {toAbsoluteImageUrl(item.selectedPreviewImage) ? (
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.detailLabel}>Selected Preview</Text>
+                      <Image
+                        source={{ uri: toAbsoluteImageUrl(item.selectedPreviewImage) }}
+                        style={[styles.fullImage, { height: 120, marginTop: 4 }]}
+                        resizeMode="cover"
+                      />
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
               <Text style={styles.customizedRequestDetailTitle}>
                 {item.name || item.arrangementSummary || item.arrangementType || item.occasion || 'Custom Order'}
               </Text>
@@ -1212,8 +1241,18 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
               <DetailSection label="Arrangement:" value={arrangementType} />
               <DetailSection label="Quantity:" value={arrangementQuantity ? String(arrangementQuantity) : null} />
               <DetailSection label="Preferred Flowers:" value={preferredFlowers} />
+              <DetailSection label="Original Target Price:" value={isBudgetAwareCustomOrder ? `PHP ${parseCurrencyNumber(item.originalEstimatedPrice).toFixed(2)}` : null} />
+              <DetailSection label="Customer Budget:" value={isBudgetAwareCustomOrder ? `PHP ${parseCurrencyNumber(item.customerBudget).toFixed(2)}` : null} />
+              <DetailSection label="Preferred Version:" value={isBudgetAwareCustomOrder ? firstNonEmpty(item.selectedOptionLabel, selectedAlternative?.label, 'Original target design') : null} />
+              <DetailSection label="Rough Estimate:" value={isBudgetAwareCustomOrder ? `PHP ${parseCurrencyNumber(item.estimatedPrice || selectedAlternative?.estimatedPrice).toFixed(2)}` : null} />
               <DetailSection label="Color Theme:" value={colorTheme} />
               <DetailSection label="Special Instructions:" value={firstNonEmpty(item.specialInstructions, request.notes)} />
+              {isBudgetAwareCustomOrder && selectedAlternative?.changes?.length ? (
+                <DetailSection
+                  label="What Changed:"
+                  value={selectedAlternative.changes.map((change) => change.explanation).join('\n')}
+                />
+              ) : null}
             </View>
           );
         })}

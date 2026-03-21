@@ -170,13 +170,13 @@ const Home = ({ addToCart, products, categories, user }) => {
                         </div>
                     </div>
                     <div className="carousel-item">
-                        <Link to="/book-event">
+                        <Link to="/custom-order">
                             <img src={specialImg} className="d-block w-100" alt="Special Orders" />
                         </Link>
                         <div className="carousel-caption">
                             <h2>Custom Order</h2>
-                            <p>Request bespoke floral arrangements for any occasion</p>
-                            <Link to="/book-event" className="btn btn-hero">Start to Craft</Link>
+                            <p>Browse arrangement concepts first, then compare visual budget-fit alternatives before sending your custom order request.</p>
+                            <Link to="/custom-order" className="btn btn-hero">Browse Offerings</Link>
                         </div>
                     </div>
                 </div>

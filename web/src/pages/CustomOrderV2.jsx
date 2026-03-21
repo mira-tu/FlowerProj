@@ -1,54 +1,119 @@
-import React, { useMemo, useState, useRef, useEffect } from 'react';
+import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Select from 'react-select';
 import { formatPhoneNumber } from '../utils/format';
 import InfoModal from '../components/InfoModal';
-import '../styles/BookEvent.css'; // Reusing event styling basics
+import '../styles/CustomOrderV2.css';
 import '../styles/Shop.css';
 
 const flowerOptions = [
-    { value: 'Roses', label: 'Roses' },
-    { value: 'Tulips', label: 'Tulips' },
-    { value: 'Sunflowers', label: 'Sunflowers' },
-    { value: 'Lilies', label: 'Lilies' },
-    { value: 'Orchids', label: 'Orchids' },
-    { value: 'Carnations', label: 'Carnations' },
-    { value: 'Mixed Flowers', label: 'Mixed Flowers' },
-    { value: 'Others', label: 'Others' }
+    { value: 'Roses', label: 'Roses', img: 'https://images.pexels.com/photos/56866/garden-rose-red-pink-56866.jpeg?auto=compress&cs=tinysrgb&w=800' },
+    { value: 'Tulips', label: 'Tulips', img: 'https://images.pexels.com/photos/36753/flower-purple-lical-blosso.jpg?auto=compress&cs=tinysrgb&w=800' },
+    { value: 'Sunflowers', label: 'Sunflowers', img: 'https://images.pexels.com/photos/33045/sunflower-sun-summer-yellow.jpg?auto=compress&cs=tinysrgb&w=800' },
+    { value: 'Lilies', label: 'Lilies', img: 'https://images.pexels.com/photos/6629632/pexels-photo-6629632.jpeg?auto=compress&cs=tinysrgb&w=800' },
+    { value: 'Orchids', label: 'Orchids', img: 'https://images.pexels.com/photos/132474/pexels-photo-132474.jpeg?auto=compress&cs=tinysrgb&w=800' },
+    { value: 'Carnations', label: 'Carnations', img: 'https://images.pexels.com/photos/14532594/pexels-photo-14532594.jpeg?auto=compress&cs=tinysrgb&w=800' },
+    { value: 'Mixed Flowers', label: 'Mixed Flowers', img: 'https://images.pexels.com/photos/931162/pexels-photo-931162.jpeg?auto=compress&cs=tinysrgb&w=800' },
+    { value: 'Others', label: 'Others', img: 'https://images.pexels.com/photos/931173/pexels-photo-931173.jpeg?auto=compress&cs=tinysrgb&w=800' }
 ];
 
 const arrangementOptions = [
     {
         label: 'Funeral',
         options: [
-            { value: 'Funeral Wreath (Large, 100 flowers)', label: 'Funeral Wreath (Large, 100 flowers)' },
-            { value: 'Funeral Wreath (Medium, 50 flowers)', label: 'Funeral Wreath (Medium, 50 flowers)' },
-            { value: 'Funeral Flower Stand (Large, 100 flowers)', label: 'Funeral Flower Stand (Large, 100 flowers)' },
-            { value: 'Funeral Flower Stand (Medium, 50 flowers)', label: 'Funeral Flower Stand (Medium, 50 flowers)' },
-            { value: 'Heart-Shaped Funeral Wreath (Large, 100 flowers)', label: 'Heart-Shaped Funeral Wreath (Large, 100 flowers)' },
-            { value: 'Heart-Shaped Funeral Wreath (Medium, 50 flowers)', label: 'Heart-Shaped Funeral Wreath (Medium, 50 flowers)' },
+            {
+                value: 'Funeral Wreath (Large, 100 flowers)',
+                label: 'Funeral Wreath (Large, 100 flowers)',
+                description: 'Grand circular tribute arrangement for memorial ceremonies and chapel displays.',
+                img: 'https://images.pexels.com/photos/931166/pexels-photo-931166.jpeg?auto=compress&cs=tinysrgb&w=1200'
+            },
+            {
+                value: 'Funeral Wreath (Medium, 50 flowers)',
+                label: 'Funeral Wreath (Medium, 50 flowers)',
+                description: 'Balanced wreath size ideal for intimate memorial services and family offerings.',
+                img: 'https://images.pexels.com/photos/2479312/pexels-photo-2479312.jpeg?auto=compress&cs=tinysrgb&w=1200'
+            },
+            {
+                value: 'Funeral Flower Stand (Large, 100 flowers)',
+                label: 'Funeral Flower Stand (Large, 100 flowers)',
+                description: 'Tall standing floral tribute with fuller blooms for ceremonial entrances.',
+                img: 'https://images.pexels.com/photos/1739347/pexels-photo-1739347.jpeg?auto=compress&cs=tinysrgb&w=1200'
+            },
+            {
+                value: 'Funeral Flower Stand (Medium, 50 flowers)',
+                label: 'Funeral Flower Stand (Medium, 50 flowers)',
+                description: 'Medium-sized stand arrangement that offers elegant sympathy presentation.',
+                img: 'https://images.pexels.com/photos/1169084/pexels-photo-1169084.jpeg?auto=compress&cs=tinysrgb&w=1200'
+            },
+            {
+                value: 'Heart-Shaped Funeral Wreath (Large, 100 flowers)',
+                label: 'Heart-Shaped Funeral Wreath (Large, 100 flowers)',
+                description: 'Large heart tribute that symbolizes love and remembrance for the departed.',
+                img: 'https://images.pexels.com/photos/696996/pexels-photo-696996.jpeg?auto=compress&cs=tinysrgb&w=1200'
+            },
+            {
+                value: 'Heart-Shaped Funeral Wreath (Medium, 50 flowers)',
+                label: 'Heart-Shaped Funeral Wreath (Medium, 50 flowers)',
+                description: 'Meaningful heart-shaped sympathy wreath with a softer floral silhouette.',
+                img: 'https://images.pexels.com/photos/931177/pexels-photo-931177.jpeg?auto=compress&cs=tinysrgb&w=1200'
+            },
         ]
     },
     {
         label: 'Bridal / Wedding',
         options: [
-            { value: 'Bridal Bouquet (20 flowers)', label: 'Bridal Bouquet (20 flowers)' },
-            { value: 'Bridesmaid Bouquet (10 flowers)', label: 'Bridesmaid Bouquet (10 flowers)' },
-            { value: 'Corsage (3 flowers)', label: 'Corsage (3 flowers)' },
+            {
+                value: 'Bridal Bouquet (20 flowers)',
+                label: 'Bridal Bouquet (20 flowers)',
+                description: 'Signature wedding bouquet designed for the bride with premium bloom selection.',
+                img: 'https://images.pexels.com/photos/931171/pexels-photo-931171.jpeg?auto=compress&cs=tinysrgb&w=1200'
+            },
+            {
+                value: 'Bridesmaid Bouquet (10 flowers)',
+                label: 'Bridesmaid Bouquet (10 flowers)',
+                description: 'Coordinated bouquet style for bridesmaids that complements the bridal theme.',
+                img: 'https://images.pexels.com/photos/6032926/pexels-photo-6032926.jpeg?auto=compress&cs=tinysrgb&w=1200'
+            },
+            {
+                value: 'Corsage (3 flowers)',
+                label: 'Corsage (3 flowers)',
+                description: 'Delicate wearable floral accent for formal events and entourage members.',
+                img: 'https://images.pexels.com/photos/931176/pexels-photo-931176.jpeg?auto=compress&cs=tinysrgb&w=1200'
+            },
         ]
     },
     {
         label: 'General',
         options: [
-            { value: 'Table Centerpiece (12 flowers)', label: 'Table Centerpiece (12 flowers)' },
-            { value: 'Flower Box (Medium, 9 flowers)', label: 'Flower Box (Medium, 9 flowers)' },
-            { value: 'Flower Box (Large, 15 flowers)', label: 'Flower Box (Large, 15 flowers)' },
+            {
+                value: 'Table Centerpiece (12 flowers)',
+                label: 'Table Centerpiece (12 flowers)',
+                description: 'Low-profile arrangement perfect for dining tables and reception decor.',
+                img: 'https://images.pexels.com/photos/1070850/pexels-photo-1070850.jpeg?auto=compress&cs=tinysrgb&w=1200'
+            },
+            {
+                value: 'Flower Box (Medium, 9 flowers)',
+                label: 'Flower Box (Medium, 9 flowers)',
+                description: 'Compact flower box suited for thoughtful gifting and personal celebrations.',
+                img: 'https://images.pexels.com/photos/2111192/pexels-photo-2111192.jpeg?auto=compress&cs=tinysrgb&w=1200'
+            },
+            {
+                value: 'Flower Box (Large, 15 flowers)',
+                label: 'Flower Box (Large, 15 flowers)',
+                description: 'Larger boxed arrangement with fuller volume for statement gifting.',
+                img: 'https://images.pexels.com/photos/931170/pexels-photo-931170.jpeg?auto=compress&cs=tinysrgb&w=1200'
+            },
         ]
     },
     {
         label: 'Custom',
         options: [
-            { value: 'Other', label: 'Others (Specify below)' },
+            {
+                value: 'Other',
+                label: 'Others (Specify below)',
+                description: 'Request a fully custom design and specify arrangement details below.',
+                img: 'https://images.pexels.com/photos/931174/pexels-photo-931174.jpeg?auto=compress&cs=tinysrgb&w=1200'
+            },
         ]
     }
 ];
@@ -95,6 +160,113 @@ const customColorOptionLabel = ({ label, colors }) => (
         <span>{label}</span>
     </div>
 );
+
+const customFlowerOptionLabel = (option, { context, selectProps }) => {
+    if (context === 'value') {
+        return <span>{option.label}</span>;
+    }
+
+    return (
+        <div className="flower-option">
+            <button
+                type="button"
+                className="flower-option__image-button"
+                onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }}
+                onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (typeof selectProps.onFlowerPreview === 'function') {
+                        selectProps.onFlowerPreview(option);
+                    }
+                }}
+                aria-label={'Preview ' + option.label}
+                title="Click to preview"
+            >
+                <img src={option.img} alt={option.label} className="flower-option__image" />
+            </button>
+            <span className="flower-option__label">{option.label}</span>
+            <button
+                type="button"
+                className="flower-option__zoom"
+                onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }}
+                onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (typeof selectProps.onFlowerPreview === 'function') {
+                        selectProps.onFlowerPreview(option);
+                    }
+                }}
+                aria-label={'Expand preview for ' + option.label}
+                title="Preview image"
+            >
+                <i className="fas fa-expand" aria-hidden="true"></i>
+            </button>
+        </div>
+    );
+};
+
+const customArrangementOptionLabel = (option, { context, selectProps }) => {
+    if (context === 'value') {
+        return <span>{option.label}</span>;
+    }
+
+    return (
+        <div className="arrangement-option">
+            <button
+                type="button"
+                className="arrangement-option__image-button"
+                onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }}
+                onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (typeof selectProps.onArrangementPreview === 'function') {
+                        selectProps.onArrangementPreview(option);
+                    }
+                }}
+                aria-label={'Preview ' + option.label}
+                title="Click to preview"
+            >
+                <img
+                    src={option.img}
+                    alt={option.label}
+                    className="arrangement-option__image"
+                />
+            </button>
+            <div className="arrangement-option__content">
+                <div className="arrangement-option__title">{option.label}</div>
+                <div className="arrangement-option__description">{option.description}</div>
+            </div>
+            <button
+                type="button"
+                className="arrangement-option__zoom"
+                onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }}
+                onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (typeof selectProps.onArrangementPreview === 'function') {
+                        selectProps.onArrangementPreview(option);
+                    }
+                }}
+                aria-label={'Preview ' + option.label}
+                title="Preview image"
+            >
+                <i className="fas fa-expand" aria-hidden="true"></i>
+            </button>
+        </div>
+    );
+};
 
 const buildMultiSelectStyles = (hasError) => ({
     control: (base, state) => ({
@@ -183,7 +355,7 @@ const buildMultiSelectStyles = (hasError) => ({
     })
 });
 
-const BookEvent = ({ user }) => {
+const CustomOrderV2 = ({ user }) => {
     const [formData, setFormData] = useState({
         customerName: user?.user_metadata?.full_name || '',
         email: user?.email || '',
@@ -207,9 +379,14 @@ const BookEvent = ({ user }) => {
     });
 
     const [imagePreview, setImagePreview] = useState(null);
+    const [otherArrangementImagePreview, setOtherArrangementImagePreview] = useState(null);
+    const [otherFlowersImagePreview, setOtherFlowersImagePreview] = useState(null);
     const [fileSizeError, setFileSizeError] = useState('');
+    const [otherArrangementImageError, setOtherArrangementImageError] = useState('');
+    const [otherFlowersImageError, setOtherFlowersImageError] = useState('');
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const [showImageZoom, setShowImageZoom] = useState(false);
+    const [arrangementPreviewOption, setArrangementPreviewOption] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null });
     const [dateError, setDateError] = useState('');
@@ -219,6 +396,18 @@ const BookEvent = ({ user }) => {
     const navigate = useNavigate();
 
     const fileInputRef = useRef(null);
+
+    const handleArrangementPreview = useCallback((option) => {
+        setArrangementPreviewOption(option);
+    }, []);
+
+    const handleFlowerPreview = useCallback((option) => {
+        setArrangementPreviewOption({
+            img: option.img,
+            label: option.label,
+            description: 'Preferred flower option'
+        });
+    }, []);
 
     useEffect(() => {
         if (user) {
@@ -294,6 +483,8 @@ const BookEvent = ({ user }) => {
             return {
                 value: option.value,
                 label,
+                img: option.img || '',
+                description: option.description || '',
                 quantity,
                 flowersPerArrangement,
                 totalFlowers: flowersPerArrangement > 0 ? flowersPerArrangement * quantity : 0
@@ -419,6 +610,74 @@ const BookEvent = ({ user }) => {
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
+    const compressToBase64 = (file, onDone) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const img = new Image();
+            img.onload = () => {
+                const MAX_WIDTH = 800;
+                const MAX_HEIGHT = 800;
+                let width = img.width;
+                let height = img.height;
+
+                if (width > MAX_WIDTH || height > MAX_HEIGHT) {
+                    const ratio = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height);
+                    width = Math.round(width * ratio);
+                    height = Math.round(height * ratio);
+                }
+
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                onDone(canvas.toDataURL('image/jpeg', 0.6));
+            };
+            img.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+    };
+
+    const handleOtherArrangementImageChange = (e) => {
+        const file = e.target.files?.[0];
+        setOtherArrangementImageError('');
+        if (!file) return;
+        if (!['image/jpeg', 'image/png', 'image/jpg'].includes(file.type)) {
+            setOtherArrangementImageError('Please upload a JPG or PNG file.');
+            return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+            setOtherArrangementImageError('File size exceeds 5MB limit.');
+            return;
+        }
+        compressToBase64(file, setOtherArrangementImagePreview);
+    };
+
+    const handleOtherFlowersImageChange = (e) => {
+        const file = e.target.files?.[0];
+        setOtherFlowersImageError('');
+        if (!file) return;
+        if (!['image/jpeg', 'image/png', 'image/jpg'].includes(file.type)) {
+            setOtherFlowersImageError('Please upload a JPG or PNG file.');
+            return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+            setOtherFlowersImageError('File size exceeds 5MB limit.');
+            return;
+        }
+        compressToBase64(file, setOtherFlowersImagePreview);
+    };
+
+    const removeOtherArrangementImage = () => {
+        setOtherArrangementImagePreview(null);
+        setOtherArrangementImageError('');
+    };
+
+    const removeOtherFlowersImage = () => {
+        setOtherFlowersImagePreview(null);
+        setOtherFlowersImageError('');
+    };
+
     const triggerValidation = (e) => {
         e.preventDefault();
         const form = e.currentTarget;
@@ -476,7 +735,7 @@ const BookEvent = ({ user }) => {
         // 1. Prepare Cart Item
         const newCartItem = {
             id: Date.now(),
-            serviceType: "Event/Special Request",
+            serviceType: "Custom Order v2",
             name: arrangementSummary || selectedArrangementOptions.map((option) => option.label).join(', ') || 'Custom Order',
             customerName: formData.customerName,
             email: formData.email,
@@ -494,11 +753,16 @@ const BookEvent = ({ user }) => {
             arrangementSummary,
             arrangementQuantity: totalArrangementQuantity || 1,
             flowerQuantity: hasOtherArrangement ? (formData.flowerQuantity || null) : null,
+            otherArrangementImageBase64: otherArrangementImagePreview,
             totalFlowers: totalEstimatedFlowers > 0 ? totalEstimatedFlowers : null,
             flowers: formData.selectedFlowers.map(f => f.label).join(', ') + (formData.otherFlowersText ? ` (${formData.otherFlowersText})` : ''),
+            otherFlowersImageBase64: otherFlowersImagePreview,
             colorPreference: formData.colorPreference === 'Others' ? formData.otherColorPreference : formData.colorPreference,
             specialInstructions: formData.specialInstructions,
             inspirationImageBase64: imagePreview,
+            requestVariant: 'custom_order_v2',
+            custom_order_version: 2,
+            flow: 'custom_order_v2',
             qty: 1,
             price: null
         };
@@ -719,6 +983,8 @@ const BookEvent = ({ user }) => {
                                                             onChange={handleArrangementSelect}
                                                             value={flattenedArrangementOptions.filter((option) => formData.arrangementTypes.includes(option.value))}
                                                             closeMenuOnSelect={false}
+                                                            formatOptionLabel={customArrangementOptionLabel}
+                                                            onArrangementPreview={handleArrangementPreview}
                                                             styles={buildMultiSelectStyles(validated && formData.arrangementTypes.length === 0)}
                                                         />
                                                         <input
@@ -742,6 +1008,20 @@ const BookEvent = ({ user }) => {
                                                                     <label className="form-label fw-semibold mb-2">Flowers per "Others" Arrangement</label>
                                                                     <input type="number" name="flowerQuantity" className="form-control bg-light border-0 py-3" placeholder="e.g., 50" min="1" value={formData.flowerQuantity} onChange={handleChange} required />
                                                                 </div>
+                                                                <div className="mt-3">
+                                                                    <label className="form-label fw-semibold mb-2">Arrangement Reference Photo (Optional)</label>
+                                                                    <input type="file" className="form-control bg-light border-0 py-2" accept=".jpg,.jpeg,.png" onChange={handleOtherArrangementImageChange} />
+                                                                    <div className="form-text small">JPG or PNG, max 5MB.</div>
+                                                                    {otherArrangementImagePreview && (
+                                                                        <div className="mt-2">
+                                                                            <img src={otherArrangementImagePreview} alt="Arrangement reference preview" className="rounded-3 border" style={{ maxHeight: '140px', maxWidth: '100%', objectFit: 'cover' }} />
+                                                                            <div className="mt-2">
+                                                                                <button type="button" className="btn btn-sm btn-outline-danger" onClick={removeOtherArrangementImage}>Remove Photo</button>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                    {otherArrangementImageError && <p className="text-danger small mt-2 mb-0"><i className="fas fa-exclamation-circle me-1"></i>{otherArrangementImageError}</p>}
+                                                                </div>
                                                             </div>
                                                         )}
                                                     </div>
@@ -757,6 +1037,22 @@ const BookEvent = ({ user }) => {
                                                             <div className="arrangement-card-grid">
                                                                 {arrangementDetails.map((detail) => (
                                                                     <div key={detail.value} className="arrangement-qty-card">
+                                                                        {detail.img && (
+                                                                            <button
+                                                                                type="button"
+                                                                                className="arrangement-qty-card__preview"
+                                                                                onClick={() => setArrangementPreviewOption({
+                                                                                    img: detail.img,
+                                                                                    label: detail.label,
+                                                                                    description: detail.description
+                                                                                })}
+                                                                            >
+                                                                                <img src={detail.img} alt={detail.label} className="arrangement-qty-card__preview-image" />
+                                                                                <span className="arrangement-qty-card__preview-icon" aria-hidden="true">
+                                                                                    <i className="fas fa-expand"></i>
+                                                                                </span>
+                                                                            </button>
+                                                                        )}
                                                                         <div className="arrangement-qty-card__head">
                                                                             <div>
                                                                                 <div className="arrangement-qty-card__title">{detail.label}</div>
@@ -765,6 +1061,9 @@ const BookEvent = ({ user }) => {
                                                                                         ? detail.flowersPerArrangement + ' flowers each'
                                                                                         : 'Custom flower count pending'}
                                                                                 </div>
+                                                                                {detail.description && (
+                                                                                    <div className="arrangement-qty-card__description">{detail.description}</div>
+                                                                                )}
                                                                             </div>
                                                                             <div className="arrangement-qty-card__pill">
                                                                                 Qty {detail.quantity}
@@ -819,6 +1118,8 @@ const BookEvent = ({ user }) => {
                                                 placeholder="Select flowers..."
                                                 onChange={handleFlowerSelect}
                                                 value={formData.selectedFlowers}
+                                                formatOptionLabel={customFlowerOptionLabel}
+                                                onFlowerPreview={handleFlowerPreview}
                                                 styles={buildMultiSelectStyles(validated && (!formData.selectedFlowers || formData.selectedFlowers.length === 0))}
                                             />
                                             <input
@@ -833,7 +1134,23 @@ const BookEvent = ({ user }) => {
                                                 <div className="text-danger small mt-1">Please select at least one preferred flower.</div>
                                             )}
                                             {formData.selectedFlowers.some(f => f.value === 'Others') && (
-                                                <input type="text" name="otherFlowersText" className="form-control bg-light border-0 py-3 mt-2" placeholder="Please specify flowers (e.g., Peonies, Baby's Breath)" value={formData.otherFlowersText} onChange={handleChange} required />
+                                                <div className="arrangement-other-panel mt-2">
+                                                    <input type="text" name="otherFlowersText" className="form-control bg-light border-0 py-3" placeholder="Please specify flowers (e.g., Peonies, Baby's Breath)" value={formData.otherFlowersText} onChange={handleChange} required />
+                                                    <div className="mt-3">
+                                                        <label className="form-label fw-semibold mb-2">Flower Reference Photo (Optional)</label>
+                                                        <input type="file" className="form-control bg-light border-0 py-2" accept=".jpg,.jpeg,.png" onChange={handleOtherFlowersImageChange} />
+                                                        <div className="form-text small">JPG or PNG, max 5MB.</div>
+                                                        {otherFlowersImagePreview && (
+                                                            <div className="mt-2">
+                                                                <img src={otherFlowersImagePreview} alt="Flower reference preview" className="rounded-3 border" style={{ maxHeight: '140px', maxWidth: '100%', objectFit: 'cover' }} />
+                                                                <div className="mt-2">
+                                                                    <button type="button" className="btn btn-sm btn-outline-danger" onClick={removeOtherFlowersImage}>Remove Photo</button>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        {otherFlowersImageError && <p className="text-danger small mt-2 mb-0"><i className="fas fa-exclamation-circle me-1"></i>{otherFlowersImageError}</p>}
+                                                    </div>
+                                                </div>
                                             )}
                                         </div>
 
@@ -975,6 +1292,12 @@ const BookEvent = ({ user }) => {
                                     <span className="fw-semibold text-end">{formData.flowerQuantity}</span>
                                 </div>
                             )}
+                            {otherArrangementImagePreview && (
+                                <div className="mt-2 text-center">
+                                    <span className="text-muted d-block mb-1">Arrangement Reference:</span>
+                                    <img src={otherArrangementImagePreview} alt="Arrangement reference" className="rounded-3 border" style={{ maxHeight: '120px', maxWidth: '100%', objectFit: 'cover' }} />
+                                </div>
+                            )}
                             {formData.selectedFlowers.length > 0 && (
                                 <div className="d-flex justify-content-between mb-2">
                                     <span className="text-muted">Flowers:</span>
@@ -982,6 +1305,12 @@ const BookEvent = ({ user }) => {
                                         {formData.selectedFlowers.map(f => f.label).join(', ')}
                                         {formData.otherFlowersText ? ` (${formData.otherFlowersText})` : ''}
                                     </span>
+                                </div>
+                            )}
+                            {otherFlowersImagePreview && (
+                                <div className="mt-2 text-center">
+                                    <span className="text-muted d-block mb-1">Flower Reference:</span>
+                                    <img src={otherFlowersImagePreview} alt="Flower reference" className="rounded-3 border" style={{ maxHeight: '120px', maxWidth: '100%', objectFit: 'cover' }} />
                                 </div>
                             )}
                             {formData.colorPreference && (
@@ -1041,9 +1370,36 @@ const BookEvent = ({ user }) => {
                     </div>
                 </div>
             )}
+
+            {arrangementPreviewOption && (
+                <div
+                    className="modal-overlay"
+                    style={{ zIndex: 1075, cursor: 'pointer' }}
+                    onClick={() => setArrangementPreviewOption(null)}
+                >
+                    <div className="arrangement-preview-modal" onClick={(e) => e.stopPropagation()}>
+                        <button
+                            type="button"
+                            className="arrangement-preview-modal__close"
+                            onClick={() => setArrangementPreviewOption(null)}
+                            aria-label="Close arrangement preview"
+                        >
+                            <i className="fas fa-times" aria-hidden="true"></i>
+                        </button>
+                        <img
+                            src={arrangementPreviewOption.img}
+                            alt={arrangementPreviewOption.label}
+                            className="arrangement-preview-modal__image"
+                        />
+                        <div className="arrangement-preview-modal__body">
+                            <div className="arrangement-preview-modal__title">{arrangementPreviewOption.label}</div>
+                            <div className="arrangement-preview-modal__description">{arrangementPreviewOption.description}</div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
 
-export default BookEvent;
-
+export default CustomOrderV2;

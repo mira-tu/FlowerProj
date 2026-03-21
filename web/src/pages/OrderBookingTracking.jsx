@@ -5,6 +5,7 @@ import TrackingPaymentDetails from '../components/TrackingPaymentDetails';
 import DeliveryDestinationsSummary from '../components/DeliveryDestinationsSummary';
 import InfoModal from '../components/InfoModal';
 import { buildTimelineTimestampMap, formatTimelineTimestamp } from '../utils/timelineTimestamps';
+import { formatCustomOrderV4Currency, getSelectedEstimateFromItem, isCustomOrderV4Item } from '../utils/customOrderV4';
 import '../styles/Shop.css';
 
 // Timeline steps for Delivery Requests
@@ -130,7 +131,7 @@ const OrderBookingTracking = () => {
             if (typeof normalizedRequestData === 'string') {
                 try {
                     normalizedRequestData = JSON.parse(normalizedRequestData);
-                } catch (error) {
+                } catch {
                     normalizedRequestData = {};
                 }
             }
@@ -709,7 +710,7 @@ const OrderBookingTracking = () => {
                                 {request.type === 'booking' && (() => {
                                     let reqData = request.requestData || {};
                                     if (typeof reqData === 'string') {
-                                        try { reqData = JSON.parse(reqData); } catch (e) { reqData = {}; }
+                                        try { reqData = JSON.parse(reqData); } catch { reqData = {}; }
                                     }
                                     const items = getBookingItems(reqData);
 
@@ -728,6 +729,7 @@ const OrderBookingTracking = () => {
                                                         ? arrangementSelections.reduce((sum, selection) => sum + Number(selection?.quantity || 1), 0)
                                                         : null
                                                 );
+                                                const selectedEstimate = getSelectedEstimateFromItem(item);
 
                                                 return (
                                                     <div key={item.id || `booking-item-${index}`} className="p-3 rounded-3 border" style={{ background: '#f8f9fa', borderColor: '#f0d7e1' }}>
@@ -744,6 +746,26 @@ const OrderBookingTracking = () => {
                                                         {arrangement && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Arrangement</span><span className="fw-bold text-dark">{arrangement}</span></div>}
                                                         {totalArrangementQuantity && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Quantity</span><span className="fw-bold text-dark">{totalArrangementQuantity}</span></div>}
                                                         {flowers && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Preferred Flowers</span><span className="fw-bold text-dark">{flowers}</span></div>}
+                                                        {isCustomOrderV4Item(item) && (
+                                                            <>
+                                                                <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Original Target Price</span><span className="fw-bold text-dark">{formatCustomOrderV4Currency(item.originalEstimatedPrice || 0)}</span></div>
+                                                                <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Customer Budget</span><span className="fw-bold text-dark">{formatCustomOrderV4Currency(item.customerBudget || 0)}</span></div>
+                                                                <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Preferred Version</span><span className="fw-bold text-dark">{item.selectedOptionLabel || 'Original target design'}</span></div>
+                                                                <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Rough Estimate</span><span className="fw-bold text-dark">{formatCustomOrderV4Currency(selectedEstimate?.estimatedPrice || item.estimatedPrice || 0)}</span></div>
+                                                                {Array.isArray(item.suggestedAlternatives) && item.suggestedAlternatives.length > 0 && (
+                                                                    <div className="d-flex flex-column mb-2">
+                                                                        <span className="text-muted small fw-medium">What Changed From the Original</span>
+                                                                        <div className="text-dark bg-white p-3 rounded-3 mt-1 fs-6">
+                                                                            <ul className="mb-0 ps-3">
+                                                                                {(item.suggestedAlternatives.find((alternative) => alternative.id === item.selectedAlternativeId)?.changes || []).map((change) => (
+                                                                                    <li key={change.key}>{change.explanation}</li>
+                                                                                ))}
+                                                                            </ul>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                            </>
+                                                        )}
                                                         {colorTheme && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Color Theme</span><span className="fw-bold text-dark">{colorTheme}</span></div>}
                                                         {item.specialInstructions && <div className="d-flex flex-column mt-2"><span className="text-muted small fw-medium">Special Instructions</span><span className="text-dark bg-white p-3 rounded-3 mt-1 fs-6">{item.specialInstructions}</span></div>}
                                                     </div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import '../styles/Shop.css';
 import InfoModal from '../components/InfoModal';
+import { formatCustomOrderV4Currency, getSelectedEstimateFromItem, isCustomOrderV4Item } from '../utils/customOrderV4';
 
 const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
     const navigate = useNavigate();
@@ -231,6 +232,12 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
     // ===== TOTALS =====
     const productTotal = cartItems.filter(item => item.selected).reduce((acc, item) => acc + (item.price * item.qty), 0);
     const customizedTotal = customizedItems.filter(item => item.selected).reduce((acc, item) => acc + (item.price || 0), 0);
+    const selectedBookingItems = bookingItems.filter(item => item.selected);
+    const bookingEstimatedTotal = selectedBookingItems.reduce((acc, item) => {
+        const selectedEstimate = getSelectedEstimateFromItem(item);
+        return acc + (selectedEstimate?.estimatedPrice || item.estimatedPrice || 0);
+    }, 0);
+    const hasBookingEstimates = selectedBookingItems.some(item => !!(getSelectedEstimateFromItem(item)?.estimatedPrice || item.estimatedPrice));
 
     const isCartEmpty = cartItems.length === 0 && customizedItems.length === 0 && bookingItems.length === 0;
 
@@ -334,9 +341,17 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                 <span className="text-muted">Custom Order Requests ({selectedBookingCount})</span>
                 <span className="badge text-white" style={{ background: 'var(--shop-pink)' }}>Pending Quote</span>
             </div>
+            {hasBookingEstimates && (
+                <div className="d-flex justify-content-between mb-3 small">
+                    <span className="text-muted">Current rough estimate</span>
+                    <span className="fw-semibold">{formatCustomOrderV4Currency(bookingEstimatedTotal)}</span>
+                </div>
+            )}
             <div className="text-muted small mb-3 p-3 rounded" style={{ background: '#fff5f8', border: '1px dashed var(--shop-pink)' }}>
                 <i className="fas fa-info-circle me-2" style={{ color: 'var(--shop-pink)' }}></i>
-                Custom orders require admin review before pricing. No monetary total will be charged at this step.
+                {hasBookingEstimates
+                    ? 'This estimate is only a guide. Our team will still review materials and confirm the final quote.'
+                    : 'Custom orders require admin review before pricing. No monetary total will be charged at this step.'}
             </div>
             <button
                 className="btn w-100 py-3 fw-bold shadow-sm rounded-pill"
@@ -553,8 +568,8 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                                         <div className="form-check me-3 mb-0" onClick={(e) => e.stopPropagation()}>
                                                             <input className="form-check-input" type="checkbox" checked={item.selected} disabled={isTypeDisabled('booking')} onChange={() => toggleSelect(item.listId, 'booking')} style={{ borderColor: item.selected ? 'var(--shop-pink)' : '#dee2e6', backgroundColor: item.selected ? 'var(--shop-pink)' : 'white', cursor: isTypeDisabled('booking') ? 'not-allowed' : 'pointer', transform: 'scale(1.2)' }} />
                                                         </div>
-                                                        {item.inspirationImageBase64 ? (
-                                                            <img src={item.inspirationImageBase64} alt="Inspiration" className="rounded border bg-light flex-shrink-0" style={{ width: '80px', height: '80px', objectFit: 'cover' }} />
+                                                        {item.inspirationImageBase64 || item.image_url ? (
+                                                            <img src={item.inspirationImageBase64 || item.image_url} alt="Inspiration" className="rounded border bg-light flex-shrink-0" style={{ width: '80px', height: '80px', objectFit: 'cover' }} />
                                                         ) : (
                                                             <div className="rounded border bg-light d-flex align-items-center justify-content-center text-muted" style={{ width: '80px', height: '80px' }}>
                                                                 <i className="fas fa-image fs-4"></i>
@@ -566,11 +581,23 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                                                 <div><strong>Occasion:</strong> {item.occasion}</div>
                                                                 <div><strong>Date:</strong> {new Date(item.eventDate).toLocaleDateString()}</div>
                                                                 {item.flowers && <div><strong>Flowers:</strong> {item.flowers}</div>}
+                                                                {isCustomOrderV4Item(item) && (
+                                                                    <>
+                                                                        <div><strong>Original:</strong> {formatCustomOrderV4Currency(item.originalEstimatedPrice || 0)}</div>
+                                                                        <div><strong>Budget:</strong> {formatCustomOrderV4Currency(item.customerBudget || 0)}</div>
+                                                                        <div><strong>Preferred version:</strong> {item.selectedOptionLabel || 'Original target design'}</div>
+                                                                    </>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     </div>
                                                     <div className="col-12 col-md-4 text-end fw-bold align-self-end align-self-md-center mt-4 mt-md-0 pt-md-4 pe-3">
-                                                        <span className="badge bg-white shadow-sm text-dark border p-2" style={{ color: 'var(--shop-pink)' }}><i className="fas fa-search-dollar me-1" style={{ color: 'var(--shop-pink)' }}></i> For Discussion</span>
+                                                        <span className="badge bg-white shadow-sm text-dark border p-2" style={{ color: 'var(--shop-pink)' }}>
+                                                            <i className="fas fa-search-dollar me-1" style={{ color: 'var(--shop-pink)' }}></i>
+                                                            {isCustomOrderV4Item(item)
+                                                                ? `Est. ${formatCustomOrderV4Currency(getSelectedEstimateFromItem(item)?.estimatedPrice || item.estimatedPrice || 0)}`
+                                                                : 'For Discussion'}
+                                                        </span>
                                                     </div>
                                                 </div>
                                             </div>
