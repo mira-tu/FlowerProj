@@ -175,8 +175,8 @@ const Home = ({ addToCart, products, categories, user }) => {
                         </Link>
                         <div className="carousel-caption">
                             <h2>Custom Order</h2>
-                            <p>Browse arrangement concepts first, then compare visual budget-fit alternatives before sending your custom order request.</p>
-                            <Link to="/custom-order" className="btn btn-hero">Browse Offerings</Link>
+                            <p>Plan a custom flower arrangement for your event or special request.</p>
+                            <Link to="/custom-order" className="btn btn-hero">Start Request</Link>
                         </div>
                     </div>
                 </div>

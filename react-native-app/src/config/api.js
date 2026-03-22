@@ -428,7 +428,7 @@ const provideQuoteDirect = async (id, price, shippingFee = 0, quoteBreakdown = n
 
     const { data: existingRequest, error: fetchError } = await supabase
         .from('requests')
-        .select('data, user_id, request_number, status_timestamps')
+        .select('data, user_id, request_number, status, status_timestamps')
         .eq('id', id)
         .single();
 
@@ -436,12 +436,18 @@ const provideQuoteDirect = async (id, price, shippingFee = 0, quoteBreakdown = n
         throw fetchError;
     }
 
+    const existingStatus = String(existingRequest?.status || '').trim().toLowerCase();
+    const shouldSetQuotedStatus = !existingStatus || existingStatus === 'pending';
+
     const updatePayload = {
         final_price: finalItemPrice + finalShippingFee,
         shipping_fee: finalShippingFee,
-        status: 'quoted',
-        status_timestamps: withStatusTimestamp(existingRequest?.status_timestamps, 'quoted'),
     };
+
+    if (shouldSetQuotedStatus) {
+        updatePayload.status = 'quoted';
+        updatePayload.status_timestamps = withStatusTimestamp(existingRequest?.status_timestamps, 'quoted');
+    }
 
     if (quoteBreakdown) {
         updatePayload.data = {

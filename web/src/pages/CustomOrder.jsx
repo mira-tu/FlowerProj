@@ -1,15 +1,15 @@
-import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Select from 'react-select';
 import { formatPhoneNumber } from '../utils/format';
 import InfoModal from '../components/InfoModal';
-import '../styles/CustomOrderV2.css';
+import '../styles/CustomOrder.css';
 import '../styles/Shop.css';
 
 const flowerOptions = [
     { value: 'Roses', label: 'Roses', img: 'https://images.pexels.com/photos/56866/garden-rose-red-pink-56866.jpeg?auto=compress&cs=tinysrgb&w=800' },
     { value: 'Tulips', label: 'Tulips', img: 'https://images.pexels.com/photos/36753/flower-purple-lical-blosso.jpg?auto=compress&cs=tinysrgb&w=800' },
-    { value: 'Sunflowers', label: 'Sunflowers', img: 'https://images.pexels.com/photos/33045/sunflower-sun-summer-yellow.jpg?auto=compress&cs=tinysrgb&w=800' },
+    { value: 'Sunflowers', label: 'Sunflowers', img: 'https://images.pexels.com/photos/1002703/pexels-photo-1002703.jpeg?auto=compress&cs=tinysrgb&w=800' },
     { value: 'Lilies', label: 'Lilies', img: 'https://images.pexels.com/photos/6629632/pexels-photo-6629632.jpeg?auto=compress&cs=tinysrgb&w=800' },
     { value: 'Orchids', label: 'Orchids', img: 'https://images.pexels.com/photos/132474/pexels-photo-132474.jpeg?auto=compress&cs=tinysrgb&w=800' },
     { value: 'Carnations', label: 'Carnations', img: 'https://images.pexels.com/photos/14532594/pexels-photo-14532594.jpeg?auto=compress&cs=tinysrgb&w=800' },
@@ -128,6 +128,31 @@ const extractFlowersPerArrangement = (arrangementLabel = '') => {
     return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const dedupeFlowerOptions = (optionLists = []) => {
+    const uniqueOptions = [];
+    const seenValues = new Set();
+
+    optionLists.flat().forEach((option) => {
+        if (!option) return;
+        const key = String(option.value || option.label || '').trim();
+        if (!key || seenValues.has(key)) return;
+        seenValues.add(key);
+        uniqueOptions.push(option);
+    });
+
+    return uniqueOptions;
+};
+
+const buildCombinedOtherFlowersText = (otherFlowersTextByArrangement = {}) => (
+    Array.from(
+        new Set(
+            Object.values(otherFlowersTextByArrangement || {})
+                .map((value) => String(value || '').trim())
+                .filter(Boolean)
+        )
+    ).join(', ')
+);
+
 const colorOptions = [
     { value: 'Pastel Pinks and Whites', label: 'Pastel Pinks and Whites', colors: ['#ffc0cb', '#ffffff'] },
     { value: 'Rustic Autumn Colors', label: 'Rustic Autumn Colors', colors: ['#d2691e', '#8b4513', '#cd853f'] },
@@ -161,7 +186,7 @@ const customColorOptionLabel = ({ label, colors }) => (
     </div>
 );
 
-const customFlowerOptionLabel = (option, { context, selectProps }) => {
+const renderFlowerOptionLabel = (option, context, onPreview) => {
     if (context === 'value') {
         return <span>{option.label}</span>;
     }
@@ -178,8 +203,8 @@ const customFlowerOptionLabel = (option, { context, selectProps }) => {
                 onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    if (typeof selectProps.onFlowerPreview === 'function') {
-                        selectProps.onFlowerPreview(option);
+                    if (typeof onPreview === 'function') {
+                        onPreview(option);
                     }
                 }}
                 aria-label={'Preview ' + option.label}
@@ -198,8 +223,8 @@ const customFlowerOptionLabel = (option, { context, selectProps }) => {
                 onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    if (typeof selectProps.onFlowerPreview === 'function') {
-                        selectProps.onFlowerPreview(option);
+                    if (typeof onPreview === 'function') {
+                        onPreview(option);
                     }
                 }}
                 aria-label={'Expand preview for ' + option.label}
@@ -211,7 +236,7 @@ const customFlowerOptionLabel = (option, { context, selectProps }) => {
     );
 };
 
-const customArrangementOptionLabel = (option, { context, selectProps }) => {
+const renderArrangementOptionLabel = (option, context, onPreview) => {
     if (context === 'value') {
         return <span>{option.label}</span>;
     }
@@ -228,8 +253,8 @@ const customArrangementOptionLabel = (option, { context, selectProps }) => {
                 onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    if (typeof selectProps.onArrangementPreview === 'function') {
-                        selectProps.onArrangementPreview(option);
+                    if (typeof onPreview === 'function') {
+                        onPreview(option);
                     }
                 }}
                 aria-label={'Preview ' + option.label}
@@ -255,8 +280,8 @@ const customArrangementOptionLabel = (option, { context, selectProps }) => {
                 onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    if (typeof selectProps.onArrangementPreview === 'function') {
-                        selectProps.onArrangementPreview(option);
+                    if (typeof onPreview === 'function') {
+                        onPreview(option);
                     }
                 }}
                 aria-label={'Preview ' + option.label}
@@ -355,7 +380,7 @@ const buildMultiSelectStyles = (hasError) => ({
     })
 });
 
-const CustomOrderV2 = ({ user }) => {
+const CustomOrder = ({ user }) => {
     const [formData, setFormData] = useState({
         customerName: user?.user_metadata?.full_name || '',
         email: user?.email || '',
@@ -365,27 +390,27 @@ const CustomOrderV2 = ({ user }) => {
         otherOccasion: '',
         otherArrangementType: '',
         otherFlowersText: '',
-        colorPreference: '',
-        otherColorPreference: '',
         eventDate: '',
         eventTime: '',
         venue: '',
         selectedFlowers: [],
+        preferredFlowersByArrangement: {},
+        otherFlowersTextByArrangement: {},
+        colorPreferenceByArrangement: {},
+        otherColorPreferenceByArrangement: {},
+        inspirationImageByArrangement: {},
         arrangementTypes: [],
         arrangementQuantities: {},
         flowerQuantity: '',
-        specialInstructions: '',
-        inspirationFile: null
+        specialInstructions: ''
     });
 
-    const [imagePreview, setImagePreview] = useState(null);
     const [otherArrangementImagePreview, setOtherArrangementImagePreview] = useState(null);
     const [otherFlowersImagePreview, setOtherFlowersImagePreview] = useState(null);
-    const [fileSizeError, setFileSizeError] = useState('');
+    const [inspirationImageErrorsByArrangement, setInspirationImageErrorsByArrangement] = useState({});
     const [otherArrangementImageError, setOtherArrangementImageError] = useState('');
     const [otherFlowersImageError, setOtherFlowersImageError] = useState('');
     const [showConfirmModal, setShowConfirmModal] = useState(false);
-    const [showImageZoom, setShowImageZoom] = useState(false);
     const [arrangementPreviewOption, setArrangementPreviewOption] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null });
@@ -394,8 +419,6 @@ const CustomOrderV2 = ({ user }) => {
     const [validated, setValidated] = useState(false);
 
     const navigate = useNavigate();
-
-    const fileInputRef = useRef(null);
 
     const handleArrangementPreview = useCallback((option) => {
         setArrangementPreviewOption(option);
@@ -408,6 +431,16 @@ const CustomOrderV2 = ({ user }) => {
             description: 'Preferred flower option'
         });
     }, []);
+
+    const flowerOptionLabel = useCallback(
+        (option, { context }) => renderFlowerOptionLabel(option, context, handleFlowerPreview),
+        [handleFlowerPreview]
+    );
+
+    const arrangementOptionLabel = useCallback(
+        (option, { context }) => renderArrangementOptionLabel(option, context, handleArrangementPreview),
+        [handleArrangementPreview]
+    );
 
     useEffect(() => {
         if (user) {
@@ -450,8 +483,24 @@ const CustomOrderV2 = ({ user }) => {
         setFormData(prev => ({ ...prev, [name]: nextValue }));
     };
 
-    const handleFlowerSelect = (selectedOptions) => {
-        setFormData(prev => ({ ...prev, selectedFlowers: selectedOptions || [] }));
+    const handleArrangementFlowerSelect = (arrangementValue, selectedOptions) => {
+        setFormData(prev => ({
+            ...prev,
+            preferredFlowersByArrangement: {
+                ...prev.preferredFlowersByArrangement,
+                [arrangementValue]: selectedOptions || []
+            }
+        }));
+    };
+
+    const handleArrangementOtherFlowersChange = (arrangementValue, value) => {
+        setFormData(prev => ({
+            ...prev,
+            otherFlowersTextByArrangement: {
+                ...prev.otherFlowersTextByArrangement,
+                [arrangementValue]: value
+            }
+        }));
     };
 
     const selectedArrangementOptions = useMemo(
@@ -507,19 +556,67 @@ const CustomOrderV2 = ({ user }) => {
         [arrangementDetails]
     );
 
+    const combinedSelectedFlowers = useMemo(
+        () => dedupeFlowerOptions(Object.values(formData.preferredFlowersByArrangement || {})),
+        [formData.preferredFlowersByArrangement]
+    );
+
+    const combinedOtherFlowersText = useMemo(
+        () => buildCombinedOtherFlowersText(formData.otherFlowersTextByArrangement),
+        [formData.otherFlowersTextByArrangement]
+    );
+
+    const combinedArrangementColorSummary = useMemo(
+        () => arrangementDetails
+            .map((detail) => {
+                const selectedColor = formData.colorPreferenceByArrangement?.[detail.value] || '';
+                const otherColor = formData.otherColorPreferenceByArrangement?.[detail.value] || '';
+                if (!selectedColor) return null;
+                const colorLabel = selectedColor === 'Others' ? otherColor : selectedColor;
+                return colorLabel ? `${detail.label}: ${colorLabel}` : null;
+            })
+            .filter(Boolean)
+            .join(' | '),
+        [arrangementDetails, formData.colorPreferenceByArrangement, formData.otherColorPreferenceByArrangement]
+    );
+
+    const leadArrangementInspirationImage = useMemo(
+        () => arrangementDetails
+            .map((detail) => formData.inspirationImageByArrangement?.[detail.value] || null)
+            .find(Boolean) || null,
+        [arrangementDetails, formData.inspirationImageByArrangement]
+    );
+
     const handleArrangementSelect = (selectedOptions) => {
         const selectedValues = (selectedOptions || []).map((option) => option.value);
         setFormData(prev => {
             const nextQuantities = {};
+            const nextPreferredFlowersByArrangement = {};
+            const nextOtherFlowersTextByArrangement = {};
+            const nextColorPreferenceByArrangement = {};
+            const nextOtherColorPreferenceByArrangement = {};
+            const nextInspirationImageByArrangement = {};
             selectedValues.forEach((value) => {
                 const existingQty = Number.parseInt(prev.arrangementQuantities?.[value], 10);
                 nextQuantities[value] = Number.isFinite(existingQty) && existingQty > 0 ? String(existingQty) : '1';
+                nextPreferredFlowersByArrangement[value] = Array.isArray(prev.preferredFlowersByArrangement?.[value])
+                    ? prev.preferredFlowersByArrangement[value]
+                    : [];
+                nextOtherFlowersTextByArrangement[value] = prev.otherFlowersTextByArrangement?.[value] || '';
+                nextColorPreferenceByArrangement[value] = prev.colorPreferenceByArrangement?.[value] || '';
+                nextOtherColorPreferenceByArrangement[value] = prev.otherColorPreferenceByArrangement?.[value] || '';
+                nextInspirationImageByArrangement[value] = prev.inspirationImageByArrangement?.[value] || null;
             });
 
             const nextState = {
                 ...prev,
                 arrangementTypes: selectedValues,
-                arrangementQuantities: nextQuantities
+                arrangementQuantities: nextQuantities,
+                preferredFlowersByArrangement: nextPreferredFlowersByArrangement,
+                otherFlowersTextByArrangement: nextOtherFlowersTextByArrangement,
+                colorPreferenceByArrangement: nextColorPreferenceByArrangement,
+                otherColorPreferenceByArrangement: nextOtherColorPreferenceByArrangement,
+                inspirationImageByArrangement: nextInspirationImageByArrangement
             };
 
             if (!selectedValues.includes('Other')) {
@@ -550,64 +647,24 @@ const CustomOrderV2 = ({ user }) => {
         handleArrangementQuantityChange(arrangementValue, String(nextValue));
     };
 
-    const handleColorSelect = (selectedOption) => {
-        setFormData(prev => ({ ...prev, colorPreference: selectedOption ? selectedOption.value : '' }));
+    const handleArrangementColorSelect = (arrangementValue, selectedOption) => {
+        setFormData(prev => ({
+            ...prev,
+            colorPreferenceByArrangement: {
+                ...prev.colorPreferenceByArrangement,
+                [arrangementValue]: selectedOption ? selectedOption.value : ''
+            }
+        }));
     };
 
-    const handleFileChange = (e) => {
-        const file = e.target.files[0];
-        setFileSizeError('');
-
-        if (file) {
-            // Check file type
-            if (!['image/jpeg', 'image/png', 'image/jpg'].includes(file.type)) {
-                setFileSizeError('Please upload a JPG or PNG file.');
-                return;
+    const handleArrangementOtherColorChange = (arrangementValue, value) => {
+        setFormData(prev => ({
+            ...prev,
+            otherColorPreferenceByArrangement: {
+                ...prev.otherColorPreferenceByArrangement,
+                [arrangementValue]: value
             }
-
-            // Check file size (e.g., max 5MB)
-            if (file.size > 5 * 1024 * 1024) {
-                setFileSizeError('File size exceeds 5MB limit.');
-                return;
-            }
-
-            setFormData(prev => ({ ...prev, inspirationFile: file }));
-
-            // Compress image before storing as base64 to avoid localStorage quota issues
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const img = new Image();
-                img.onload = () => {
-                    const MAX_WIDTH = 800;
-                    const MAX_HEIGHT = 800;
-                    let width = img.width;
-                    let height = img.height;
-
-                    if (width > MAX_WIDTH || height > MAX_HEIGHT) {
-                        const ratio = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height);
-                        width = Math.round(width * ratio);
-                        height = Math.round(height * ratio);
-                    }
-
-                    const canvas = document.createElement('canvas');
-                    canvas.width = width;
-                    canvas.height = height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, width, height);
-                    const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
-                    setImagePreview(compressedBase64);
-                };
-                img.src = reader.result;
-            };
-            reader.readAsDataURL(file);
-        }
-    };
-
-    const removeImage = (e) => {
-        e.stopPropagation();
-        setImagePreview(null);
-        setFormData(prev => ({ ...prev, inspirationFile: null }));
-        if (fileInputRef.current) fileInputRef.current.value = '';
+        }));
     };
 
     const compressToBase64 = (file, onDone) => {
@@ -636,6 +693,57 @@ const CustomOrderV2 = ({ user }) => {
             img.src = reader.result;
         };
         reader.readAsDataURL(file);
+    };
+
+    const handleArrangementInspirationImageChange = (arrangementValue, file) => {
+        if (!file) return;
+
+        if (!['image/jpeg', 'image/png', 'image/jpg'].includes(file.type)) {
+            setInspirationImageErrorsByArrangement((prev) => ({
+                ...prev,
+                [arrangementValue]: 'Please upload a JPG or PNG file.'
+            }));
+            return;
+        }
+
+        if (file.size > 5 * 1024 * 1024) {
+            setInspirationImageErrorsByArrangement((prev) => ({
+                ...prev,
+                [arrangementValue]: 'File size exceeds 5MB limit.'
+            }));
+            return;
+        }
+
+        setInspirationImageErrorsByArrangement((prev) => ({
+            ...prev,
+            [arrangementValue]: ''
+        }));
+
+        compressToBase64(file, (compressedBase64) => {
+            setFormData((prev) => ({
+                ...prev,
+                inspirationImageByArrangement: {
+                    ...prev.inspirationImageByArrangement,
+                    [arrangementValue]: compressedBase64
+                }
+            }));
+        });
+    };
+
+    const removeArrangementInspirationImage = (arrangementValue) => {
+        setFormData((prev) => {
+            const nextImages = { ...prev.inspirationImageByArrangement };
+            delete nextImages[arrangementValue];
+            return {
+                ...prev,
+                inspirationImageByArrangement: nextImages
+            };
+        });
+
+        setInspirationImageErrorsByArrangement((prev) => ({
+            ...prev,
+            [arrangementValue]: ''
+        }));
     };
 
     const handleOtherArrangementImageChange = (e) => {
@@ -724,13 +832,37 @@ const CustomOrderV2 = ({ user }) => {
     const handleSubmit = async () => {
         setIsSubmitting(true);
 
-        const arrangementSelections = arrangementDetails.map((detail) => ({
-            arrangement_type: detail.value,
-            arrangement_label: detail.label,
-            quantity: detail.quantity,
-            flowers_per_arrangement: detail.flowersPerArrangement || 0,
-            total_flowers: detail.totalFlowers || 0
-        }));
+        const arrangementSelections = arrangementDetails.map((detail) => {
+            const arrangementFlowers = Array.isArray(formData.preferredFlowersByArrangement?.[detail.value])
+                ? formData.preferredFlowersByArrangement[detail.value]
+                : [];
+            const arrangementOtherFlowersText = String(formData.otherFlowersTextByArrangement?.[detail.value] || '').trim();
+            const arrangementFlowerLabels = arrangementFlowers.map((flower) => flower?.label).filter(Boolean);
+            const selectedColor = formData.colorPreferenceByArrangement?.[detail.value] || '';
+            const otherColor = String(formData.otherColorPreferenceByArrangement?.[detail.value] || '').trim();
+            const inspirationImageBase64 = formData.inspirationImageByArrangement?.[detail.value] || null;
+
+            return {
+                arrangement_type: detail.value,
+                arrangement_label: detail.label,
+                quantity: detail.quantity,
+                flowers_per_arrangement: detail.flowersPerArrangement || 0,
+                total_flowers: detail.totalFlowers || 0,
+                preferredFlowers: arrangementFlowerLabels,
+                preferred_flowers: arrangementFlowerLabels,
+                otherFlowersText: arrangementOtherFlowersText || null,
+                other_flowers_text: arrangementOtherFlowersText || null,
+                flowers: arrangementFlowerLabels.join(', ') + (arrangementOtherFlowersText ? ` (${arrangementOtherFlowersText})` : ''),
+                colorPreference: selectedColor === 'Others' ? otherColor : selectedColor || null,
+                color_preference: selectedColor === 'Others' ? otherColor : selectedColor || null,
+                rawColorPreference: selectedColor || null,
+                raw_color_preference: selectedColor || null,
+                otherColorPreference: otherColor || null,
+                other_color_preference: otherColor || null,
+                inspirationImageBase64,
+                inspiration_image_base64: inspirationImageBase64
+            };
+        });
 
         // 1. Prepare Cart Item
         const newCartItem = {
@@ -755,11 +887,15 @@ const CustomOrderV2 = ({ user }) => {
             flowerQuantity: hasOtherArrangement ? (formData.flowerQuantity || null) : null,
             otherArrangementImageBase64: otherArrangementImagePreview,
             totalFlowers: totalEstimatedFlowers > 0 ? totalEstimatedFlowers : null,
-            flowers: formData.selectedFlowers.map(f => f.label).join(', ') + (formData.otherFlowersText ? ` (${formData.otherFlowersText})` : ''),
+            customerPreferredFlowers: combinedSelectedFlowers.map((flower) => flower.label),
+            customer_preferred_flowers: combinedSelectedFlowers.map((flower) => flower.label),
+            selectedFlowers: combinedSelectedFlowers.map((flower) => flower.label),
+            flowers: combinedSelectedFlowers.map((flower) => flower.label).join(', ') + (combinedOtherFlowersText ? ` (${combinedOtherFlowersText})` : ''),
+            otherFlowersText: combinedOtherFlowersText,
             otherFlowersImageBase64: otherFlowersImagePreview,
-            colorPreference: formData.colorPreference === 'Others' ? formData.otherColorPreference : formData.colorPreference,
+            colorPreference: combinedArrangementColorSummary || null,
             specialInstructions: formData.specialInstructions,
-            inspirationImageBase64: imagePreview,
+            inspirationImageBase64: leadArrangementInspirationImage,
             requestVariant: 'custom_order_v2',
             custom_order_version: 2,
             flow: 'custom_order_v2',
@@ -983,8 +1119,7 @@ const CustomOrderV2 = ({ user }) => {
                                                             onChange={handleArrangementSelect}
                                                             value={flattenedArrangementOptions.filter((option) => formData.arrangementTypes.includes(option.value))}
                                                             closeMenuOnSelect={false}
-                                                            formatOptionLabel={customArrangementOptionLabel}
-                                                            onArrangementPreview={handleArrangementPreview}
+                                                            formatOptionLabel={arrangementOptionLabel}
                                                             styles={buildMultiSelectStyles(validated && formData.arrangementTypes.length === 0)}
                                                         />
                                                         <input
@@ -1111,32 +1246,66 @@ const CustomOrderV2 = ({ user }) => {
                                             </div>
                                         </div>
                                         <div className="col-12 mt-3 position-relative">
-                                            <label className="form-label fw-semibold">Preferred Flowers <span className="text-danger">*</span></label>
-                                            <Select
-                                                isMulti
-                                                options={flowerOptions}
-                                                placeholder="Select flowers..."
-                                                onChange={handleFlowerSelect}
-                                                value={formData.selectedFlowers}
-                                                formatOptionLabel={customFlowerOptionLabel}
-                                                onFlowerPreview={handleFlowerPreview}
-                                                styles={buildMultiSelectStyles(validated && (!formData.selectedFlowers || formData.selectedFlowers.length === 0))}
-                                            />
-                                            <input
-                                                type="text"
-                                                tabIndex={-1}
-                                                style={{ opacity: 0, height: 0, position: 'absolute', bottom: 10, left: 20 }}
-                                                value={formData.selectedFlowers.length > 0 ? 'selected' : ''}
-                                                onChange={() => { }}
-                                                required
-                                            />
-                                            {validated && (!formData.selectedFlowers || formData.selectedFlowers.length === 0) && (
-                                                <div className="text-danger small mt-1">Please select at least one preferred flower.</div>
-                                            )}
-                                            {formData.selectedFlowers.some(f => f.value === 'Others') && (
-                                                <div className="arrangement-other-panel mt-2">
-                                                    <input type="text" name="otherFlowersText" className="form-control bg-light border-0 py-3" placeholder="Please specify flowers (e.g., Peonies, Baby's Breath)" value={formData.otherFlowersText} onChange={handleChange} required />
-                                                    <div className="mt-3">
+                                            <label className="form-label fw-semibold">Preferred Flowers Per Arrangement <span className="text-danger">*</span></label>
+                                            <div className="d-grid gap-3">
+                                                {arrangementDetails.map((detail) => {
+                                                    const selectedArrangementFlowers = formData.preferredFlowersByArrangement?.[detail.value] || [];
+                                                    const selectedArrangementOtherFlowers = formData.otherFlowersTextByArrangement?.[detail.value] || '';
+                                                    const hasArrangementFlowerError = validated && selectedArrangementFlowers.length === 0;
+
+                                                    return (
+                                                        <div key={`flowers-${detail.value}`} className="arrangement-other-panel">
+                                                            <div className="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-2">
+                                                                <div>
+                                                                    <div className="fw-semibold">{detail.label}</div>
+                                                                    <div className="text-muted small">
+                                                                        {detail.quantity} arrangement{detail.quantity > 1 ? 's' : ''}
+                                                                        {detail.flowersPerArrangement > 0 ? ` - ${detail.flowersPerArrangement} flowers each` : ''}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            <Select
+                                                                isMulti
+                                                                options={flowerOptions}
+                                                                placeholder={`Select flowers for ${detail.label}...`}
+                                                                onChange={(selectedOptions) => handleArrangementFlowerSelect(detail.value, selectedOptions)}
+                                                                value={selectedArrangementFlowers}
+                                                                formatOptionLabel={flowerOptionLabel}
+                                                                styles={buildMultiSelectStyles(hasArrangementFlowerError)}
+                                                            />
+                                                            <input
+                                                                type="text"
+                                                                tabIndex={-1}
+                                                                style={{ opacity: 0, height: 0, position: 'absolute', left: 0 }}
+                                                                value={selectedArrangementFlowers.length > 0 ? 'selected' : ''}
+                                                                onChange={() => { }}
+                                                                required
+                                                            />
+                                                            {hasArrangementFlowerError && (
+                                                                <div className="text-danger small mt-1">Please select at least one preferred flower for this arrangement.</div>
+                                                            )}
+
+                                                            {selectedArrangementFlowers.some((flower) => flower.value === 'Others') && (
+                                                                <input
+                                                                    type="text"
+                                                                    className="form-control bg-light border-0 py-3 mt-3"
+                                                                    placeholder={`Please specify flowers for ${detail.label}`}
+                                                                    value={selectedArrangementOtherFlowers}
+                                                                    onChange={(e) => handleArrangementOtherFlowersChange(detail.value, e.target.value)}
+                                                                    required
+                                                                />
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+
+                                            {arrangementDetails.some((detail) => (
+                                                (formData.preferredFlowersByArrangement?.[detail.value] || []).some((flower) => flower.value === 'Others')
+                                            )) && (
+                                                <div className="arrangement-other-panel mt-3">
+                                                    <div className="mt-1">
                                                         <label className="form-label fw-semibold mb-2">Flower Reference Photo (Optional)</label>
                                                         <input type="file" className="form-control bg-light border-0 py-2" accept=".jpg,.jpeg,.png" onChange={handleOtherFlowersImageChange} />
                                                         <div className="form-text small">JPG or PNG, max 5MB.</div>
@@ -1152,42 +1321,63 @@ const CustomOrderV2 = ({ user }) => {
                                                     </div>
                                                 </div>
                                             )}
+
                                         </div>
 
                                         <div className="col-12 mt-3 position-relative">
-                                            <label className="form-label fw-semibold">Color Palette & Theme Preference <span className="text-danger">*</span></label>
-                                            <Select
-                                                options={colorOptions}
-                                                formatOptionLabel={customColorOptionLabel}
-                                                placeholder="Select Color Theme..."
-                                                onChange={handleColorSelect}
-                                                value={colorOptions.find(option => option.value === formData.colorPreference) || null}
-                                                isClearable
-                                                styles={{
-                                                    control: (base) => ({
-                                                        ...base,
-                                                        border: (validated && !formData.colorPreference) ? '1px solid #dc3545' : '0',
-                                                        backgroundColor: '#f8f9fa',
-                                                        padding: '6px',
-                                                        borderRadius: '8px',
-                                                        boxShadow: 'none'
-                                                    })
-                                                }}
-                                            />
-                                            <input
-                                                type="text"
-                                                tabIndex={-1}
-                                                style={{ opacity: 0, height: 0, position: 'absolute', bottom: 10, left: 20 }}
-                                                value={formData.colorPreference || ''}
-                                                onChange={() => { }}
-                                                required
-                                            />
-                                            {validated && !formData.colorPreference && (
-                                                <div className="text-danger small mt-1">Please select a color theme.</div>
-                                            )}
-                                            {formData.colorPreference === 'Others' && (
-                                                <input type="text" name="otherColorPreference" className="form-control bg-light border-0 py-3 mt-2" placeholder="Please specify your color preference" value={formData.otherColorPreference} onChange={handleChange} required />
-                                            )}
+                                            <label className="form-label fw-semibold">Color Palette Per Arrangement <span className="text-danger">*</span></label>
+                                            <div className="d-grid gap-3">
+                                                {arrangementDetails.map((detail) => {
+                                                    const selectedColor = formData.colorPreferenceByArrangement?.[detail.value] || '';
+                                                    const otherColor = formData.otherColorPreferenceByArrangement?.[detail.value] || '';
+                                                    const hasColorError = validated && !selectedColor;
+
+                                                    return (
+                                                        <div key={`color-${detail.value}`} className="arrangement-other-panel">
+                                                            <div className="fw-semibold mb-2">{detail.label}</div>
+                                                            <Select
+                                                                options={colorOptions}
+                                                                formatOptionLabel={customColorOptionLabel}
+                                                                placeholder={`Select color palette for ${detail.label}...`}
+                                                                onChange={(selectedOption) => handleArrangementColorSelect(detail.value, selectedOption)}
+                                                                value={colorOptions.find((option) => option.value === selectedColor) || null}
+                                                                isClearable
+                                                                styles={{
+                                                                    control: (base) => ({
+                                                                        ...base,
+                                                                        border: hasColorError ? '1px solid #dc3545' : '0',
+                                                                        backgroundColor: '#f8f9fa',
+                                                                        padding: '6px',
+                                                                        borderRadius: '8px',
+                                                                        boxShadow: 'none'
+                                                                    })
+                                                                }}
+                                                            />
+                                                            <input
+                                                                type="text"
+                                                                tabIndex={-1}
+                                                                style={{ opacity: 0, height: 0, position: 'absolute', left: 0 }}
+                                                                value={selectedColor || ''}
+                                                                onChange={() => { }}
+                                                                required
+                                                            />
+                                                            {hasColorError && (
+                                                                <div className="text-danger small mt-1">Please select a color theme for this arrangement.</div>
+                                                            )}
+                                                            {selectedColor === 'Others' && (
+                                                                <input
+                                                                    type="text"
+                                                                    className="form-control bg-light border-0 py-3 mt-2"
+                                                                    placeholder={`Please specify color preference for ${detail.label}`}
+                                                                    value={otherColor}
+                                                                    onChange={(e) => handleArrangementOtherColorChange(detail.value, e.target.value)}
+                                                                    required
+                                                                />
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
                                         </div>
 
                                         <div className="col-12 mt-4">
@@ -1196,22 +1386,56 @@ const CustomOrderV2 = ({ user }) => {
                                         </div>
 
                                         <div className="col-12 mt-4">
-                                            <label className="form-label fw-semibold d-block">Inspiration Photo (Optional)</label>
-                                            <span className="text-muted small d-block mb-3">Upload a reference photo (JPG or PNG, max 5MB).</span>
+                                            <label className="form-label fw-semibold d-block">Inspiration Photo Per Arrangement (Optional)</label>
+                                            <span className="text-muted small d-block mb-3">Upload a separate reference photo for each selected arrangement (JPG or PNG, max 5MB).</span>
 
-                                            {imagePreview ? (
-                                                <div className="position-relative d-inline-block">
-                                                    <img src={imagePreview} alt="Inspiration Preview" className="rounded-3 border shadow-sm" style={{ maxHeight: '200px', maxWidth: '100%', objectFit: 'cover' }} />
-                                                    <button type="button" className="btn btn-sm btn-danger position-absolute top-0 end-0 m-2 rounded-circle" onClick={removeImage} style={{ width: '32px', height: '32px', padding: 0 }}><i className="fas fa-times"></i></button>
-                                                </div>
-                                            ) : (
-                                                <div className="p-5 text-center bg-light rounded-4 border" style={{ borderStyle: 'dashed !important', cursor: 'pointer' }} onClick={() => fileInputRef.current?.click()}>
-                                                    <i className="fas fa-cloud-upload-alt fs-1 text-muted mb-3"></i>
-                                                    <p className="mb-0 fw-semibold">Click to upload image</p>
-                                                    <input type="file" className="d-none" ref={fileInputRef} onChange={handleFileChange} accept=".jpg,.jpeg,.png" />
-                                                </div>
-                                            )}
-                                            {fileSizeError && <p className="text-danger small mt-2"><i className="fas fa-exclamation-circle me-1"></i>{fileSizeError}</p>}
+                                            <div className="d-grid gap-3">
+                                                {arrangementDetails.map((detail) => {
+                                                    const inspirationPreview = formData.inspirationImageByArrangement?.[detail.value] || null;
+                                                    const inspirationError = inspirationImageErrorsByArrangement?.[detail.value] || '';
+
+                                                    return (
+                                                        <div key={`inspiration-${detail.value}`} className="arrangement-other-panel">
+                                                            <div className="fw-semibold mb-2">{detail.label}</div>
+                                                            {inspirationPreview ? (
+                                                                <div className="position-relative d-inline-block">
+                                                                    <img
+                                                                        src={inspirationPreview}
+                                                                        alt={`${detail.label} inspiration preview`}
+                                                                        className="rounded-3 border shadow-sm"
+                                                                        style={{ maxHeight: '200px', maxWidth: '100%', objectFit: 'cover', cursor: 'zoom-in' }}
+                                                                        onClick={() => setArrangementPreviewOption({
+                                                                            img: inspirationPreview,
+                                                                            label: `${detail.label} Inspiration Photo`,
+                                                                            description: 'Arrangement-specific inspiration reference'
+                                                                        })}
+                                                                    />
+                                                                    <button
+                                                                        type="button"
+                                                                        className="btn btn-sm btn-danger position-absolute top-0 end-0 m-2 rounded-circle"
+                                                                        onClick={() => removeArrangementInspirationImage(detail.value)}
+                                                                        style={{ width: '32px', height: '32px', padding: 0 }}
+                                                                    >
+                                                                        <i className="fas fa-times"></i>
+                                                                    </button>
+                                                                </div>
+                                                            ) : (
+                                                                <label className="p-4 text-center bg-light rounded-4 border d-block" style={{ borderStyle: 'dashed', cursor: 'pointer' }}>
+                                                                    <i className="fas fa-cloud-upload-alt fs-3 text-muted mb-3"></i>
+                                                                    <p className="mb-0 fw-semibold">Upload image for {detail.label}</p>
+                                                                    <input
+                                                                        type="file"
+                                                                        className="d-none"
+                                                                        accept=".jpg,.jpeg,.png"
+                                                                        onChange={(e) => handleArrangementInspirationImageChange(detail.value, e.target.files?.[0])}
+                                                                    />
+                                                                </label>
+                                                            )}
+                                                            {inspirationError && <p className="text-danger small mt-2 mb-0"><i className="fas fa-exclamation-circle me-1"></i>{inspirationError}</p>}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
                                         </div>
                                     </div>
 
@@ -1298,49 +1522,70 @@ const CustomOrderV2 = ({ user }) => {
                                     <img src={otherArrangementImagePreview} alt="Arrangement reference" className="rounded-3 border" style={{ maxHeight: '120px', maxWidth: '100%', objectFit: 'cover' }} />
                                 </div>
                             )}
-                            {formData.selectedFlowers.length > 0 && (
-                                <div className="d-flex justify-content-between mb-2">
-                                    <span className="text-muted">Flowers:</span>
-                                    <span className="fw-semibold text-end" style={{ maxWidth: '60%' }}>
-                                        {formData.selectedFlowers.map(f => f.label).join(', ')}
-                                        {formData.otherFlowersText ? ` (${formData.otherFlowersText})` : ''}
-                                    </span>
-                                </div>
-                            )}
+                            {arrangementDetails.map((detail) => {
+                                const arrangementFlowers = formData.preferredFlowersByArrangement?.[detail.value] || [];
+                                const arrangementOtherFlowers = formData.otherFlowersTextByArrangement?.[detail.value] || '';
+                                if (!arrangementFlowers.length) return null;
+
+                                return (
+                                    <div key={`summary-flowers-${detail.value}`} className="d-flex justify-content-between mb-2">
+                                        <span className="text-muted">{detail.label} Flowers:</span>
+                                        <span className="fw-semibold text-end" style={{ maxWidth: '60%' }}>
+                                            {arrangementFlowers.map((flower) => flower.label).join(', ')}
+                                            {arrangementOtherFlowers ? ` (${arrangementOtherFlowers})` : ''}
+                                        </span>
+                                    </div>
+                                );
+                            })}
                             {otherFlowersImagePreview && (
                                 <div className="mt-2 text-center">
                                     <span className="text-muted d-block mb-1">Flower Reference:</span>
                                     <img src={otherFlowersImagePreview} alt="Flower reference" className="rounded-3 border" style={{ maxHeight: '120px', maxWidth: '100%', objectFit: 'cover' }} />
                                 </div>
                             )}
-                            {formData.colorPreference && (
-                                <div className="d-flex justify-content-between mb-2">
-                                    <span className="text-muted">Color Theme:</span>
-                                    <span className="fw-semibold text-end" style={{ maxWidth: '60%' }}>
-                                        {formData.colorPreference === 'Others' ? formData.otherColorPreference : formData.colorPreference}
-                                    </span>
-                                </div>
-                            )}
+                            {arrangementDetails.map((detail) => {
+                                const selectedColor = formData.colorPreferenceByArrangement?.[detail.value] || '';
+                                const otherColor = formData.otherColorPreferenceByArrangement?.[detail.value] || '';
+                                if (!selectedColor) return null;
+
+                                return (
+                                    <div key={`summary-color-${detail.value}`} className="d-flex justify-content-between mb-2">
+                                        <span className="text-muted">{detail.label} Color:</span>
+                                        <span className="fw-semibold text-end" style={{ maxWidth: '60%' }}>
+                                            {selectedColor === 'Others' ? otherColor : selectedColor}
+                                        </span>
+                                    </div>
+                                );
+                            })}
                             {formData.specialInstructions && (
                                 <div className="mb-2">
                                     <span className="text-muted d-block mb-1">Special Instructions:</span>
                                     <span className="fw-semibold" style={{ whiteSpace: 'pre-line' }}>{formData.specialInstructions}</span>
                                 </div>
                             )}
-                            {imagePreview && (
-                                <div className="mt-2 text-center">
-                                    <span className="text-muted d-block mb-1">Inspiration Photo:</span>
-                                    <img
-                                        src={imagePreview}
-                                        alt="Inspiration"
-                                        className="rounded-3 border"
-                                        style={{ maxHeight: '120px', maxWidth: '100%', objectFit: 'cover', cursor: 'pointer' }}
-                                        onClick={() => setShowImageZoom(true)}
-                                        title="Click to zoom"
-                                    />
-                                    <p className="text-muted small mt-1 mb-0"><i className="fas fa-search-plus me-1"></i>Click image to zoom</p>
-                                </div>
-                            )}
+                            {arrangementDetails.map((detail) => {
+                                const inspirationPreview = formData.inspirationImageByArrangement?.[detail.value] || null;
+                                if (!inspirationPreview) return null;
+
+                                return (
+                                    <div key={`summary-inspiration-${detail.value}`} className="mt-2 text-center">
+                                        <span className="text-muted d-block mb-1">{detail.label} Inspiration Photo:</span>
+                                        <img
+                                            src={inspirationPreview}
+                                            alt={`${detail.label} inspiration`}
+                                            className="rounded-3 border"
+                                            style={{ maxHeight: '120px', maxWidth: '100%', objectFit: 'cover', cursor: 'pointer' }}
+                                            onClick={() => setArrangementPreviewOption({
+                                                img: inspirationPreview,
+                                                label: `${detail.label} Inspiration Photo`,
+                                                description: 'Arrangement-specific inspiration reference'
+                                            })}
+                                            title="Click to zoom"
+                                        />
+                                        <p className="text-muted small mt-1 mb-0"><i className="fas fa-search-plus me-1"></i>Click image to zoom</p>
+                                    </div>
+                                );
+                            })}
                         </div>
 
                         <div className="d-flex gap-3">
@@ -1350,23 +1595,6 @@ const CustomOrderV2 = ({ user }) => {
                                 Submit Request
                             </button>
                         </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Image Zoom Modal */}
-            {showImageZoom && imagePreview && (
-                <div
-                    className="modal-overlay"
-                    style={{ zIndex: 1070, cursor: 'pointer' }}
-                    onClick={() => setShowImageZoom(false)}
-                >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', padding: '20px' }}>
-                        <img
-                            src={imagePreview}
-                            alt="Zoomed Inspiration"
-                            style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}
-                        />
                     </div>
                 </div>
             )}
@@ -1402,4 +1630,4 @@ const CustomOrderV2 = ({ user }) => {
     );
 };
 
-export default CustomOrderV2;
+export default CustomOrder;

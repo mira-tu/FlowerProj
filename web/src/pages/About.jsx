@@ -195,7 +195,7 @@ const About = () => {
                         <div className="col-md-6">
                             <div className="card h-100 border-0 rounded-4 overflow-hidden shadow hover-lift d-flex flex-column">
                                 <div className="img-wrapper" style={{ height: '300px' }}>
-                                    <Link to="/custom-order/request" className="d-block w-100 h-100">
+                                    <Link to="/custom-order" className="d-block w-100 h-100">
                                         <img
                                             src={aboutData.eventDecorationsImage || customOrderImg}
                                             className="w-100 h-100 object-fit-cover"
@@ -211,7 +211,7 @@ const About = () => {
                                         {aboutData.eventDecorationsDescription}
                                     </p>
                                     <div className="mt-auto">
-                                        <Link to="/custom-order/request" className="btn btn-pink rounded-pill px-4 fw-semibold w-50">Learn More</Link>
+                                        <Link to="/custom-order" className="btn btn-pink rounded-pill px-4 fw-semibold w-50">Learn More</Link>
                                     </div>
                                 </div>
                             </div>

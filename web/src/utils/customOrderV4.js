@@ -1179,6 +1179,8 @@ export const buildCustomOrderV4CartItem = ({
       flowers_per_arrangement: totalFlowers,
       total_flowers: totalFlowers,
     }],
+    customerPreferredFlowers: selectedFlowers,
+    customer_preferred_flowers: selectedFlowers,
     flowers: selectedFlowers.join(', '),
     selectedFlowers,
     flowerQuantities,

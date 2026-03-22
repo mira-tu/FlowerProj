@@ -33,6 +33,48 @@ const buildStatusTimestamps = (existingValue, status, reason = '') => {
     return next;
 };
 
+const summarizeCustomOrderQuoteBreakdown = (breakdown = {}, fallbackShipping = 0) => {
+    const rawLineItems = Array.isArray(breakdown?.line_items) ? breakdown.line_items : [];
+    const lineItems = rawLineItems.length
+        ? rawLineItems
+            .map((item, index) => {
+                const label = String(item?.product_name || item?.flowerName || item?.name || `Item ${index + 1}`).trim();
+                const hasQuantity = item?.quantity != null || item?.qty != null;
+                const quantity = hasQuantity ? (Number(item?.quantity ?? item?.qty) || 0) : 1;
+                const unitPrice = Number(item?.unit_price ?? item?.unitPrice ?? item?.price) || 0;
+                const explicitTotal = Number(item?.total ?? item?.line_total ?? item?.lineTotal);
+
+                return {
+                    key: `${label}-${index}`,
+                    label,
+                    quantity,
+                    unitPrice,
+                    total: Number.isFinite(explicitTotal) ? explicitTotal : (hasQuantity ? quantity * unitPrice : unitPrice),
+                    showQuantity: hasQuantity,
+                };
+            })
+            .filter((item) => item.label)
+        : Object.keys(breakdown?.quantity_per_flower || {}).map((flowerName, index) => {
+            const quantity = Number(breakdown?.quantity_per_flower?.[flowerName]) || 0;
+            const unitPrice = Number(breakdown?.price_per_flower?.[flowerName]) || 0;
+
+            return {
+                key: `${flowerName}-${index}`,
+                label: flowerName,
+                quantity,
+                unitPrice,
+                total: quantity * unitPrice,
+                showQuantity: true,
+            };
+        });
+
+    const subtotal = Number(breakdown?.computed_subtotal ?? breakdown?.subtotal ?? lineItems.reduce((sum, item) => sum + item.total, 0));
+    const shipping = Number(breakdown?.shipping_fee ?? breakdown?.shippingFee ?? fallbackShipping ?? 0);
+    const total = Number(breakdown?.computed_total ?? breakdown?.total ?? (subtotal + shipping));
+
+    return { lineItems, subtotal, shipping, total };
+};
+
 const Profile = ({ user, logout }) => {
     const navigate = useNavigate();
     const location = useLocation();
@@ -1119,35 +1161,23 @@ const Profile = ({ user, logout }) => {
 
                                 {order.type === 'booking' && order.status === 'quoted' && (order.quoteBreakdown || order.data?.quote_breakdown) && (() => {
                                     const breakdown = order.quoteBreakdown || order.data?.quote_breakdown;
-                                    const quantityMap = breakdown?.quantity_per_flower || {};
-                                    const priceMap = breakdown?.price_per_flower || {};
-                                    const lineItems = Object.keys(quantityMap).map((flowerName) => {
-                                        const quantity = Number(quantityMap[flowerName]) || 0;
-                                        const unitPrice = Number(priceMap[flowerName]) || 0;
-                                        return {
-                                            flowerName,
-                                            quantity,
-                                            unitPrice,
-                                            total: quantity * unitPrice,
-                                        };
-                                    });
-
-                                    const subtotal = Number(breakdown?.computed_subtotal ?? lineItems.reduce((sum, item) => sum + item.total, 0));
-                                    const shipping = Number(breakdown?.shipping_fee ?? order.shipping_fee ?? 0);
-                                    const total = Number(breakdown?.computed_total ?? (subtotal + shipping));
+                                    const { lineItems, subtotal, shipping, total } = summarizeCustomOrderQuoteBreakdown(breakdown, order.shipping_fee);
 
                                     return (
                                         <div className="mt-3 pt-3 border-top">
                                             <div className="small fw-bold mb-2" style={{ color: 'var(--shop-pink)' }}>Price Breakdown</div>
                                             {lineItems.length > 0 ? (
                                                 lineItems.map((item) => (
-                                                    <div key={item.flowerName} className="d-flex justify-content-between small mb-1">
-                                                        <span>{item.flowerName} ({item.quantity} x ₱{item.unitPrice.toLocaleString()})</span>
+                                                    <div key={item.key} className="d-flex justify-content-between small mb-1">
+                                                        <span>
+                                                            {item.label}
+                                                            {item.showQuantity ? ` (${item.quantity} x ₱${item.unitPrice.toLocaleString()})` : ''}
+                                                        </span>
                                                         <span className="fw-semibold">₱{item.total.toLocaleString()}</span>
                                                     </div>
                                                 ))
                                             ) : (
-                                                <div className="small text-muted mb-1">No per-flower lines available.</div>
+                                                <div className="small text-muted mb-1">No line-item breakdown available.</div>
                                             )}
                                             <div className="d-flex justify-content-between small border-top pt-2 mt-2">
                                                 <span>Subtotal</span>

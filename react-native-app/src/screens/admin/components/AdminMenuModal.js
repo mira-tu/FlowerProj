@@ -98,11 +98,6 @@ const AdminMenuModal = ({ visible, onClose, setActiveTab, currentUser, onLogoutP
               <Text style={styles.menuItemText}>Requests & Bookings</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('custom-order-v4'); onClose(); }}>
-              <Ionicons name="images-outline" size={20} color="#333" />
-              <Text style={styles.menuItemText}>Custom Order</Text>
-            </TouchableOpacity>
-
             <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('stock'); onClose(); }}>
               <Ionicons name="cube-outline" size={20} color="#333" />
               <Text style={styles.menuItemText}>Stock</Text>

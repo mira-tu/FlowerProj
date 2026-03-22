@@ -20,7 +20,6 @@ import LogoutConfirmModal from './admin/components/LogoutConfirmModal';
 import AboutTab from './admin/tabs/AboutTab';
 import CatalogueTab from './admin/tabs/CatalogueTab';
 import ContactTab from './admin/tabs/ContactTab';
-import CustomOrderV4Tab from './admin/tabs/CustomOrderV4Tab';
 import EmployeesTab from './admin/tabs/EmployeesTab';
 import MessagingTab from './admin/tabs/MessagingTab';
 import NotificationsTab from './admin/tabs/NotificationsTab';
@@ -191,7 +190,14 @@ const AdminDashboard = () => {
       case 'fees':
         return <DeliveryFeesTab />;
       case 'messaging':
-        return <MessagingTab customerToMessage={customerToMessage} setCustomerToMessage={setCustomerToMessage} />;
+        return (
+          <MessagingTab
+            customerToMessage={customerToMessage}
+            setCustomerToMessage={setCustomerToMessage}
+            setActiveTab={setActiveTab}
+            setFocusedEntityTarget={setFocusedEntityTarget}
+          />
+        );
       case 'notifications':
         return (
           <NotificationsTab
@@ -207,8 +213,6 @@ const AdminDashboard = () => {
         return <AboutTab />;
       case 'contact':
         return <ContactTab />;
-      case 'custom-order-v4':
-        return <CustomOrderV4Tab />;
       case 'employees':
         return <EmployeesTab />;
       default:

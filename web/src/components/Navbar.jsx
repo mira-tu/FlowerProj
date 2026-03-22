@@ -162,7 +162,6 @@ const Navbar = ({ cartCount, user, logout }) => {
                                 </a>
                                 <ul className="dropdown-menu services-menu border-0 shadow-sm">
                                     <li><Link className="dropdown-item" to="/custom-order">Custom Order</Link></li>
-                                    <li><Link className="dropdown-item" to="/custom-order-v2">Custom Order v2</Link></li>
                                     <li><Link className="dropdown-item" to="/customized">Customized Bouquets</Link></li>
                                 </ul>
                             </li>
@@ -234,7 +233,6 @@ const Navbar = ({ cartCount, user, logout }) => {
                         <li><Link to="/about" onClick={closeMenu}><i className="fa-solid fa-circle-info"></i> About</Link></li>
                         <li><Link to="/contact" onClick={closeMenu}><i className="fa-solid fa-envelope"></i> Contact</Link></li>
                         <li><Link to="/custom-order" onClick={closeMenu}><i className="fa-solid fa-calendar-check"></i> Custom Order</Link></li>
-                        <li><Link to="/custom-order-v2" onClick={closeMenu}><i className="fa-solid fa-calendar-check"></i> Custom Order v2</Link></li>
                         <li><Link to="/customized" onClick={closeMenu}><i className="fa-solid fa-wand-magic-sparkles"></i> Customized Bouquets</Link></li>
                     </ul>
 

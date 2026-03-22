@@ -41,6 +41,85 @@ const getBookingItems = (requestData = {}) => {
     return items.filter((item) => item && typeof item === 'object' && Object.keys(item).length);
 };
 
+const normalizeFreeTextList = (value) => {
+    if (!value || typeof value !== 'string') return [];
+    return value
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+};
+
+const normalizeFlowerNames = (value, otherFlowersText = '') => {
+    if (!value) return [];
+
+    const otherFlowerNames = normalizeFreeTextList(otherFlowersText);
+    const finalNames = [];
+
+    const pushName = (name) => {
+        const trimmed = String(name || '').trim();
+        if (!trimmed) return;
+
+        if (/^others?$/i.test(trimmed) && otherFlowerNames.length > 0) {
+            otherFlowerNames.forEach((entry) => {
+                if (!finalNames.includes(entry)) finalNames.push(entry);
+            });
+            return;
+        }
+
+        const cleanedName = trimmed.replace(/\s*\([^)]*\)\s*$/, '').trim();
+        if (cleanedName && !finalNames.includes(cleanedName)) {
+            finalNames.push(cleanedName);
+        }
+    };
+
+    if (Array.isArray(value)) {
+        value.forEach((entry) => {
+            if (!entry) return;
+            if (typeof entry === 'string') {
+                pushName(entry);
+            } else {
+                pushName(entry.label || entry.name || entry.value || '');
+            }
+        });
+        return finalNames;
+    }
+
+    if (typeof value === 'string') {
+        value
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter(Boolean)
+            .forEach(pushName);
+        return finalNames;
+    }
+
+    return finalNames;
+};
+
+const getBookingPreferredFlowerNames = (item = {}) => normalizeFlowerNames(
+    item.customerPreferredFlowers
+    ?? item.customer_preferred_flowers
+    ?? item.preferredFlowers
+    ?? item.preferred_flowers
+    ?? item.requestedFlowers
+    ?? item.requested_flowers
+    ?? item.selectedFlowers
+    ?? item.flowers
+    ?? null,
+    item.otherFlowersText || item.other_flowers_text || ''
+);
+
+const getArrangementSelectionPreferredFlowerNames = (selection = {}, fallbackOtherFlowersText = '') => normalizeFlowerNames(
+    selection.preferredFlowers
+    ?? selection.preferred_flowers
+    ?? selection.customerPreferredFlowers
+    ?? selection.customer_preferred_flowers
+    ?? selection.selectedFlowers
+    ?? selection.flowers
+    ?? null,
+    selection.otherFlowersText || selection.other_flowers_text || fallbackOtherFlowersText || ''
+);
+
 const formatBookingArrangement = (item = {}) => {
     const arrangementSelections = Array.isArray(item.arrangementSelections) ? item.arrangementSelections : [];
     if (arrangementSelections.length) {
@@ -62,23 +141,46 @@ const formatBookingArrangement = (item = {}) => {
 };
 
 const formatBookingFlowers = (item = {}) => {
-    if (Array.isArray(item.selectedFlowers) && item.selectedFlowers.length) {
-        let flowers = item.selectedFlowers.map((flower) => flower?.label || flower?.value || flower).filter(Boolean).join(', ');
-        if (flowers.includes('Others') && item.otherFlowersText) {
-            flowers = flowers.replace('Others', item.otherFlowersText);
+    const arrangementSelections = Array.isArray(item.arrangementSelections) ? item.arrangementSelections : [];
+    if (arrangementSelections.length) {
+        const perArrangementFlowers = arrangementSelections
+            .map((selection) => {
+                const names = getArrangementSelectionPreferredFlowerNames(
+                    selection,
+                    item.otherFlowersText || item.other_flowers_text || ''
+                );
+                const label = selection?.arrangement_label || selection?.arrangementLabel || selection?.arrangement_type || selection?.arrangementType;
+                if (!label || !names.length) return null;
+                return `${label}: ${names.join(', ')}`;
+            })
+            .filter(Boolean);
+
+        if (perArrangementFlowers.length) {
+            return perArrangementFlowers.join(' | ');
         }
-        return flowers;
     }
 
-    if (item.selectedFlowers) {
-        return String(item.selectedFlowers);
+    return getBookingPreferredFlowerNames(item).join(', ');
+};
+
+const formatBookingColors = (item = {}) => {
+    const arrangementSelections = Array.isArray(item.arrangementSelections) ? item.arrangementSelections : [];
+    if (arrangementSelections.length) {
+        const perArrangementColors = arrangementSelections
+            .map((selection) => {
+                const label = selection?.arrangement_label || selection?.arrangementLabel || selection?.arrangement_type || selection?.arrangementType;
+                const colorValue = selection?.colorPreference || selection?.color_preference || selection?.rawColorPreference || selection?.raw_color_preference;
+                if (!label || !colorValue) return null;
+                return `${label}: ${colorValue}`;
+            })
+            .filter(Boolean);
+
+        if (perArrangementColors.length) {
+            return perArrangementColors.join(' | ');
+        }
     }
 
-    if (item.flowers) {
-        return String(item.flowers);
-    }
-
-    return '';
+    return item.colorPreference === 'Others' ? item.otherColorPreference : item.colorPreference;
 };
 
 const buildBookingOverview = (requestData = {}) => {
@@ -95,6 +197,48 @@ const buildBookingOverview = (requestData = {}) => {
     };
 };
 
+const summarizeCustomOrderQuoteBreakdown = (breakdown = {}, fallbackShipping = 0) => {
+    const rawLineItems = Array.isArray(breakdown?.line_items) ? breakdown.line_items : [];
+    const lineItems = rawLineItems.length
+        ? rawLineItems
+            .map((item, index) => {
+                const label = String(item?.product_name || item?.flowerName || item?.name || `Item ${index + 1}`).trim();
+                const hasQuantity = item?.quantity != null || item?.qty != null;
+                const quantity = hasQuantity ? (Number(item?.quantity ?? item?.qty) || 0) : 1;
+                const unitPrice = Number(item?.unit_price ?? item?.unitPrice ?? item?.price) || 0;
+                const explicitTotal = Number(item?.total ?? item?.line_total ?? item?.lineTotal);
+
+                return {
+                    key: `${label}-${index}`,
+                    label,
+                    quantity,
+                    unitPrice,
+                    total: Number.isFinite(explicitTotal) ? explicitTotal : (hasQuantity ? quantity * unitPrice : unitPrice),
+                    showQuantity: hasQuantity,
+                };
+            })
+            .filter((item) => item.label)
+        : Object.keys(breakdown?.quantity_per_flower || {}).map((flowerName, index) => {
+            const quantity = Number(breakdown?.quantity_per_flower?.[flowerName]) || 0;
+            const unitPrice = Number(breakdown?.price_per_flower?.[flowerName]) || 0;
+
+            return {
+                key: `${flowerName}-${index}`,
+                label: flowerName,
+                quantity,
+                unitPrice,
+                total: quantity * unitPrice,
+                showQuantity: true,
+            };
+        });
+
+    const subtotal = Number(breakdown?.computed_subtotal ?? breakdown?.subtotal ?? lineItems.reduce((sum, item) => sum + item.total, 0));
+    const shipping = Number(breakdown?.shipping_fee ?? breakdown?.shippingFee ?? fallbackShipping ?? 0);
+    const total = Number(breakdown?.computed_total ?? breakdown?.total ?? (subtotal + shipping));
+
+    return { lineItems, subtotal, shipping, total };
+};
+
 const OrderBookingTracking = () => {
     const navigate = useNavigate();
     const { requestNumber } = useParams();
@@ -104,6 +248,8 @@ const OrderBookingTracking = () => {
     const [additionalFile, setAdditionalFile] = useState(null);
     const [uploadingReceipt, setUploadingReceipt] = useState(false);
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
+    const [feedbackMessage, setFeedbackMessage] = useState('');
+    const [submittingFeedback, setSubmittingFeedback] = useState(false);
 
     useEffect(() => {
         const fetchRequest = async () => {
@@ -347,6 +493,67 @@ const OrderBookingTracking = () => {
             month: 'long',
             day: 'numeric'
         });
+    };
+
+    const handleSendFeedback = async (event) => {
+        event.preventDefault();
+
+        const trimmedMessage = feedbackMessage.trim();
+        if (!trimmedMessage || !request?.id) {
+            return;
+        }
+
+        setSubmittingFeedback(true);
+        try {
+            const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+            if (sessionError) throw sessionError;
+
+            const senderId = session?.user?.id;
+            if (!senderId) {
+                throw new Error('You must be logged in to send feedback.');
+            }
+
+            const { data: staffUsers, error: staffError } = await supabase
+                .from('users')
+                .select('id')
+                .in('role', ['admin', 'employee'])
+                .order('role', { ascending: true })
+                .limit(1);
+
+            if (staffError) throw staffError;
+
+            const receiverId = staffUsers?.[0]?.id;
+            if (!receiverId) {
+                throw new Error('No admin or employee account is available to receive feedback right now.');
+            }
+
+            const requestLabel = request.request_number || request.id;
+            const formattedMessage = `[Custom Order #${requestLabel}] ${trimmedMessage}`;
+
+            const { error: insertError } = await supabase.from('messages').insert([{
+                sender_id: senderId,
+                receiver_id: receiverId,
+                message: formattedMessage,
+            }]);
+
+            if (insertError) throw insertError;
+
+            setFeedbackMessage('');
+            setInfoModal({
+                show: true,
+                title: 'Feedback Sent',
+                message: 'Your feedback was sent successfully. The admin can now see it in the Messages tab.',
+            });
+        } catch (error) {
+            console.error('Error sending custom order feedback:', error);
+            setInfoModal({
+                show: true,
+                title: 'Feedback Not Sent',
+                message: error.message || 'We could not send your feedback right now. Please try again.',
+            });
+        } finally {
+            setSubmittingFeedback(false);
+        }
     };
 
     const getRequestTypeLabel = () => {
@@ -666,7 +873,7 @@ const OrderBookingTracking = () => {
                                     </div>
                                     <div className="delivery-info-row">
                                         <div className="delivery-label">Phone</div>
-                                        <div className="delivery-value">{request.contact_number}</div>
+                                        <div className="delivery-value">{request.contact_number || request.requestData?.contactNumber || request.requestData?.contact_number || 'N/A'}</div>
                                     </div>
                                     <div className="delivery-info-row">
                                         <div className="delivery-label">Address</div>
@@ -722,7 +929,7 @@ const OrderBookingTracking = () => {
                                             {items.map((item, index) => {
                                                 const arrangement = formatBookingArrangement(item);
                                                 const flowers = formatBookingFlowers(item);
-                                                const colorTheme = item.colorPreference === 'Others' ? item.otherColorPreference : item.colorPreference;
+                                                const colorTheme = formatBookingColors(item);
                                                 const arrangementSelections = Array.isArray(item.arrangementSelections) ? item.arrangementSelections : [];
                                                 const totalArrangementQuantity = item.arrangementQuantity || (
                                                     arrangementSelections.length
@@ -741,8 +948,8 @@ const OrderBookingTracking = () => {
                                                         {(item.recipientName || item.recipient_name) && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Recipient</span><span className="fw-bold text-dark">{item.recipientName || item.recipient_name}</span></div>}
                                                         {item.occasion && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Occasion</span><span className="fw-bold text-dark">{item.occasion === 'Other' ? item.otherOccasion : item.occasion}</span></div>}
                                                         {request.delivery_method !== 'pickup' && (item.eventDate || item.event_date) && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Event Date</span><span className="fw-bold text-dark">{item.eventDate || item.event_date}</span></div>}
-                                                        {request.delivery_method !== 'pickup' && item.eventTime && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Event Time</span><span className="fw-bold text-dark">{item.eventTime}</span></div>}
-                                                        {request.delivery_method !== 'pickup' && item.venue && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Venue</span><span className="fw-bold text-dark">{item.venue}</span></div>}
+                                                        {request.delivery_method !== 'pickup' && (item.eventTime || item.event_time) && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Event Time</span><span className="fw-bold text-dark">{item.eventTime || item.event_time}</span></div>}
+                                                        {request.delivery_method !== 'pickup' && (item.venue || item.deliveryAddress || item.delivery_address) && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Venue</span><span className="fw-bold text-dark">{item.venue || item.deliveryAddress || item.delivery_address}</span></div>}
                                                         {arrangement && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Arrangement</span><span className="fw-bold text-dark">{arrangement}</span></div>}
                                                         {totalArrangementQuantity && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Quantity</span><span className="fw-bold text-dark">{totalArrangementQuantity}</span></div>}
                                                         {flowers && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Preferred Flowers</span><span className="fw-bold text-dark">{flowers}</span></div>}
@@ -803,31 +1010,22 @@ const OrderBookingTracking = () => {
 
                             {request.status === 'quoted' && request.requestData?.quote_breakdown && (() => {
                                 const breakdown = request.requestData.quote_breakdown;
-                                const quantityMap = breakdown?.quantity_per_flower || {};
-                                const priceMap = breakdown?.price_per_flower || {};
-                                const lineItems = Object.keys(quantityMap).map((flowerName) => {
-                                    const quantity = Number(quantityMap[flowerName]) || 0;
-                                    const unitPrice = Number(priceMap[flowerName]) || 0;
-                                    return {
-                                        flowerName,
-                                        quantity,
-                                        unitPrice,
-                                        total: quantity * unitPrice,
-                                    };
-                                });
-                                const subtotal = Number(breakdown?.computed_subtotal ?? lineItems.reduce((sum, item) => sum + item.total, 0));
-                                const shipping = Number(breakdown?.shipping_fee ?? request.shipping_fee ?? 0);
-                                const total = Number(breakdown?.computed_total ?? (subtotal + shipping));
+                                const { lineItems, subtotal, shipping, total } = summarizeCustomOrderQuoteBreakdown(breakdown, request.shipping_fee);
 
                                 return (
                                     <div className="mt-2 mb-3 p-3 rounded-3" style={{ background: '#fff5f8', border: '1px solid #fbcfe8' }}>
                                         <div className="text-muted small fw-medium mb-2">Quote Price Breakdown</div>
-                                        {lineItems.map((item) => (
-                                            <div key={item.flowerName} className="d-flex justify-content-between small mb-1">
-                                                <span>{item.flowerName} ({item.quantity} x ₱{item.unitPrice.toLocaleString()})</span>
+                                        {lineItems.length > 0 ? lineItems.map((item) => (
+                                            <div key={item.key} className="d-flex justify-content-between small mb-1">
+                                                <span>
+                                                    {item.label}
+                                                    {item.showQuantity ? ` (${item.quantity} x ₱${item.unitPrice.toLocaleString()})` : ''}
+                                                </span>
                                                 <span className="fw-semibold">₱{item.total.toLocaleString()}</span>
                                             </div>
-                                        ))}
+                                        )) : (
+                                            <div className="small text-muted mb-1">No line-item breakdown available.</div>
+                                        )}
                                         <div className="d-flex justify-content-between small border-top pt-2 mt-2">
                                             <span>Subtotal</span>
                                             <span className="fw-semibold">₱{subtotal.toLocaleString()}</span>
@@ -849,6 +1047,35 @@ const OrderBookingTracking = () => {
                                     <span className="text-muted fw-bold">Final Price</span>
                                     <span className="fs-5 fw-bold" style={{ color: 'var(--shop-pink)' }}>{request.finalPrice ? `₱${request.finalPrice.toLocaleString()}` : 'For Discussion'}</span>
                                 </div>
+                            </div>
+                            <div className="mt-4 pt-4 border-top">
+                                <div className="d-flex align-items-start gap-2 mb-2">
+                                    <i className="fas fa-comment-dots mt-1" style={{ color: 'var(--shop-pink)' }}></i>
+                                    <div>
+                                        <h6 className="fw-bold mb-1">Send Feedback</h6>
+                                        <p className="text-muted small mb-0">
+                                            Share a note, concern, or appreciation about this custom order. It will be sent to the admin Messages conversation for your account.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <form onSubmit={handleSendFeedback}>
+                                    <textarea
+                                        className="form-control"
+                                        rows="4"
+                                        value={feedbackMessage}
+                                        onChange={(event) => setFeedbackMessage(event.target.value)}
+                                        placeholder="Tell us what you think about this custom order..."
+                                    />
+                                    <button
+                                        type="submit"
+                                        className="btn w-100 mt-3"
+                                        style={{ background: 'var(--shop-pink)', color: 'white' }}
+                                        disabled={submittingFeedback || !feedbackMessage.trim()}
+                                    >
+                                        {submittingFeedback ? 'Sending...' : 'Send Feedback'}
+                                    </button>
+                                </form>
                             </div>
                         </div>
 

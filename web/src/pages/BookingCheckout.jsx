@@ -280,7 +280,13 @@ const BookingCheckout = ({ user }) => {
                     }
                 }
 
-                const { inspirationImageBase64: _inspirationImageBase64, deliveryAddress, ...cleanItem } = item;
+                const {
+                    inspirationImageBase64: _inspirationImageBase64,
+                    otherArrangementImageBase64: _otherArrangementImageBase64,
+                    otherFlowersImageBase64: _otherFlowersImageBase64,
+                    deliveryAddress,
+                    ...cleanItem
+                } = item;
 
                 return {
                     ...cleanItem,
@@ -401,7 +407,7 @@ const BookingCheckout = ({ user }) => {
                         </div>
                         <h3>No custom orders selected</h3>
                         <p>Please add custom orders to your cart first.</p>
-                        <Link to="/custom-order/request" className="btn-shop-now">Create a Custom Order</Link>
+                        <Link to="/custom-order" className="btn-shop-now">Create a Custom Order</Link>
                     </div>
                 </div>
             </div>

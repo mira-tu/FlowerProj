@@ -64,6 +64,8 @@ const getCustomizedTrackingItems = (request) => {
     }];
 };
 
+const getCustomOrderMessageThreadId = (requestId) => (requestId ? `request-${requestId}` : null);
+
 const OrderCustomizedTracking = ({ user }) => {
     const navigate = useNavigate();
     const { requestNumber } = useParams();
@@ -79,6 +81,8 @@ const OrderCustomizedTracking = ({ user }) => {
     const [gcashName, setGcashName] = useState('');
     const [gcashNumber, setGcashNumber] = useState('');
     const [submittingRefundDetails, setSubmittingRefundDetails] = useState(false);
+    const [feedbackMessage, setFeedbackMessage] = useState('');
+    const [submittingFeedback, setSubmittingFeedback] = useState(false);
 
     useEffect(() => {
         const generateTrackingSteps = (requestObj) => {
@@ -504,6 +508,61 @@ const OrderCustomizedTracking = ({ user }) => {
         }
     };
 
+    const handleSendFeedback = (event) => {
+        event.preventDefault();
+
+        const trimmedMessage = feedbackMessage.trim();
+        if (!trimmedMessage || !request?.id || !customOrderMessageThreadId) {
+            return;
+        }
+
+        setSubmittingFeedback(true);
+        try {
+            const message = {
+                id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                orderId: customOrderMessageThreadId,
+                sender: 'user',
+                senderName: user?.name || 'You',
+                message: trimmedMessage,
+                timestamp: new Date().toISOString(),
+                readByAdmin: false,
+                context: 'custom_order_feedback',
+            };
+
+            const allMessages = JSON.parse(localStorage.getItem('messages') || '[]');
+            localStorage.setItem('messages', JSON.stringify([...allMessages, message]));
+            window.dispatchEvent(new Event('messageUpdated'));
+
+            const notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
+            localStorage.setItem('notifications', JSON.stringify([{
+                id: `notif-${Date.now()}`,
+                type: 'message',
+                title: 'New Custom Order Feedback',
+                message: `A customer sent feedback for custom order #${request.request_number || request.id}.`,
+                icon: 'fa-comments',
+                timestamp: new Date().toISOString(),
+                read: false,
+                link: '/admin/dashboard',
+            }, ...notifications]));
+
+            setFeedbackMessage('');
+            setInfoModal({
+                show: true,
+                title: 'Feedback Sent',
+                message: 'Your feedback was sent successfully. Our team can review it from the existing order conversation.',
+            });
+        } catch (error) {
+            console.error('Error sending custom order feedback:', error);
+            setInfoModal({
+                show: true,
+                title: 'Feedback Not Sent',
+                message: error.message || 'We could not send your feedback right now. Please try again.',
+            });
+        } finally {
+            setSubmittingFeedback(false);
+        }
+    };
+
     const trackingSteps = getTrackingSteps();
     const timelineTimestampMap = buildTimelineTimestampMap({
         steps: trackingSteps,
@@ -530,6 +589,7 @@ const OrderCustomizedTracking = ({ user }) => {
         refundRequest,
     }) && ['completed', 'cancelled'].includes(String(request?.status || '').toLowerCase());
     const showRefundGcashForm = String(refundRequest?.status || '').toLowerCase() === 'approved';
+    const customOrderMessageThreadId = getCustomOrderMessageThreadId(request?.id);
 
     if (loading) {
         return (
@@ -941,6 +1001,36 @@ const OrderCustomizedTracking = ({ user }) => {
                                     + {customizedTrackingItems.length - 2} more item(s)
                                 </div>
                             )}
+
+                            <div className="mt-4 pt-3 border-top">
+                                <div className="d-flex align-items-start gap-2 mb-2">
+                                    <i className="fas fa-comment-dots mt-1" style={{ color: 'var(--shop-pink)' }}></i>
+                                    <div>
+                                        <h6 className="fw-bold mb-1">Send Feedback</h6>
+                                        <p className="text-muted small mb-0">
+                                            Share a note, concern, or appreciation about this custom order. It will be sent to the same order conversation used by My Orders.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <form onSubmit={handleSendFeedback}>
+                                    <textarea
+                                        className="form-control"
+                                        rows="4"
+                                        value={feedbackMessage}
+                                        onChange={(event) => setFeedbackMessage(event.target.value)}
+                                        placeholder="Tell us what you think about this custom order..."
+                                    />
+                                    <button
+                                        type="submit"
+                                        className="btn w-100 mt-3"
+                                        style={{ background: 'var(--shop-pink)', color: 'white' }}
+                                        disabled={submittingFeedback || !feedbackMessage.trim() || !customOrderMessageThreadId}
+                                    >
+                                        {submittingFeedback ? 'Sending...' : 'Send Feedback'}
+                                    </button>
+                                </form>
+                            </div>
 
                             <div className="mt-4 pt-3 border-top">
                                 <div className="d-flex justify-content-between mb-2 small text-muted">

@@ -16,13 +16,7 @@ const BookingCart = ({ user }) => {
         }
     }, [navigate, user]);
 
-    const getOriginPage = () => {
-        const firstItem = inquiryItems[0] || {};
-        if (firstItem.custom_order_version === 2 || firstItem.requestVariant === 'custom_order_v2' || firstItem.flow === 'custom_order_v2') {
-            return '/custom-order-v2';
-        }
-        return '/custom-order/request';
-    };
+    const getOriginPage = () => '/custom-order';
 
     const handleRemoveItem = (id) => {
         const updatedItems = inquiryItems.filter(item => item.id !== id);

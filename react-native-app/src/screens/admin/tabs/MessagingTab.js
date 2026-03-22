@@ -15,7 +15,19 @@ import { supabase } from '../../../config/supabase';
 import styles from '../../AdminDashboard.styles';
 import { formatMessageTimestamp } from '../adminHelpers';
 
-const MessagingTab = ({ customerToMessage, setCustomerToMessage }) => {
+const extractCustomOrderReference = (messageText = '') => {
+    const text = String(messageText || '');
+    const match = text.match(/^\[Custom Order #([^\]]+)\]\s*/i);
+    if (!match) return null;
+
+    return {
+        requestNumber: match[1].trim(),
+        label: `[Custom Order #${match[1].trim()}]`,
+        body: text.slice(match[0].length).trim(),
+    };
+};
+
+const MessagingTab = ({ customerToMessage, setCustomerToMessage, setActiveTab, setFocusedEntityTarget }) => {
     const [conversations, setConversations] = useState([]);
     const [selectedConversation, setSelectedConversation] = useState(null);
     const [messages, setMessages] = useState([]);
@@ -145,6 +157,35 @@ const MessagingTab = ({ customerToMessage, setCustomerToMessage }) => {
         }
     };
 
+    const handleOpenCustomOrderRequest = async (requestNumber) => {
+        const trimmedRequestNumber = String(requestNumber || '').trim();
+        if (!trimmedRequestNumber) return;
+
+        try {
+            const { data: requestRecord, error } = await supabase
+                .from('requests')
+                .select('id, type')
+                .eq('request_number', trimmedRequestNumber)
+                .single();
+
+            if (error) throw error;
+
+            if (requestRecord?.type !== 'booking') {
+                Alert.alert('Request Not Found', `Request #${trimmedRequestNumber} is not a custom order request.`);
+                return;
+            }
+
+            setFocusedEntityTarget?.({
+                entityType: 'request',
+                entityId: requestRecord.id,
+            });
+            setActiveTab?.('requests');
+        } catch (error) {
+            console.error('Error opening custom order request:', error);
+            Alert.alert('Request Not Found', `Could not open request #${trimmedRequestNumber}.`);
+        }
+    };
+
     const renderConversationItem = ({ item }) => {
         const isUnread = item.unreadCount > 0;
         return (
@@ -170,6 +211,10 @@ const MessagingTab = ({ customerToMessage, setCustomerToMessage }) => {
 
     const renderMessageItem = ({ item }) => {
         const isSentByMe = item.sender_id === currentUser.id;
+        const customOrderReference = extractCustomOrderReference(item.message);
+        const messageBody = customOrderReference?.body || item.message;
+        const messageTextStyle = isSentByMe ? styles.messageTextSent : styles.messageTextReceived;
+        const linkTextColor = isSentByMe ? '#FFFFFF' : '#DB2777';
         return (
             <View style={[styles.messageWrapper, isSentByMe ? styles.messageSentWrapper : styles.messageReceivedWrapper]}>
                 {!isSentByMe && (
@@ -178,7 +223,20 @@ const MessagingTab = ({ customerToMessage, setCustomerToMessage }) => {
                     </View>
                 )}
                 <View style={[styles.messageBubble, isSentByMe ? styles.messageSentBubble : styles.messageReceivedBubble]}>
-                    <Text style={isSentByMe ? styles.messageTextSent : styles.messageTextReceived}>{item.message}</Text>
+                    {customOrderReference ? (
+                        <View>
+                            <TouchableOpacity onPress={() => handleOpenCustomOrderRequest(customOrderReference.requestNumber)} activeOpacity={0.75}>
+                                <Text style={[messageTextStyle, { textDecorationLine: 'underline', marginBottom: messageBody ? 4 : 0, color: linkTextColor }]}>
+                                    {customOrderReference.label}
+                                </Text>
+                            </TouchableOpacity>
+                            {messageBody ? (
+                                <Text style={messageTextStyle}>{messageBody}</Text>
+                            ) : null}
+                        </View>
+                    ) : (
+                        <Text style={messageTextStyle}>{item.message}</Text>
+                    )}
                     <Text style={[styles.messageTime, isSentByMe ? styles.messageTimeSent : styles.messageTimeReceived]}>{formatMessageTimestamp(item.created_at)}</Text>
                 </View>
             </View>

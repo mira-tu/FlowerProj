@@ -862,7 +862,7 @@ serve(async (req) => {
 
         const { data: existingRequest, error: fetchError } = await adminClient
           .from("requests")
-          .select("data, user_id, request_number, status_timestamps")
+          .select("data, user_id, request_number, status, status_timestamps")
           .eq("id", id)
           .single();
 
@@ -870,12 +870,18 @@ serve(async (req) => {
           throw fetchError;
         }
 
+        const existingStatus = String(existingRequest?.status || "").trim().toLowerCase();
+        const shouldSetQuotedStatus = !existingStatus || existingStatus === "pending";
+
         const updatePayload: Record<string, unknown> = {
           final_price: finalItemPrice + finalShippingFee,
           shipping_fee: finalShippingFee,
-          status: "quoted",
-          status_timestamps: withStatusTimestamp(existingRequest?.status_timestamps, "quoted"),
         };
+
+        if (shouldSetQuotedStatus) {
+          updatePayload.status = "quoted";
+          updatePayload.status_timestamps = withStatusTimestamp(existingRequest?.status_timestamps, "quoted");
+        }
 
         if (quoteBreakdown) {
           const currentData = parseMaybeJson(existingRequest?.data);

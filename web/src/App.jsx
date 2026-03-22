@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, Component, useRef } from 'react'
-import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 
 // ErrorBoundary: catches unhandled React errors so the SPA never goes blank.
 // Instead of a white screen, users see a friendly retry button.
@@ -51,9 +51,7 @@ import Wishlist from './pages/Wishlist'
 import Cart from './pages/Cart'
 import BookingCheckout from './pages/BookingCheckout'
 import Customized from './pages/Customized'
-import CustomOrderV2 from './pages/CustomOrderV2'
-import CustomOrderV4 from './pages/CustomOrderV4'
-import CustomOrderV4Form from './pages/CustomOrderV4Form'
+import CustomOrder from './pages/CustomOrder'
 import ProductDetail from './pages/ProductDetail'
 import Checkout from './pages/Checkout'
 import OrderSuccess from './pages/OrderSuccess'
@@ -392,9 +390,9 @@ function AppContent() {
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/privacy" element={<Privacy />} />
-        <Route path="/custom-order" element={<CustomOrderV4 />} />
-        <Route path="/custom-order/request" element={<CustomOrderV4Form user={user} />} />
-        <Route path="/custom-order-v2" element={<CustomOrderV2 user={user} />} />
+        <Route path="/custom-order" element={<CustomOrder user={user} />} />
+        <Route path="/custom-order/request" element={<Navigate to="/custom-order" replace />} />
+        <Route path="/custom-order-v2" element={<Navigate to="/custom-order" replace />} />
         <Route path="/customized" element={<Customized addToCart={addToCart} />} />
         <Route path="/product/:productId" element={<ProductDetail addToCart={addToCart} user={user} />} />
         <Route path="/checkout" element={<Checkout setCart={setCart} user={user} />} />
