@@ -20,7 +20,15 @@ const Footer = () => {
                     <div className="col-md-4 mb-4">
                         <h5 className="footer-title">Follow Us</h5>
                         <div>
-                            <a href="#" className="social-icon"><i className="fab fa-facebook"></i></a>
+                            <a
+                                href="https://www.facebook.com/profile.php?id=100064187910950"
+                                className="social-icon"
+                                target="_blank"
+                                rel="noreferrer"
+                                aria-label="Visit our Facebook page"
+                            >
+                                <i className="fab fa-facebook"></i>
+                            </a>
                         </div>
                     </div>
                 </div>

@@ -171,7 +171,7 @@ const Navbar = ({ cartCount, user, logout }) => {
                                 <i className="fa-regular fa-heart"></i>
                             </Link>
 
-                            <Link to="/profile" state={{ activeMenu: 'messages' }} className="btn-icon">
+                            <Link to="/profile?menu=messages" className="btn-icon">
                                 <i className="fa-regular fa-message"></i>
                                 {unreadMessageCount > 0 && (
                                     <span className="badge-count">{unreadMessageCount > 9 ? '9+' : unreadMessageCount}</span>
@@ -243,7 +243,7 @@ const Navbar = ({ cartCount, user, logout }) => {
                             <i className="fa-regular fa-heart"></i>
                             <span>Wishlist</span>
                         </Link>
-                        <Link to="/profile" state={{ activeMenu: 'messages' }} className="mobile-icon-btn" onClick={closeMenu}>
+                        <Link to="/profile?menu=messages" className="mobile-icon-btn" onClick={closeMenu}>
                             <i className="fa-regular fa-message"></i>
                             <span>Messages</span>
                             {unreadMessageCount > 0 && <span className="mobile-badge">{unreadMessageCount > 9 ? '9+' : unreadMessageCount}</span>}

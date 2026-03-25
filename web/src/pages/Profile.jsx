@@ -75,6 +75,14 @@ const summarizeCustomOrderQuoteBreakdown = (breakdown = {}, fallbackShipping = 0
     return { lineItems, subtotal, shipping, total };
 };
 
+const PROFILE_MENUS = ['orders', 'messages', 'addresses', 'settings'];
+
+const isValidProfileMenu = (menu) => PROFILE_MENUS.includes(menu);
+
+const buildProfileMenuPath = (menu = 'orders') => (
+    menu === 'orders' ? '/profile' : `/profile?menu=${menu}`
+);
+
 const Profile = ({ user, logout }) => {
     const navigate = useNavigate();
     const location = useLocation();
@@ -104,11 +112,28 @@ const Profile = ({ user, logout }) => {
 
     useEffect(() => {
         const params = new URLSearchParams(location.search);
-        const menu = params.get('menu');
-        if (menu && ['orders', 'messages', 'addresses', 'settings'].includes(menu)) {
-            setActiveMenu(menu);
+        const menuFromQuery = params.get('menu');
+        const menuFromState = location.state?.activeMenu;
+
+        if (isValidProfileMenu(menuFromQuery)) {
+            setActiveMenu(menuFromQuery);
+            return;
         }
-    }, [location.search]);
+
+        if (location.pathname === '/profile' && isValidProfileMenu(menuFromState)) {
+            navigate(buildProfileMenuPath(menuFromState), { replace: true, state: null });
+            return;
+        }
+
+        setActiveMenu('orders');
+    }, [location.pathname, location.search, location.state, navigate]);
+
+    const openProfileMenu = (menuId) => {
+        if (!isValidProfileMenu(menuId)) return;
+
+        setActiveMenu(menuId);
+        navigate(buildProfileMenuPath(menuId), { replace: true });
+    };
 
     const menuItems = [
         { id: 'orders', label: 'My Orders', icon: 'fa-box' },
@@ -944,7 +969,7 @@ const Profile = ({ user, logout }) => {
             message: `To request an adjustment for request #${order.request_number}, please proceed to the "Messages" tab to chat with our staff.`,
             confirmText: 'Go to Messages',
             onConfirm: () => {
-                setActiveMenu('messages');
+                openProfileMenu('messages');
                 setModalContent(null);
             }
         });
@@ -1583,7 +1608,7 @@ const Profile = ({ user, logout }) => {
                     <button
                         className="btn mt-3"
                         style={{ background: 'var(--shop-pink)', color: 'white' }}
-                        onClick={() => setActiveMenu('settings')}
+                        onClick={() => openProfileMenu('settings')}
                     >
                         Go to Account Settings
                     </button>
@@ -1689,7 +1714,7 @@ const Profile = ({ user, logout }) => {
                                             if (item.link) {
                                                 navigate(item.link);
                                             } else {
-                                                setActiveMenu(item.id);
+                                                openProfileMenu(item.id);
                                             }
                                         }}
                                         style={{ cursor: 'pointer' }}
