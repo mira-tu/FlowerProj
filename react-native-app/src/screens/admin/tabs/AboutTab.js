@@ -15,27 +15,87 @@ import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../../../config/supabase';
 import styles from '../../AdminDashboard.styles';
 
-const AboutTab = () => {
-  const [aboutData, setAboutData] = useState({
-    story: '',
-    about_description: '',
-    promise: '',
-    ownerQuote: '',
-    ownerImage: null,
-    ourShopImage: null,
-    customBouquetsDescription: '',
-    customBouquetsImage: null,
-    eventDecorationsDescription: '',
-    eventDecorationsImage: null,
-    specialOrdersDescription: '',
-    specialOrdersImage: null,
-    promises_responsibly_sourced_description: '',
-    promises_responsibly_sourced_image: null,
-    promises_crafted_by_experts_description: '',
-    promises_crafted_by_experts_image: null,
-    promises_caring_for_moments_description: '',
-    promises_caring_for_moments_image: null,
+const ABOUT_CONTENT_KEYS = [
+  'about_story', 'about_description', 'about_promise', 'about_owner_quote', 'about_owner_image', 'about_our_shop_img',
+  'about_custom_bouquets_desc', 'about_custom_bouquets_img',
+  'about_event_decorations_desc', 'about_event_decorations_img',
+  'about_special_orders_desc', 'about_special_orders_img',
+  'promises_responsibly_sourced_description', 'promises_responsibly_sourced_image',
+  'promises_crafted_by_experts_description', 'promises_crafted_by_experts_image',
+  'promises_caring_for_moments_description', 'promises_caring_for_moments_image'
+];
+
+const createDefaultAboutData = () => ({
+  story: '',
+  about_description: '',
+  promise: '',
+  ownerQuote: '',
+  ownerImage: null,
+  ourShopImage: null,
+  customBouquetsDescription: '',
+  customBouquetsImage: null,
+  eventDecorationsDescription: '',
+  eventDecorationsImage: null,
+  specialOrdersDescription: '',
+  specialOrdersImage: null,
+  promises_responsibly_sourced_description: '',
+  promises_responsibly_sourced_image: null,
+  promises_crafted_by_experts_description: '',
+  promises_crafted_by_experts_image: null,
+  promises_caring_for_moments_description: '',
+  promises_caring_for_moments_image: null,
+});
+
+const mapAppContentRowsToAboutData = (rows = []) => {
+  const normalizedRows = [...rows].sort((left, right) => {
+    const leftUpdatedAt = Date.parse(left?.updated_at || '') || 0;
+    const rightUpdatedAt = Date.parse(right?.updated_at || '') || 0;
+
+    if (rightUpdatedAt !== leftUpdatedAt) {
+      return rightUpdatedAt - leftUpdatedAt;
+    }
+
+    return Number(right?.id || 0) - Number(left?.id || 0);
   });
+
+  const latestRowsByKey = new Map();
+  normalizedRows.forEach((row) => {
+    if (!latestRowsByKey.has(row.key)) {
+      latestRowsByKey.set(row.key, row.value);
+    }
+  });
+
+  const info = createDefaultAboutData();
+  const assign = (key, field) => {
+    if (latestRowsByKey.has(key)) {
+      info[field] = latestRowsByKey.get(key);
+    }
+  };
+
+  assign('about_story', 'story');
+  assign('about_description', 'about_description');
+  assign('about_promise', 'promise');
+  assign('about_owner_quote', 'ownerQuote');
+  assign('about_owner_image', 'ownerImage');
+  assign('about_our_shop_img', 'ourShopImage');
+  assign('about_custom_bouquets_desc', 'customBouquetsDescription');
+  assign('about_custom_bouquets_img', 'customBouquetsImage');
+  assign('about_event_decorations_desc', 'eventDecorationsDescription');
+  assign('about_event_decorations_img', 'eventDecorationsImage');
+  assign('about_special_orders_desc', 'specialOrdersDescription');
+  assign('about_special_orders_img', 'specialOrdersImage');
+  assign('promises_responsibly_sourced_description', 'promises_responsibly_sourced_description');
+  assign('promises_responsibly_sourced_image', 'promises_responsibly_sourced_image');
+  assign('promises_crafted_by_experts_description', 'promises_crafted_by_experts_description');
+  assign('promises_crafted_by_experts_image', 'promises_crafted_by_experts_image');
+  assign('promises_caring_for_moments_description', 'promises_caring_for_moments_description');
+  assign('promises_caring_for_moments_image', 'promises_caring_for_moments_image');
+
+  return info;
+};
+
+const AboutTab = () => {
+  const [aboutData, setAboutData] = useState(createDefaultAboutData);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -44,49 +104,11 @@ const AboutTab = () => {
     try {
       const { data, error } = await supabase
         .from('app_content')
-        .select('key, value')
-        .in('key', [
-          'about_story', 'about_description', 'about_promise', 'about_owner_quote', 'about_owner_image', 'about_our_shop_img',
-          'about_custom_bouquets_desc', 'about_custom_bouquets_img',
-          'about_event_decorations_desc', 'about_event_decorations_img',
-          'about_special_orders_desc', 'about_special_orders_img',
-          'promises_responsibly_sourced_description', 'promises_responsibly_sourced_image',
-          'promises_crafted_by_experts_description', 'promises_crafted_by_experts_image',
-          'promises_caring_for_moments_description', 'promises_caring_for_moments_image'
-        ]);
+        .select('id, key, value, updated_at')
+        .in('key', ABOUT_CONTENT_KEYS);
 
       if (error) throw error;
-
-      const info = data.reduce((acc, { key, value }) => {
-        if (key === 'about_story') acc.story = value;
-        if (key === 'about_description') acc.about_description = value;
-        if (key === 'about_promise') acc.promise = value;
-        if (key === 'about_owner_quote') acc.ownerQuote = value;
-        if (key === 'about_owner_image') acc.ownerImage = value;
-        if (key === 'about_our_shop_img') acc.ourShopImage = value;
-        if (key === 'about_custom_bouquets_desc') acc.customBouquetsDescription = value;
-        if (key === 'about_custom_bouquets_img') acc.customBouquetsImage = value;
-        if (key === 'about_event_decorations_desc') acc.eventDecorationsDescription = value;
-        if (key === 'about_event_decorations_img') acc.eventDecorationsImage = value;
-        if (key === 'about_special_orders_desc') acc.specialOrdersDescription = value;
-        if (key === 'about_special_orders_img') acc.specialOrdersImage = value;
-        if (key === 'promises_responsibly_sourced_description') acc.promises_responsibly_sourced_description = value;
-        if (key === 'promises_responsibly_sourced_image') acc.promises_responsibly_sourced_image = value;
-        if (key === 'promises_crafted_by_experts_description') acc.promises_crafted_by_experts_description = value;
-        if (key === 'promises_crafted_by_experts_image') acc.promises_crafted_by_experts_image = value;
-        if (key === 'promises_caring_for_moments_description') acc.promises_caring_for_moments_description = value;
-        if (key === 'promises_caring_for_moments_image') acc.promises_caring_for_moments_image = value;
-        return acc;
-      }, {
-        story: '', about_description: '', promise: '', ownerQuote: '', ownerImage: null, ourShopImage: null,
-        customBouquetsDescription: '', customBouquetsImage: null,
-        eventDecorationsDescription: '', eventDecorationsImage: null,
-        specialOrdersDescription: '', specialOrdersImage: null,
-        promises_responsibly_sourced_description: '', promises_responsibly_sourced_image: null,
-        promises_crafted_by_experts_description: '', promises_crafted_by_experts_image: null,
-        promises_caring_for_moments_description: '', promises_caring_for_moments_image: null,
-      });
-      setAboutData(info);
+      setAboutData(mapAppContentRowsToAboutData(data || []));
     } catch (error) {
       Alert.alert('Error fetching about data', error.message);
     } finally {
@@ -121,6 +143,7 @@ const AboutTab = () => {
     setIsSaving(true);
     try {
       let updates = [];
+      const nowIso = new Date().toISOString();
       const textFields = {
         about_story: aboutData.story,
         about_description: aboutData.about_description,
@@ -135,7 +158,7 @@ const AboutTab = () => {
       };
 
       for (const [key, value] of Object.entries(textFields)) {
-        updates.push({ key, value });
+        updates.push({ key, value, updated_at: nowIso });
       }
 
       const handleImageUpload = async (imageAsset, fileName, keyName) => {
@@ -154,7 +177,7 @@ const AboutTab = () => {
           if (!urlData) throw new Error(`Could not get public URL for ${fileName}.`);
 
           const imageUrl = `${urlData.publicUrl}?t=${new Date().getTime()}`;
-          updates.push({ key: keyName, value: imageUrl });
+          updates.push({ key: keyName, value: imageUrl, updated_at: nowIso });
         }
       };
 
