@@ -16,6 +16,7 @@ const Signup = () => {
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const [loading, setLoading] = useState(false);
+    const emailRedirectTo = `${window.location.origin}/login`;
 
     const handleChange = (e) => {
         setFormData({
@@ -48,7 +49,7 @@ const Signup = () => {
                 email: formData.email,
                 password: formData.password,
                 options: {
-                    emailRedirectTo: 'https://flowershop-yess.up.railway.app/login',
+                    emailRedirectTo,
                     data: {
                         name: `${formData.firstName} ${formData.lastName}` // Store full name in user metadata
                     }

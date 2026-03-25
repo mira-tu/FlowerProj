@@ -15,6 +15,7 @@ const Login = ({ onLogin }) => {
     const [resetLoading, setResetLoading] = useState(false);
     const [resetMessage, setResetMessage] = useState('');
     const [resetError, setResetError] = useState('');
+    const resetRedirectTo = `${window.location.origin}/reset-password`;
 
     const handleLogin = async (e) => {
         e.preventDefault();
@@ -79,7 +80,7 @@ const Login = ({ onLogin }) => {
 
         try {
             const { error: resetError } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-                redirectTo: 'https://flowershop-yess.up.railway.app/reset-password',
+                redirectTo: resetRedirectTo,
             });
 
             if (resetError) {

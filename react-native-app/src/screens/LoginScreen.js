@@ -11,6 +11,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { authAPI } from '../config/api';
+import AdminHeroGraphic from '../components/AdminHeroGraphic';
 
 const LoginScreen = () => {
   const navigation = useNavigation();
@@ -124,6 +125,10 @@ const LoginScreen = () => {
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
         <View style={styles.logoContainer}>
+          <AdminHeroGraphic />
+          <View style={styles.portalBadge}>
+            <Text style={styles.portalBadgeText}>Admin Portal</Text>
+          </View>
           <Text style={styles.shopName}>Jocerry's Flower Shop</Text>
         </View>
         <Text style={styles.subtitle}>Sign in with an admin or employee account.</Text>
@@ -187,12 +192,29 @@ const styles = StyleSheet.create({
   },
   logoContainer: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 18,
+  },
+  portalBadge: {
+    backgroundColor: '#ffe4f0',
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    marginTop: -12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#f9a8d4',
+  },
+  portalBadgeText: {
+    color: '#9d174d',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
   },
   shopName: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#ec4899',
+    color: '#be185d',
     textAlign: 'center',
     marginBottom: 8,
   },
@@ -208,6 +230,7 @@ const styles = StyleSheet.create({
     color: '#6c757d',
     textAlign: 'center',
     marginBottom: 32,
+    paddingHorizontal: 10,
   },
   input: {
     borderWidth: 1,
