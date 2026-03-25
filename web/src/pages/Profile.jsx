@@ -236,6 +236,8 @@ const Profile = ({ user, logout }) => {
 
     const [showCancelModal, setShowCancelModal] = useState(false);
     const [orderToCancel, setOrderToCancel] = useState(null);
+    const [cancelReason, setCancelReason] = useState('');
+    const [cancelReasonError, setCancelReasonError] = useState('');
     const [showWaitingModal, setShowWaitingModal] = useState(false);
     const [modalContent, setModalContent] = useState(null);
     const [profileForm, setProfileForm] = useState({
@@ -774,17 +776,30 @@ const Profile = ({ user, logout }) => {
         }
     };
 
+    const closeCancelModal = () => {
+        setShowCancelModal(false);
+        setOrderToCancel(null);
+        setCancelReason('');
+        setCancelReasonError('');
+    };
+
     const handleCancelClick = (order) => {
         setOrderToCancel(order);
+        setCancelReason('');
+        setCancelReasonError('');
         setShowCancelModal(true);
     };
 
     const handleConfirmCancel = async () => {
         if (!orderToCancel) return;
 
-        try {
-            const customerCancellationReason = 'Cancelled by customer';
+        const trimmedCancelReason = cancelReason.trim();
+        if (!trimmedCancelReason) {
+            setCancelReasonError('Please tell us why you want to cancel this item.');
+            return;
+        }
 
+        try {
             if (orderToCancel.type) { // It's a request (booking, special_order, customized)
                 const requestId = orderToCancel.request_id || (orderToCancel.isRequest ? orderToCancel.id?.replace?.(/^request-/, '') : null) || orderToCancel.id;
                 const { data: currentRequest, error: requestFetchError } = await supabase
@@ -804,11 +819,11 @@ const Profile = ({ user, logout }) => {
                     .from('requests')
                     .update({
                         status: 'cancelled',
-                        cancellation_reason: customerCancellationReason,
-                        status_timestamps: buildStatusTimestamps(currentRequest?.status_timestamps, 'cancelled', customerCancellationReason),
+                        cancellation_reason: trimmedCancelReason,
+                        status_timestamps: buildStatusTimestamps(currentRequest?.status_timestamps, 'cancelled', trimmedCancelReason),
                         data: {
                             ...requestData,
-                            cancellation_reason: customerCancellationReason,
+                            cancellation_reason: trimmedCancelReason,
                             cancelled_at: new Date().toISOString(),
                         },
                     })
@@ -837,8 +852,8 @@ const Profile = ({ user, logout }) => {
                         .from('orders')
                         .update({
                             status: 'cancelled',
-                            cancellation_reason: customerCancellationReason,
-                            status_timestamps: buildStatusTimestamps(currentOrder?.status_timestamps, 'cancelled', customerCancellationReason),
+                            cancellation_reason: trimmedCancelReason,
+                            status_timestamps: buildStatusTimestamps(currentOrder?.status_timestamps, 'cancelled', trimmedCancelReason),
                         })
                         .eq('id', orderToCancel.id);
 
@@ -865,8 +880,8 @@ const Profile = ({ user, logout }) => {
                     .from('orders')
                     .update({
                         status: 'cancelled',
-                        cancellation_reason: customerCancellationReason,
-                        status_timestamps: buildStatusTimestamps(currentOrder?.status_timestamps, 'cancelled', customerCancellationReason),
+                        cancellation_reason: trimmedCancelReason,
+                        status_timestamps: buildStatusTimestamps(currentOrder?.status_timestamps, 'cancelled', trimmedCancelReason),
                     })
                     .eq('id', orderToCancel.id);
 
@@ -901,8 +916,7 @@ const Profile = ({ user, logout }) => {
 
             // Reload orders from Supabase
             loadOrders(user.id);
-            setShowCancelModal(false);
-            setOrderToCancel(null);
+            closeCancelModal();
         } catch (error) {
             console.error('Error during cancellation:', error);
             setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel. Please try again.' });
@@ -1800,10 +1814,7 @@ const Profile = ({ user, logout }) => {
             {showCancelModal && (
                 <div
                     className="modal-overlay"
-                    onClick={() => {
-                        setShowCancelModal(false);
-                        setOrderToCancel(null);
-                    }}
+                    onClick={closeCancelModal}
                     style={{
                         position: 'fixed',
                         top: 0,
@@ -1837,12 +1848,38 @@ const Profile = ({ user, logout }) => {
                         <p style={{ marginBottom: '1.5rem', color: '#4b5563' }}>
                             Are you sure you want to cancel this {orderToCancel?.type ? 'request' : 'order'}? This action cannot be undone.
                         </p>
+                        <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
+                            <label htmlFor="cancelReasonProfile" style={{ display: 'block', fontWeight: '600', color: '#333', marginBottom: '0.5rem' }}>
+                                Reason for cancellation
+                            </label>
+                            <textarea
+                                id="cancelReasonProfile"
+                                value={cancelReason}
+                                onChange={(e) => {
+                                    setCancelReason(e.target.value);
+                                    if (cancelReasonError) setCancelReasonError('');
+                                }}
+                                placeholder="Tell us why you want to cancel."
+                                rows={4}
+                                style={{
+                                    width: '100%',
+                                    borderRadius: '0.75rem',
+                                    border: `1px solid ${cancelReasonError ? '#dc3545' : '#d1d5db'}`,
+                                    padding: '0.75rem 0.9rem',
+                                    resize: 'vertical',
+                                    outline: 'none',
+                                    color: '#111827'
+                                }}
+                            />
+                            {cancelReasonError && (
+                                <div style={{ marginTop: '0.5rem', color: '#dc3545', fontSize: '0.9rem' }}>
+                                    {cancelReasonError}
+                                </div>
+                            )}
+                        </div>
                         <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
                             <button
-                                onClick={() => {
-                                    setShowCancelModal(false);
-                                    setOrderToCancel(null);
-                                }}
+                                onClick={closeCancelModal}
                                 style={{
                                     backgroundColor: 'transparent',
                                     color: '#4b5563',

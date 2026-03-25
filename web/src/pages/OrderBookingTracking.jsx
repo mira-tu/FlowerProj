@@ -810,7 +810,7 @@ const OrderBookingTracking = () => {
                                             <div className="timeline-content">
                                                 <h5>Request {request.status === 'declined' ? 'Declined' : 'Cancelled'}</h5>
                                                 <p>{request.status === 'declined' ? 'Your request could not be fulfilled.' : 'You have cancelled this request.'}</p>
-                                                <p className="mb-1"><strong>Reason:</strong> {cancellationReason || (request.status === 'cancelled' ? 'Cancelled by customer' : 'No decline feedback provided.')}</p>
+                                                <p className="mb-1"><strong>Reason:</strong> {cancellationReason || (request.status === 'cancelled' ? 'No cancellation reason provided.' : 'No decline feedback provided.')}</p>
                                                 <div className="timeline-date">{new Date(request.date).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
                                             </div>
                                         </div>

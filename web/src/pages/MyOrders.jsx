@@ -43,12 +43,40 @@ const getCustomizedPreviewItems = (order) => {
     }];
 };
 
+const parseJsonObject = (value) => {
+    if (!value) return {};
+    if (typeof value === 'string') {
+        try {
+            return JSON.parse(value);
+        } catch (error) {
+            return {};
+        }
+    }
+    return typeof value === 'object' ? value : {};
+};
+
+const buildStatusTimestamps = (existingValue, status, reason = '') => {
+    const next = {
+        ...parseJsonObject(existingValue),
+        [status]: new Date().toISOString(),
+    };
+
+    if (status === 'cancelled' && reason) {
+        next.cancellation_reason = reason;
+        next.cancel_reason = reason;
+    }
+
+    return next;
+};
+
 const MyOrders = () => {
     const navigate = useNavigate();
     const [activeOrderTab, setActiveOrderTab] = useState('all');
     const [orders, setOrders] = useState([]);
     const [showCancelModal, setShowCancelModal] = useState(false);
     const [orderToCancel, setOrderToCancel] = useState(null);
+    const [cancelReason, setCancelReason] = useState('');
+    const [cancelReasonError, setCancelReasonError] = useState('');
     const [showWaitingModal, setShowWaitingModal] = useState(false);
     const [showChatModal, setShowChatModal] = useState(false);
     const [selectedOrderForChat, setSelectedOrderForChat] = useState(null);
@@ -357,36 +385,117 @@ const MyOrders = () => {
         }
     };
 
+    const closeCancelModal = () => {
+        setShowCancelModal(false);
+        setOrderToCancel(null);
+        setCancelReason('');
+        setCancelReasonError('');
+    };
+
     const handleCancelClick = (order) => {
         setOrderToCancel(order);
+        setCancelReason('');
+        setCancelReasonError('');
         setShowCancelModal(true);
     };
 
     const handleConfirmCancel = async () => {
         if (!orderToCancel) return;
 
-        try {
-            if (orderToCancel.isRequest) {
-                // Cancel request via Supabase
-                const { error } = await supabase
-                    .from('requests')
-                    .update({ status: 'cancelled' })
-                    .eq('id', orderToCancel.request_id);
+        const trimmedCancelReason = cancelReason.trim();
+        if (!trimmedCancelReason) {
+            setCancelReasonError('Please tell us why you want to cancel this item.');
+            return;
+        }
 
-                if (error) {
-                    console.error('Error cancelling request:', error);
+        try {
+            if (orderToCancel.type) {
+                const requestId = orderToCancel.request_id || (orderToCancel.isRequest ? orderToCancel.id?.replace?.(/^request-/, '') : null) || orderToCancel.id;
+                const { data: currentRequest, error: requestFetchError } = await supabase
+                    .from('requests')
+                    .select('data, status_timestamps')
+                    .eq('id', requestId)
+                    .single();
+
+                if (requestFetchError) {
+                    console.error('Error loading request before cancellation:', requestFetchError);
                     setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel request. Please try again.' });
                     return;
                 }
+
+                const requestData = parseJsonObject(currentRequest?.data);
+                const { error: requestUpdateError } = await supabase
+                    .from('requests')
+                    .update({
+                        status: 'cancelled',
+                        cancellation_reason: trimmedCancelReason,
+                        status_timestamps: buildStatusTimestamps(currentRequest?.status_timestamps, 'cancelled', trimmedCancelReason),
+                        data: {
+                            ...requestData,
+                            cancellation_reason: trimmedCancelReason,
+                            cancelled_at: new Date().toISOString(),
+                        },
+                    })
+                    .eq('id', requestId);
+
+                if (requestUpdateError) {
+                    console.error('Error cancelling request:', requestUpdateError);
+                    setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel request. Please try again.' });
+                    return;
+                }
+
+                if (!orderToCancel.isRequest && orderToCancel.id) {
+                    const { data: currentOrder, error: orderFetchError } = await supabase
+                        .from('orders')
+                        .select('status_timestamps')
+                        .eq('id', orderToCancel.id)
+                        .single();
+
+                    if (orderFetchError) {
+                        console.error('Error loading linked order before cancellation:', orderFetchError);
+                        setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel order. Please try again.' });
+                        return;
+                    }
+
+                    const { error: orderUpdateError } = await supabase
+                        .from('orders')
+                        .update({
+                            status: 'cancelled',
+                            cancellation_reason: trimmedCancelReason,
+                            status_timestamps: buildStatusTimestamps(currentOrder?.status_timestamps, 'cancelled', trimmedCancelReason),
+                        })
+                        .eq('id', orderToCancel.id);
+
+                    if (orderUpdateError) {
+                        console.error('Error cancelling linked order:', orderUpdateError);
+                        setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel order. Please try again.' });
+                        return;
+                    }
+                }
             } else {
-                // Cancel order via Supabase
-                const { error } = await supabase
+                const { data: currentOrder, error: orderFetchError } = await supabase
                     .from('orders')
-                    .update({ status: 'cancelled' })
+                    .select('status_timestamps')
+                    .eq('id', orderToCancel.id)
+                    .single();
+
+                if (orderFetchError) {
+                    console.error('Error loading order before cancellation:', orderFetchError);
+                    setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel order. Please try again.' });
+                    return;
+                }
+
+                const { error: orderUpdateError } = await supabase
+                    .from('orders')
+                    .update({
+                        status: 'cancelled',
+                        cancellation_reason: trimmedCancelReason,
+                        status_timestamps: buildStatusTimestamps(currentOrder?.status_timestamps, 'cancelled', trimmedCancelReason),
+                    })
                     .eq('id', orderToCancel.id);
 
-                if (error) {
-                    console.error('Error cancelling order:', error);
+                if (orderUpdateError) {
+                    console.error('Error cancelling order:', orderUpdateError);
                     setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel order. Please try again.' });
                     return;
                 }
@@ -421,8 +530,7 @@ const MyOrders = () => {
             // Reload orders from Supabase
             const { data: { session } } = await supabase.auth.getSession();
             loadOrders(session.user.id);
-            setShowCancelModal(false);
-            setOrderToCancel(null);
+            closeCancelModal();
         } catch (error) {
             console.error('Error cancelling order:', error);
             setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel order. Please try again.' });
@@ -1118,10 +1226,7 @@ const MyOrders = () => {
             {showCancelModal && (
                 <div
                     className="modal-overlay"
-                    onClick={() => {
-                        setShowCancelModal(false);
-                        setOrderToCancel(null);
-                    }}
+                    onClick={closeCancelModal}
                     style={{
                         position: 'fixed',
                         top: 0,
@@ -1155,12 +1260,38 @@ const MyOrders = () => {
                         <p style={{ marginBottom: '1.5rem', color: '#4b5563' }}>
                             Are you sure you want to cancel this {orderToCancel?.type ? 'request' : 'order'}? This action cannot be undone.
                         </p>
+                        <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
+                            <label htmlFor="cancelReasonMyOrders" style={{ display: 'block', fontWeight: '600', color: '#333', marginBottom: '0.5rem' }}>
+                                Reason for cancellation
+                            </label>
+                            <textarea
+                                id="cancelReasonMyOrders"
+                                value={cancelReason}
+                                onChange={(e) => {
+                                    setCancelReason(e.target.value);
+                                    if (cancelReasonError) setCancelReasonError('');
+                                }}
+                                placeholder="Tell us why you want to cancel."
+                                rows={4}
+                                style={{
+                                    width: '100%',
+                                    borderRadius: '0.75rem',
+                                    border: `1px solid ${cancelReasonError ? '#dc3545' : '#d1d5db'}`,
+                                    padding: '0.75rem 0.9rem',
+                                    resize: 'vertical',
+                                    outline: 'none',
+                                    color: '#111827'
+                                }}
+                            />
+                            {cancelReasonError && (
+                                <div style={{ marginTop: '0.5rem', color: '#dc3545', fontSize: '0.9rem' }}>
+                                    {cancelReasonError}
+                                </div>
+                            )}
+                        </div>
                         <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
                             <button
-                                onClick={() => {
-                                    setShowCancelModal(false);
-                                    setOrderToCancel(null);
-                                }}
+                                onClick={closeCancelModal}
                                 style={{
                                     backgroundColor: 'transparent',
                                     color: '#4b5563',
