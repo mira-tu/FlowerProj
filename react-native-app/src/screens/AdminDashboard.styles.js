@@ -1948,6 +1948,7 @@ const styles = StyleSheet.create({
     width: '92%',
     maxWidth: 560,
     maxHeight: '84%',
+    minHeight: 360,
     paddingHorizontal: 18,
     paddingTop: 18,
     paddingBottom: 16,
@@ -1955,7 +1956,8 @@ const styles = StyleSheet.create({
   },
   assignRiderModalBody: {
     flex: 1,
-    minHeight: 0,
+    flexShrink: 1,
+    minHeight: 220,
     marginTop: 12,
   },
   stopAssignmentList: {
@@ -2501,6 +2503,14 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
     fontSize: 16,
+  },
+  eoActionHint: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#b45309',
+    textAlign: 'center',
+    fontWeight: '600',
   },
 
   // New Status Modal Styles

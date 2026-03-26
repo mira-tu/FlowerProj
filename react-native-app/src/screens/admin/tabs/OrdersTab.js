@@ -317,9 +317,10 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
   const processAccept = async (orderToAccept) => {
     try {
       const orderId = orderToAccept.id;
-      await adminAPI.acceptOrder(orderId, 'processing');
+      await adminAPI.updateOrderStatus(orderId, 'processing');
+
       const paymentStatus = resolveAcceptedOrderPaymentStatus(orderToAccept);
-      if (paymentStatus) {
+      if (paymentStatus && paymentStatus !== orderToAccept.payment_status) {
         await adminAPI.updateOrderPaymentStatus(orderId, paymentStatus);
       }
 
@@ -333,8 +334,9 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
 
       await loadOrders();
     } catch (error) {
-      console.error('Error accepting order or updating payment status:', error);
-      Alert.alert('Error', 'Failed to accept order or update payment status');
+      const errorMessage = error?.message || 'Failed to accept order.';
+      console.error('Error accepting order:', error);
+      Alert.alert('Error', errorMessage);
     }
   };
 
@@ -388,6 +390,18 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
 
 
   const openStatusModal = (order) => {
+    if (
+      order?.delivery_method === 'delivery'
+      && order?.status === 'processing'
+      && !hasRequiredRiderAssignments(order)
+    ) {
+      Alert.alert(
+        'Assign Rider First',
+        'Please assign a rider before changing the status of this delivery order.'
+      );
+      return;
+    }
+
     setOrderToUpdate(order);
     const nextStatus = getNextStatus(order.status, order.delivery_method);
     if (nextStatus) {
@@ -564,6 +578,16 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
 
   const EnhancedOrderCard = ({ item, onMessageCustomer, onPhoneCall, onAssignRider, onUpdateStatus, openReceiptModal, onPrintReceipt }) => {
     const groupedDestinations = getGroupedDestinations(item);
+    const requiresRiderBeforeStatusChange = (
+      item.delivery_method === 'delivery'
+      && item.status === 'processing'
+      && !hasRequiredRiderAssignments(item)
+    );
+    const isAwaitingPaidGCash = (
+      item.payment_method?.toLowerCase() === 'gcash'
+      && item.payment_status !== 'paid'
+    );
+    const isStatusChangeDisabled = isAwaitingPaidGCash || requiresRiderBeforeStatusChange;
 
     return (
       <View style={styles.eoCard}>
@@ -878,14 +902,21 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
               <TouchableOpacity
                 style={[
                   styles.eoMainBtn,
-                  { backgroundColor: item.payment_method?.toLowerCase() === 'gcash' && item.payment_status !== 'paid' ? '#9CA3AF' : '#3B82F6' }
+                  { backgroundColor: isStatusChangeDisabled ? '#9CA3AF' : '#3B82F6' }
                 ]}
-                disabled={item.payment_method?.toLowerCase() === 'gcash' && item.payment_status !== 'paid'}
+                disabled={isStatusChangeDisabled}
                 onPress={() => onUpdateStatus(item)}
               >
                 <Ionicons name="git-network-outline" size={18} color="#fff" />
                 <Text style={styles.eoMainBtnText}>Change Status</Text>
               </TouchableOpacity>
+              {requiresRiderBeforeStatusChange && (
+                <Text style={styles.eoActionHint}>
+                  {groupedDestinations.length > 0
+                    ? 'Assign riders to all delivery stops first before changing status.'
+                    : 'Assign a rider first before changing status.'}
+                </Text>
+              )}
               {item.delivery_method === 'delivery' && item.status === 'processing' && (
                 <TouchableOpacity style={[styles.eoMainBtn, { backgroundColor: '#10B981', marginTop: 10 }]} onPress={() => onAssignRider(item)}>
                   <Ionicons name="person-add-outline" size={18} color="#fff" />

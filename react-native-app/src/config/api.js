@@ -1310,10 +1310,23 @@ export const authAPI = {
     adminLogin: async (credentials) => authAPI.staffLogin(credentials),
 
     logout: async () => {
-        const { error } = await supabase.auth.signOut();
+        const { error } = await supabase.auth.signOut({ scope: 'local' });
         if (error) {
             console.error('Error logging out from Supabase:', error);
         }
+
+        try {
+            const allKeys = await AsyncStorage.getAllKeys();
+            const supabaseSessionKeys = allKeys.filter((key) => (
+                /^sb-.*-auth-token$/.test(key) || key === 'supabase.auth.token'
+            ));
+
+            const keysToRemove = [...new Set(['token', 'currentUser', ...supabaseSessionKeys])];
+            await AsyncStorage.multiRemove(keysToRemove);
+        } catch (storageError) {
+            console.error('Error clearing local auth storage:', storageError);
+        }
+
         return { data: { success: true } };
     },
 
