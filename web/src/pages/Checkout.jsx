@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import '../styles/Shop.css';
 import { supabase } from '../config/supabase';
@@ -91,6 +91,17 @@ const Checkout = ({ setCart, user }) => {
     const [barangayFees, setBarangayFees] = useState([]);
     const [multiAddressEnabled, setMultiAddressEnabled] = useState(false);
     const [deliveryAssignments, setDeliveryAssignments] = useState([]);
+    const [addressValidationMessage, setAddressValidationMessage] = useState('');
+    const addressSectionRef = useRef(null);
+
+    const scrollToAddressSection = () => {
+        if (!addressSectionRef.current) return;
+
+        addressSectionRef.current.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+        });
+    };
 
     useEffect(() => {
         const fetchThreshold = async () => {
@@ -187,6 +198,12 @@ const Checkout = ({ setCart, user }) => {
         });
     }, [checkoutItems, deliveryMethod, selectedAddressId]);
 
+    useEffect(() => {
+        if (deliveryMethod !== 'delivery' || selectedAddressId) {
+            setAddressValidationMessage('');
+        }
+    }, [deliveryMethod, selectedAddressId]);
+
     const addressFeeMap = useMemo(
         () => buildAddressFeeMap(savedAddresses, barangayFees),
         [savedAddresses, barangayFees]
@@ -245,8 +262,8 @@ const Checkout = ({ setCart, user }) => {
         }
 
         if (deliveryMethod === 'delivery' && !selectedAddressId) {
-            showInfoModal('Address Required', 'Please select a saved delivery address before placing your order.');
-            setIsProcessing(false);
+            setAddressValidationMessage('Please set or select a delivery address before placing your order.');
+            scrollToAddressSection();
             return;
         }
 
@@ -577,27 +594,38 @@ const Checkout = ({ setCart, user }) => {
                         </div>
 
                         {deliveryMethod === 'delivery' && (
-                            <CheckoutAddressSelection
-                                user={user}
-                                address={address}
-                                setAddress={setAddress}
-                                selectedAddressId={selectedAddressId}
-                                setSelectedAddressId={setSelectedAddressId}
-                                showInfoModal={showInfoModal}
-                                onAddressesLoaded={setSavedAddresses}
-                            />
-                        )}
+                            <div ref={addressSectionRef}>
+                                {addressValidationMessage && (
+                                    <div
+                                        className="alert alert-danger"
+                                        role="alert"
+                                        style={{ borderRadius: '1rem', marginBottom: '1rem' }}
+                                    >
+                                        <i className="fas fa-exclamation-circle me-2"></i>
+                                        {addressValidationMessage}
+                                    </div>
+                                )}
 
-                        {deliveryMethod === 'delivery' && (
-                            <MultiAddressDeliverySection
-                                checkoutItems={checkoutItems}
-                                savedAddresses={savedAddresses}
-                                selectedAddressId={selectedAddressId}
-                                enabled={multiAddressEnabled}
-                                setEnabled={setMultiAddressEnabled}
-                                assignments={deliveryAssignments}
-                                setAssignments={setDeliveryAssignments}
-                            />
+                                <CheckoutAddressSelection
+                                    user={user}
+                                    address={address}
+                                    setAddress={setAddress}
+                                    selectedAddressId={selectedAddressId}
+                                    setSelectedAddressId={setSelectedAddressId}
+                                    showInfoModal={showInfoModal}
+                                    onAddressesLoaded={setSavedAddresses}
+                                />
+
+                                <MultiAddressDeliverySection
+                                    checkoutItems={checkoutItems}
+                                    savedAddresses={savedAddresses}
+                                    selectedAddressId={selectedAddressId}
+                                    enabled={multiAddressEnabled}
+                                    setEnabled={setMultiAddressEnabled}
+                                    assignments={deliveryAssignments}
+                                    setAssignments={setDeliveryAssignments}
+                                />
+                            </div>
                         )}
 
                         <div className="checkout-section">
@@ -759,7 +787,7 @@ const Checkout = ({ setCart, user }) => {
                             <button
                                 className="btn-place-order"
                                 onClick={handlePlaceOrder}
-                                disabled={isProcessing || (deliveryMethod === 'delivery' && !selectedAddressId)}
+                                disabled={isProcessing}
                             >
                                 {isProcessing ? (
                                     <>
@@ -770,6 +798,12 @@ const Checkout = ({ setCart, user }) => {
                                     <>Place Order</>
                                 )}
                             </button>
+                            {deliveryMethod === 'delivery' && addressValidationMessage && (
+                                <div className="small text-danger text-center mt-2">
+                                    <i className="fas fa-map-marker-alt me-1"></i>
+                                    {addressValidationMessage}
+                                </div>
+                            )}
 
                             <div className="text-center mt-3">
                                 <small className="text-muted">
