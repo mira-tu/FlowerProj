@@ -1917,7 +1917,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0f2f5',
     borderRadius: 12,
     paddingHorizontal: 10,
-    marginTop: 15,
+    marginTop: 10,
     marginBottom: 6,
   },
   riderSearchIcon: {
@@ -1945,10 +1945,10 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   assignRiderModalContent: {
-    width: '92%',
+    width: '94%',
     maxWidth: 560,
-    maxHeight: '84%',
-    minHeight: 360,
+    maxHeight: '92%',
+    minHeight: 520,
     paddingHorizontal: 18,
     paddingTop: 18,
     paddingBottom: 16,
@@ -1957,7 +1957,7 @@ const styles = StyleSheet.create({
   assignRiderModalBody: {
     flex: 1,
     flexShrink: 1,
-    minHeight: 220,
+    minHeight: 360,
     marginTop: 12,
   },
   stopAssignmentList: {
@@ -1966,10 +1966,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     marginBottom: 8,
-    maxHeight: 180,
+    minHeight: 140,
+    maxHeight: 240,
   },
   stopAssignmentListContent: {
-    paddingVertical: 0,
+    paddingVertical: 4,
   },
   stopAssignmentRow: {
     flexDirection: 'row',
@@ -2035,12 +2036,13 @@ const styles = StyleSheet.create({
   },
   assignRiderList: {
     flex: 1,
-    minHeight: 140,
+    minHeight: 190,
     marginTop: 10,
     borderWidth: 1,
     borderColor: '#e5e7eb',
     borderRadius: 12,
     overflow: 'hidden',
+    maxHeight: 260,
   },
   assignRiderListContent: {
     flexGrow: 1,
@@ -2054,7 +2056,7 @@ const styles = StyleSheet.create({
     paddingVertical: 24,
   },
   assignRiderFooter: {
-    marginTop: 14,
+    marginTop: 10,
     paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: '#f3f4f6',

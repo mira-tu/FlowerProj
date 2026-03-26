@@ -3498,11 +3498,11 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                             {isActive ? <View style={styles.stopAssignmentIndicatorInner} /> : null}
                           </View>
                           <View style={styles.stopAssignmentRowContent}>
-                            <Text style={styles.stopAssignmentRowTitle} numberOfLines={1}>
+                            <Text style={styles.stopAssignmentRowTitle} numberOfLines={2}>
                               {`Stop ${index + 1} - ${group.recipientName || `Delivery stop ${index + 1}`}`}
                             </Text>
                             {group.addressText ? (
-                              <Text style={styles.stopAssignmentRowSubtitle} numberOfLines={1}>
+                              <Text style={styles.stopAssignmentRowSubtitle} numberOfLines={2}>
                                 {group.addressText}
                               </Text>
                             ) : null}
@@ -3533,7 +3533,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                   <View style={styles.stopAssignmentSummaryHeader}>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.stopAssignmentSelectionLabel}>Selected stop</Text>
-                      <Text style={styles.stopAssignmentSelectionTitle} numberOfLines={1}>
+                      <Text style={styles.stopAssignmentSelectionTitle} numberOfLines={2}>
                         {selectedStopGroup.recipientName || 'Delivery stop'}
                       </Text>
                     </View>
@@ -3542,7 +3542,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                     </TouchableOpacity>
                   </View>
                   {selectedStopGroup.addressText ? (
-                    <Text style={styles.stopAssignmentSelectionAddress} numberOfLines={1}>
+                    <Text style={styles.stopAssignmentSelectionAddress} numberOfLines={2}>
                       {selectedStopGroup.addressText}
                     </Text>
                   ) : null}
