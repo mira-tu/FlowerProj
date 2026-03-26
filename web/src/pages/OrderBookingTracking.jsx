@@ -183,6 +183,23 @@ const formatBookingColors = (item = {}) => {
     return item.colorPreference === 'Others' ? item.otherColorPreference : item.colorPreference;
 };
 
+const formatBookingEventTime = (value) => {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return '';
+
+    const timeMatch = trimmed.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+    if (!timeMatch) {
+        return trimmed;
+    }
+
+    let hours = Number(timeMatch[1]);
+    const minutes = timeMatch[2];
+    const period = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12;
+
+    return `${hours}:${minutes} ${period}`;
+};
+
 const buildBookingOverview = (requestData = {}) => {
     const items = getBookingItems(requestData);
     const uniqueValues = (values = []) => Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
@@ -192,6 +209,7 @@ const buildBookingOverview = (requestData = {}) => {
         itemCount: items.length,
         occasionText: uniqueValues(requestData.combined_occasions || items.map((item) => item.occasion)).join(', '),
         eventDateText: uniqueValues(requestData.combined_dates || items.map((item) => item.eventDate || item.event_date)).join(', '),
+        eventTimeText: uniqueValues(items.map((item) => formatBookingEventTime(item.eventTime || item.event_time))).join(', '),
         recipientText: uniqueValues(items.map((item) => item.recipientName || item.recipient_name)).join(', '),
         venueText: uniqueValues(items.map((item) => item.venue || item.deliveryAddress)).join(', '),
     };
@@ -856,6 +874,12 @@ const OrderBookingTracking = () => {
                                             <div className="delivery-value">{bookingOverview.eventDateText}</div>
                                         </div>
                                     )}
+                                    {bookingOverview.eventTimeText && (
+                                        <div className="delivery-info-row">
+                                            <div className="delivery-label">Preferred Time</div>
+                                            <div className="delivery-value">{bookingOverview.eventTimeText}</div>
+                                        </div>
+                                    )}
                                     {bookingOverview.venueText && (
                                         <div className="delivery-info-row">
                                             <div className="delivery-label">Venue</div>
@@ -948,7 +972,7 @@ const OrderBookingTracking = () => {
                                                         {(item.recipientName || item.recipient_name) && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Recipient</span><span className="fw-bold text-dark">{item.recipientName || item.recipient_name}</span></div>}
                                                         {item.occasion && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Occasion</span><span className="fw-bold text-dark">{item.occasion === 'Other' ? item.otherOccasion : item.occasion}</span></div>}
                                                         {request.delivery_method !== 'pickup' && (item.eventDate || item.event_date) && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Event Date</span><span className="fw-bold text-dark">{item.eventDate || item.event_date}</span></div>}
-                                                        {request.delivery_method !== 'pickup' && (item.eventTime || item.event_time) && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Event Time</span><span className="fw-bold text-dark">{item.eventTime || item.event_time}</span></div>}
+                                                        {request.delivery_method !== 'pickup' && (item.eventTime || item.event_time) && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Event Time</span><span className="fw-bold text-dark">{formatBookingEventTime(item.eventTime || item.event_time)}</span></div>}
                                                         {request.delivery_method !== 'pickup' && (item.venue || item.deliveryAddress || item.delivery_address) && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Venue</span><span className="fw-bold text-dark">{item.venue || item.deliveryAddress || item.delivery_address}</span></div>}
                                                         {arrangement && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Arrangement</span><span className="fw-bold text-dark">{arrangement}</span></div>}
                                                         {totalArrangementQuantity && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Quantity</span><span className="fw-bold text-dark">{totalArrangementQuantity}</span></div>}
