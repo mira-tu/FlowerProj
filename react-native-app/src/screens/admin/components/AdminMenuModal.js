@@ -134,6 +134,11 @@ const AdminMenuModal = ({ visible, onClose, setActiveTab, currentUser, onLogoutP
                   <Text style={styles.menuItemText}>About</Text>
                 </TouchableOpacity>
 
+                <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('customOrder'); onClose(); }}>
+                  <Ionicons name="color-wand-outline" size={20} color="#333" />
+                  <Text style={styles.menuItemText}>Custom Order</Text>
+                </TouchableOpacity>
+
                 <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('contact'); onClose(); }}>
                   <Ionicons name="call-outline" size={20} color="#333" />
                   <Text style={styles.menuItemText}>Contact</Text>

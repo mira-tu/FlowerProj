@@ -20,6 +20,7 @@ import LogoutConfirmModal from './admin/components/LogoutConfirmModal';
 import AboutTab from './admin/tabs/AboutTab';
 import CatalogueTab from './admin/tabs/CatalogueTab';
 import ContactTab from './admin/tabs/ContactTab';
+import CustomOrderTab from './admin/tabs/CustomOrderTab';
 import EmployeesTab from './admin/tabs/EmployeesTab';
 import MessagingTab from './admin/tabs/MessagingTab';
 import NotificationsTab from './admin/tabs/NotificationsTab';
@@ -158,7 +159,7 @@ const AdminDashboard = () => {
   const showLogoutConfirm = () => setLogoutConfirmVisible(true);
 
   const renderTabContent = () => {
-    if (currentUser?.role === 'employee' && (activeTab === 'sales' || activeTab === 'about' || activeTab === 'contact' || activeTab === 'employees')) {
+    if (currentUser?.role === 'employee' && (activeTab === 'sales' || activeTab === 'about' || activeTab === 'contact' || activeTab === 'employees' || activeTab === 'customOrder')) {
       return <CatalogueTab />;
     }
 
@@ -211,6 +212,8 @@ const AdminDashboard = () => {
         return <SalesTab />;
       case 'about':
         return <AboutTab />;
+      case 'customOrder':
+        return <CustomOrderTab />;
       case 'contact':
         return <ContactTab />;
       case 'employees':

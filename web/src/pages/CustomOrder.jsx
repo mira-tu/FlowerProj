@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Select from 'react-select';
+import { supabase } from '../config/supabase';
 import { formatPhoneNumber } from '../utils/format';
 import InfoModal from '../components/InfoModal';
 import '../styles/CustomOrder.css';
@@ -162,6 +163,189 @@ const colorOptions = [
     { value: 'Soft Blues and Purples', label: 'Soft Blues and Purples', colors: ['#add8e6', '#800080'] },
     { value: 'Others', label: 'Others', colors: [] }
 ];
+
+const CUSTOM_ORDER_CATALOG_KEY = 'custom_order_catalog';
+
+const DEFAULT_CUSTOM_ORDER_CATALOG = {
+    version: 1,
+    flowers: flowerOptions.map((item, index) => ({
+        id: `flower-${index + 1}`,
+        value: item.value,
+        label: item.label,
+        img: item.img,
+        isActive: true,
+        isCustomOption: item.value === 'Others'
+    })),
+    arrangements: flattenedArrangementOptions.map((item, index) => ({
+        id: `arrangement-${index + 1}`,
+        value: item.value,
+        label: item.label,
+        groupLabel: arrangementOptions.find((group) => group.options.some((option) => option.value === item.value))?.label || 'General',
+        description: item.description || '',
+        img: item.img || '',
+        flowersPerArrangement: extractFlowersPerArrangement(item.label),
+        isActive: true,
+        isCustomOption: item.value === 'Other'
+    })),
+    colors: colorOptions.map((item, index) => ({
+        id: `color-${index + 1}`,
+        value: item.value,
+        label: item.label,
+        colors: item.colors,
+        isActive: true,
+        isCustomOption: item.value === 'Others'
+    }))
+};
+
+const makeCatalogItemId = (value, prefix) => {
+    const normalized = String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+
+    return normalized ? `${prefix}-${normalized}` : `${prefix}-${Date.now()}`;
+};
+
+const toPositiveInteger = (value, fallback = 0) => {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+        return fallback;
+    }
+    return parsed;
+};
+
+const normalizeCatalogImage = (value) => String(value || '').trim();
+
+const normalizeCatalogColorSwatches = (colors = []) => (
+    Array.isArray(colors)
+        ? colors
+            .map((color) => String(color || '').trim())
+            .filter(Boolean)
+            .slice(0, 6)
+        : []
+);
+
+const normalizeFlowerCatalogItem = (item, index) => {
+    const label = String(item?.label || item?.value || `Flower ${index + 1}`).trim();
+    const value = String(item?.value || label).trim();
+
+    return {
+        id: String(item?.id || makeCatalogItemId(value || label, 'flower')),
+        value: value || `flower-${index + 1}`,
+        label,
+        img: normalizeCatalogImage(item?.img),
+        isActive: item?.isActive !== false,
+        isCustomOption: Boolean(item?.isCustomOption),
+    };
+};
+
+const normalizeArrangementCatalogItem = (item, index) => {
+    const label = String(item?.label || item?.value || `Arrangement ${index + 1}`).trim();
+    const value = String(item?.value || label).trim();
+    const flowersPerArrangement = toPositiveInteger(
+        item?.flowersPerArrangement,
+        extractFlowersPerArrangement(label)
+    );
+
+    return {
+        id: String(item?.id || makeCatalogItemId(value || label, 'arrangement')),
+        value: value || `arrangement-${index + 1}`,
+        label,
+        groupLabel: String(item?.groupLabel || 'General').trim() || 'General',
+        description: String(item?.description || '').trim(),
+        img: normalizeCatalogImage(item?.img),
+        flowersPerArrangement,
+        isActive: item?.isActive !== false,
+        isCustomOption: Boolean(item?.isCustomOption),
+    };
+};
+
+const normalizeColorCatalogItem = (item, index) => {
+    const label = String(item?.label || item?.value || `Color ${index + 1}`).trim();
+    const value = String(item?.value || label).trim();
+
+    return {
+        id: String(item?.id || makeCatalogItemId(value || label, 'color')),
+        value: value || `color-${index + 1}`,
+        label,
+        colors: normalizeCatalogColorSwatches(item?.colors),
+        isActive: item?.isActive !== false,
+        isCustomOption: Boolean(item?.isCustomOption),
+    };
+};
+
+const normalizeCustomOrderCatalog = (catalog) => {
+    const sourceCatalog = catalog && typeof catalog === 'object' ? catalog : DEFAULT_CUSTOM_ORDER_CATALOG;
+
+    return {
+        version: toPositiveInteger(sourceCatalog.version, 1) || 1,
+        flowers: (Array.isArray(sourceCatalog.flowers) && sourceCatalog.flowers.length
+            ? sourceCatalog.flowers
+            : DEFAULT_CUSTOM_ORDER_CATALOG.flowers
+        )
+            .map(normalizeFlowerCatalogItem)
+            .filter((item) => item.label),
+        arrangements: (Array.isArray(sourceCatalog.arrangements) && sourceCatalog.arrangements.length
+            ? sourceCatalog.arrangements
+            : DEFAULT_CUSTOM_ORDER_CATALOG.arrangements
+        )
+            .map(normalizeArrangementCatalogItem)
+            .filter((item) => item.label),
+        colors: (Array.isArray(sourceCatalog.colors) && sourceCatalog.colors.length
+            ? sourceCatalog.colors
+            : DEFAULT_CUSTOM_ORDER_CATALOG.colors
+        )
+            .map(normalizeColorCatalogItem)
+            .filter((item) => item.label),
+    };
+};
+
+const buildGroupedArrangementOptions = (arrangements = []) => {
+    const groupedOptions = new Map();
+
+    arrangements.forEach((item) => {
+        const groupLabel = String(item?.groupLabel || 'General').trim() || 'General';
+        if (!groupedOptions.has(groupLabel)) {
+            groupedOptions.set(groupLabel, []);
+        }
+
+        groupedOptions.get(groupLabel).push({
+            value: item.value,
+            label: item.label,
+            description: item.description || '',
+            img: item.img || '',
+            flowersPerArrangement: item.flowersPerArrangement || 0,
+            isCustomOption: Boolean(item.isCustomOption),
+        });
+    });
+
+    return Array.from(groupedOptions.entries()).map(([label, options]) => ({
+        label,
+        options,
+    }));
+};
+
+const isCustomCatalogOption = (option) => Boolean(option?.isCustomOption);
+
+const fetchCustomOrderCatalog = async () => {
+    try {
+        const { data, error } = await supabase
+            .from('app_content')
+            .select('value')
+            .eq('key', CUSTOM_ORDER_CATALOG_KEY)
+            .maybeSingle();
+
+        if (error || !data?.value) {
+            return normalizeCustomOrderCatalog(DEFAULT_CUSTOM_ORDER_CATALOG);
+        }
+
+        return normalizeCustomOrderCatalog(JSON.parse(data.value));
+    } catch (error) {
+        console.error('Error loading custom order catalog:', error);
+        return normalizeCustomOrderCatalog(DEFAULT_CUSTOM_ORDER_CATALOG);
+    }
+};
 
 const customColorOptionLabel = ({ label, colors }) => (
     <div style={{ display: 'flex', alignItems: 'center' }}>
@@ -419,6 +603,54 @@ const CustomOrder = ({ user }) => {
     const [validated, setValidated] = useState(false);
 
     const navigate = useNavigate();
+    const [customOrderCatalog, setCustomOrderCatalog] = useState(() => normalizeCustomOrderCatalog(DEFAULT_CUSTOM_ORDER_CATALOG));
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadCatalog = async () => {
+            const loadedCatalog = await fetchCustomOrderCatalog();
+            if (isMounted) {
+                setCustomOrderCatalog(loadedCatalog);
+            }
+        };
+
+        loadCatalog();
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
+
+    const catalogFlowerOptions = useMemo(
+        () => customOrderCatalog.flowers.filter((item) => item.isActive !== false),
+        [customOrderCatalog]
+    );
+
+    const catalogArrangementOptions = useMemo(
+        () => buildGroupedArrangementOptions(customOrderCatalog.arrangements.filter((item) => item.isActive !== false)),
+        [customOrderCatalog]
+    );
+
+    const flattenedCatalogArrangementOptions = useMemo(
+        () => catalogArrangementOptions.flatMap((group) => group.options),
+        [catalogArrangementOptions]
+    );
+
+    const catalogColorOptions = useMemo(
+        () => customOrderCatalog.colors.filter((item) => item.isActive !== false),
+        [customOrderCatalog]
+    );
+
+    const arrangementOptionLookup = useMemo(
+        () => new Map(flattenedCatalogArrangementOptions.map((option) => [option.value, option])),
+        [flattenedCatalogArrangementOptions]
+    );
+
+    const colorOptionLookup = useMemo(
+        () => new Map(catalogColorOptions.map((option) => [option.value, option])),
+        [catalogColorOptions]
+    );
 
     const handleArrangementPreview = useCallback((option) => {
         setArrangementPreviewOption(option);
@@ -504,11 +736,13 @@ const CustomOrder = ({ user }) => {
     };
 
     const selectedArrangementOptions = useMemo(
-        () => flattenedArrangementOptions.filter((option) => formData.arrangementTypes.includes(option.value)),
-        [formData.arrangementTypes]
+        () => formData.arrangementTypes
+            .map((value) => arrangementOptionLookup.get(value))
+            .filter(Boolean),
+        [arrangementOptionLookup, formData.arrangementTypes]
     );
 
-    const hasOtherArrangement = formData.arrangementTypes.includes('Other');
+    const hasOtherArrangement = selectedArrangementOptions.some(isCustomCatalogOption);
 
     const otherFlowersPerArrangement = useMemo(() => {
         const parsedCount = Number.parseInt(formData.flowerQuantity, 10);
@@ -521,13 +755,13 @@ const CustomOrder = ({ user }) => {
         return selectedArrangementOptions.map((option) => {
             const parsedQty = Number.parseInt(formData.arrangementQuantities?.[option.value], 10);
             const quantity = Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1;
-            const isOther = option.value === 'Other';
+            const isOther = isCustomCatalogOption(option);
             const label = isOther
                 ? (formData.otherArrangementType?.trim() || option.label)
                 : option.label;
             const flowersPerArrangement = isOther
                 ? otherFlowersPerArrangement
-                : extractFlowersPerArrangement(option.label);
+                : (Number(option.flowersPerArrangement) || extractFlowersPerArrangement(option.label));
 
             return {
                 value: option.value,
@@ -572,12 +806,12 @@ const CustomOrder = ({ user }) => {
                 const selectedColor = formData.colorPreferenceByArrangement?.[detail.value] || '';
                 const otherColor = formData.otherColorPreferenceByArrangement?.[detail.value] || '';
                 if (!selectedColor) return null;
-                const colorLabel = selectedColor === 'Others' ? otherColor : selectedColor;
+                const colorLabel = isCustomCatalogOption(colorOptionLookup.get(selectedColor)) ? otherColor : selectedColor;
                 return colorLabel ? `${detail.label}: ${colorLabel}` : null;
             })
             .filter(Boolean)
             .join(' | '),
-        [arrangementDetails, formData.colorPreferenceByArrangement, formData.otherColorPreferenceByArrangement]
+        [arrangementDetails, colorOptionLookup, formData.colorPreferenceByArrangement, formData.otherColorPreferenceByArrangement]
     );
 
     const leadArrangementInspirationImage = useMemo(
@@ -619,7 +853,7 @@ const CustomOrder = ({ user }) => {
                 inspirationImageByArrangement: nextInspirationImageByArrangement
             };
 
-            if (!selectedValues.includes('Other')) {
+            if (!selectedValues.some((value) => isCustomCatalogOption(arrangementOptionLookup.get(value)))) {
                 nextState.otherArrangementType = '';
                 nextState.flowerQuantity = '';
             }
@@ -853,8 +1087,8 @@ const CustomOrder = ({ user }) => {
                 otherFlowersText: arrangementOtherFlowersText || null,
                 other_flowers_text: arrangementOtherFlowersText || null,
                 flowers: arrangementFlowerLabels.join(', ') + (arrangementOtherFlowersText ? ` (${arrangementOtherFlowersText})` : ''),
-                colorPreference: selectedColor === 'Others' ? otherColor : selectedColor || null,
-                color_preference: selectedColor === 'Others' ? otherColor : selectedColor || null,
+                colorPreference: isCustomCatalogOption(colorOptionLookup.get(selectedColor)) ? otherColor : selectedColor || null,
+                color_preference: isCustomCatalogOption(colorOptionLookup.get(selectedColor)) ? otherColor : selectedColor || null,
                 rawColorPreference: selectedColor || null,
                 raw_color_preference: selectedColor || null,
                 otherColorPreference: otherColor || null,
@@ -878,7 +1112,7 @@ const CustomOrder = ({ user }) => {
             eventTime: formData.eventTime,
             venue: formData.venue,
             arrangementType: arrangementSummary || selectedArrangementOptions.map((option) => option.label).join(', '),
-            arrangementTypes: selectedArrangementOptions.map((option) => option.value === 'Other' ? (formData.otherArrangementType?.trim() || option.label) : option.label),
+            arrangementTypes: selectedArrangementOptions.map((option) => isCustomCatalogOption(option) ? (formData.otherArrangementType?.trim() || option.label) : option.label),
             arrangementTypeValues: selectedArrangementOptions.map((option) => option.value),
             arrangementQuantities: formData.arrangementQuantities,
             arrangementSelections,
@@ -1114,10 +1348,10 @@ const CustomOrder = ({ user }) => {
                                                         <label className="form-label fw-semibold">Arrangement Type <span className="text-danger">*</span></label>
                                                         <Select
                                                             isMulti
-                                                            options={arrangementOptions}
+                                                            options={catalogArrangementOptions}
                                                             placeholder="Search or select type..."
                                                             onChange={handleArrangementSelect}
-                                                            value={flattenedArrangementOptions.filter((option) => formData.arrangementTypes.includes(option.value))}
+                                                            value={flattenedCatalogArrangementOptions.filter((option) => formData.arrangementTypes.includes(option.value))}
                                                             closeMenuOnSelect={false}
                                                             formatOptionLabel={arrangementOptionLabel}
                                                             styles={buildMultiSelectStyles(validated && formData.arrangementTypes.length === 0)}
@@ -1267,7 +1501,7 @@ const CustomOrder = ({ user }) => {
 
                                                             <Select
                                                                 isMulti
-                                                                options={flowerOptions}
+                                                                options={catalogFlowerOptions}
                                                                 placeholder={`Select flowers for ${detail.label}...`}
                                                                 onChange={(selectedOptions) => handleArrangementFlowerSelect(detail.value, selectedOptions)}
                                                                 value={selectedArrangementFlowers}
@@ -1286,7 +1520,7 @@ const CustomOrder = ({ user }) => {
                                                                 <div className="text-danger small mt-1">Please select at least one preferred flower for this arrangement.</div>
                                                             )}
 
-                                                            {selectedArrangementFlowers.some((flower) => flower.value === 'Others') && (
+                                                            {selectedArrangementFlowers.some((flower) => isCustomCatalogOption(flower)) && (
                                                                 <input
                                                                     type="text"
                                                                     className="form-control bg-light border-0 py-3 mt-3"
@@ -1302,7 +1536,7 @@ const CustomOrder = ({ user }) => {
                                             </div>
 
                                             {arrangementDetails.some((detail) => (
-                                                (formData.preferredFlowersByArrangement?.[detail.value] || []).some((flower) => flower.value === 'Others')
+                                                (formData.preferredFlowersByArrangement?.[detail.value] || []).some((flower) => isCustomCatalogOption(flower))
                                             )) && (
                                                 <div className="arrangement-other-panel mt-3">
                                                     <div className="mt-1">
@@ -1336,11 +1570,11 @@ const CustomOrder = ({ user }) => {
                                                         <div key={`color-${detail.value}`} className="arrangement-other-panel">
                                                             <div className="fw-semibold mb-2">{detail.label}</div>
                                                             <Select
-                                                                options={colorOptions}
+                                                                options={catalogColorOptions}
                                                                 formatOptionLabel={customColorOptionLabel}
                                                                 placeholder={`Select color palette for ${detail.label}...`}
                                                                 onChange={(selectedOption) => handleArrangementColorSelect(detail.value, selectedOption)}
-                                                                value={colorOptions.find((option) => option.value === selectedColor) || null}
+                                                                value={catalogColorOptions.find((option) => option.value === selectedColor) || null}
                                                                 isClearable
                                                                 styles={{
                                                                     control: (base) => ({
@@ -1364,7 +1598,7 @@ const CustomOrder = ({ user }) => {
                                                             {hasColorError && (
                                                                 <div className="text-danger small mt-1">Please select a color theme for this arrangement.</div>
                                                             )}
-                                                            {selectedColor === 'Others' && (
+                                                            {isCustomCatalogOption(colorOptionLookup.get(selectedColor)) && (
                                                                 <input
                                                                     type="text"
                                                                     className="form-control bg-light border-0 py-3 mt-2"
@@ -1552,7 +1786,7 @@ const CustomOrder = ({ user }) => {
                                     <div key={`summary-color-${detail.value}`} className="d-flex justify-content-between mb-2">
                                         <span className="text-muted">{detail.label} Color:</span>
                                         <span className="fw-semibold text-end" style={{ maxWidth: '60%' }}>
-                                            {selectedColor === 'Others' ? otherColor : selectedColor}
+                                            {isCustomCatalogOption(colorOptionLookup.get(selectedColor)) ? otherColor : selectedColor}
                                         </span>
                                     </div>
                                 );
