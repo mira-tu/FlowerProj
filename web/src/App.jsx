@@ -52,6 +52,7 @@ import Cart from './pages/Cart'
 import BookingCheckout from './pages/BookingCheckout'
 import Customized from './pages/Customized'
 import CustomOrder from './pages/CustomOrder'
+import CustomOrderCatalog from './pages/CustomOrderCatalog'
 import ProductDetail from './pages/ProductDetail'
 import Checkout from './pages/Checkout'
 import OrderSuccess from './pages/OrderSuccess'
@@ -390,7 +391,8 @@ function AppContent() {
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/privacy" element={<Privacy />} />
-        <Route path="/custom-order" element={<CustomOrder user={user} />} />
+        <Route path="/custom-order" element={<CustomOrderCatalog />} />
+        <Route path="/custom-order/form" element={<CustomOrder user={user} />} />
         <Route path="/custom-order/request" element={<Navigate to="/custom-order" replace />} />
         <Route path="/custom-order-v2" element={<Navigate to="/custom-order" replace />} />
         <Route path="/customized" element={<Customized addToCart={addToCart} />} />

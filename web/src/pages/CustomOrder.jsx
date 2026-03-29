@@ -1,5 +1,5 @@
-import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Select from 'react-select';
 import { supabase } from '../config/supabase';
 import { formatPhoneNumber } from '../utils/format';
@@ -313,6 +313,7 @@ const buildGroupedArrangementOptions = (arrangements = []) => {
         groupedOptions.get(groupLabel).push({
             value: item.value,
             label: item.label,
+            groupLabel,
             description: item.description || '',
             img: item.img || '',
             flowersPerArrangement: item.flowersPerArrangement || 0,
@@ -603,7 +604,14 @@ const CustomOrder = ({ user }) => {
     const [validated, setValidated] = useState(false);
 
     const navigate = useNavigate();
+    const location = useLocation();
     const [customOrderCatalog, setCustomOrderCatalog] = useState(() => normalizeCustomOrderCatalog(DEFAULT_CUSTOM_ORDER_CATALOG));
+    const appliedArrangementPrefillRef = useRef('');
+
+    const preselectedArrangementValue = useMemo(() => {
+        const searchParams = new URLSearchParams(location.search);
+        return String(searchParams.get('arrangement') || location.state?.preselectedArrangement || '').trim();
+    }, [location.search, location.state]);
 
     useEffect(() => {
         let isMounted = true;
@@ -645,6 +653,11 @@ const CustomOrder = ({ user }) => {
     const arrangementOptionLookup = useMemo(
         () => new Map(flattenedCatalogArrangementOptions.map((option) => [option.value, option])),
         [flattenedCatalogArrangementOptions]
+    );
+
+    const preselectedArrangementOption = useMemo(
+        () => arrangementOptionLookup.get(preselectedArrangementValue) || null,
+        [arrangementOptionLookup, preselectedArrangementValue]
     );
 
     const colorOptionLookup = useMemo(
@@ -689,6 +702,62 @@ const CustomOrder = ({ user }) => {
             }));
         }
     }, [user]);
+
+    useEffect(() => {
+        if (!preselectedArrangementValue || appliedArrangementPrefillRef.current === preselectedArrangementValue) {
+            return;
+        }
+
+        const arrangementOption = arrangementOptionLookup.get(preselectedArrangementValue);
+        if (!arrangementOption) {
+            return;
+        }
+
+        appliedArrangementPrefillRef.current = preselectedArrangementValue;
+
+        setFormData((prev) => {
+            const nextArrangementTypes = Array.isArray(prev.arrangementTypes)
+                ? [...prev.arrangementTypes]
+                : [];
+
+            if (!nextArrangementTypes.includes(arrangementOption.value)) {
+                nextArrangementTypes.unshift(arrangementOption.value);
+            }
+
+            const nextArrangementQuantities = { ...(prev.arrangementQuantities || {}) };
+            if (!nextArrangementQuantities[arrangementOption.value] || Number.parseInt(nextArrangementQuantities[arrangementOption.value], 10) < 1) {
+                nextArrangementQuantities[arrangementOption.value] = '1';
+            }
+
+            return {
+                ...prev,
+                arrangementTypes: nextArrangementTypes,
+                arrangementQuantities: nextArrangementQuantities,
+                preferredFlowersByArrangement: {
+                    ...(prev.preferredFlowersByArrangement || {}),
+                    [arrangementOption.value]: Array.isArray(prev.preferredFlowersByArrangement?.[arrangementOption.value])
+                        ? prev.preferredFlowersByArrangement[arrangementOption.value]
+                        : []
+                },
+                otherFlowersTextByArrangement: {
+                    ...(prev.otherFlowersTextByArrangement || {}),
+                    [arrangementOption.value]: prev.otherFlowersTextByArrangement?.[arrangementOption.value] || ''
+                },
+                colorPreferenceByArrangement: {
+                    ...(prev.colorPreferenceByArrangement || {}),
+                    [arrangementOption.value]: prev.colorPreferenceByArrangement?.[arrangementOption.value] || ''
+                },
+                otherColorPreferenceByArrangement: {
+                    ...(prev.otherColorPreferenceByArrangement || {}),
+                    [arrangementOption.value]: prev.otherColorPreferenceByArrangement?.[arrangementOption.value] || ''
+                },
+                inspirationImageByArrangement: {
+                    ...(prev.inspirationImageByArrangement || {}),
+                    [arrangementOption.value]: prev.inspirationImageByArrangement?.[arrangementOption.value] || null
+                }
+            };
+        });
+    }, [arrangementOptionLookup, preselectedArrangementValue]);
 
     // Prevent past dates
     const minEventDate = useMemo(() => {
@@ -1192,12 +1261,56 @@ const CustomOrder = ({ user }) => {
             <div className="container">
 
                 {/* Header Section */}
-                <div className="text-center mb-5 mt-4">
-                    <h1 className="display-4 fw-bold font-playfair text-dark">Custom Floral & Custom Order</h1>
-                    <p className="lead text-muted mx-auto" style={{ maxWidth: '700px' }}>
-                        Whether it's a personalized bouquet or full event styling, let us bring your floral vision to life. Fill out the details below to request a quote.
+                <div className="text-center mb-4 mt-4">
+                    <div className="d-flex justify-content-center mb-3">
+                        <Link
+                            to="/custom-order"
+                            className="text-decoration-none fw-semibold"
+                            style={{ color: 'var(--shop-pink)' }}
+                        >
+                            <i className="fas fa-arrow-left me-2"></i>Back to arrangement catalogue
+                        </Link>
+                    </div>
+                    <h1 className="display-4 fw-bold font-playfair text-dark">Custom Order Request Form</h1>
+                    <p className="lead text-muted mx-auto mb-0" style={{ maxWidth: '700px' }}>
+                        Start from a selected arrangement type or build your request from scratch. You can still adjust quantity, flowers, colors, and inspiration details before you submit.
                     </p>
                 </div>
+
+                {preselectedArrangementOption && (
+                    <div
+                        className="mx-auto mb-4 p-4"
+                        style={{
+                            maxWidth: '900px',
+                            borderRadius: '24px',
+                            background: 'linear-gradient(135deg, rgba(240, 123, 150, 0.12) 0%, rgba(255, 244, 247, 0.96) 100%)',
+                            border: '1px solid rgba(240, 123, 150, 0.18)',
+                            boxShadow: '0 16px 32px rgba(65, 35, 46, 0.08)'
+                        }}
+                    >
+                        <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+                            <div className="text-start">
+                                <div className="text-uppercase fw-bold small mb-2" style={{ letterSpacing: '0.12em', color: 'var(--shop-pink)' }}>
+                                    Selected From Catalogue
+                                </div>
+                                <h2 className="h4 fw-bold mb-2">{preselectedArrangementOption.label}</h2>
+                                <p className="text-muted mb-0">
+                                    This arrangement was preselected from the catalogue. You can keep it, add more arrangement types, or fully change the request here.
+                                </p>
+                            </div>
+                            <div className="d-flex flex-wrap gap-2">
+                                <span className="badge rounded-pill text-bg-light px-3 py-2">
+                                    {preselectedArrangementOption.groupLabel || 'Custom Order'}
+                                </span>
+                                <span className="badge rounded-pill text-bg-light px-3 py-2">
+                                    {preselectedArrangementOption.flowersPerArrangement > 0
+                                        ? `${preselectedArrangementOption.flowersPerArrangement} flowers guide`
+                                        : 'Custom flower count'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 <div className="row justify-content-center">
                     <div className="col-lg-9">
