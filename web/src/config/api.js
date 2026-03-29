@@ -59,6 +59,9 @@ export const stockAPI = {
                 quantity: item.quantity ?? 0, // <-- CRITICAL: stock limit enforcement
                 reorder_level: item.reorder_level,
                 is_available: item.is_available,
+                wrapper_group_name: item.wrapper_group_name ?? null,
+                wrapper_color: item.wrapper_color ?? null,
+                updated_at: item.updated_at ?? null,
             }));
 
 

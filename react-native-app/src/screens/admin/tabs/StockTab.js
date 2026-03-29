@@ -32,6 +32,22 @@ const normalizeStockCategory = (value) => {
   if (normalized === 'flower' || normalized === 'flowers') return 'Flowers';
   return String(value || '').trim();
 };
+const isWrapperStockItem = (item) => normalizeStockCategory(item?.category) === 'Wrappers';
+const getWrapperDesignName = (item) => {
+  const explicitGroupName = String(item?.wrapper_group_name || '').trim();
+  if (explicitGroupName) return explicitGroupName;
+  return String(item?.name || '').trim();
+};
+const getWrapperColorName = (item) => String(item?.wrapper_color || '').trim();
+const getStockDisplayName = (item) => {
+  if (!isWrapperStockItem(item)) return item?.name || '';
+  return getWrapperDesignName(item) || item?.name || '';
+};
+const getStockDescription = (item) => {
+  if (!isWrapperStockItem(item)) return '';
+  const colorName = getWrapperColorName(item);
+  return colorName ? `Color variation: ${colorName}` : 'Single wrapper design';
+};
 
 const StockTab = () => {
   const [activeStockTab, setActiveStockTab] = useState('Ribbons');
@@ -50,6 +66,7 @@ const StockTab = () => {
     quantity: '',
     unit: '',
     is_available: true, // Boolean status field
+    wrapper_color: '',
     image: null,
   });
 
@@ -108,6 +125,8 @@ const StockTab = () => {
       unit: '',
 
       is_available: true, // Boolean status field
+
+      wrapper_color: '',
 
       image: null,
 
@@ -211,7 +230,7 @@ const StockTab = () => {
 
     setStockFormData({
 
-      name: item.name,
+      name: getStockDisplayName(item),
 
       price: item.price ? item.price.toString() : '',
 
@@ -221,7 +240,9 @@ const StockTab = () => {
 
       is_available: item.is_available, // Corrected: use item.is_available from API
 
-      image: item.image_url ? { uri: item.image_url.startsWith('http') ? item.image_url : `${BASE_URL}${item.image_url}` } : null,
+      wrapper_color: getWrapperColorName(item),
+
+      image: item.image_url ? { uri: item.image_url.startsWith('http') || item.image_url.startsWith('data:') ? item.image_url : `${BASE_URL}${item.image_url}` } : null,
 
     });
 
@@ -254,7 +275,11 @@ const StockTab = () => {
 
   const handleSaveStock = async () => {
 
-    if (!stockFormData.name || !stockFormData.quantity) {
+    const normalizedCategory = normalizeStockCategory(activeStockTab);
+    const trimmedName = stockFormData.name.trim();
+    const trimmedWrapperColor = stockFormData.wrapper_color.trim();
+
+    if (!trimmedName || !stockFormData.quantity) {
 
       Alert.alert('Error', 'Please fill in Name and Quantity');
 
@@ -272,13 +297,17 @@ const StockTab = () => {
 
         ...stockFormData,
 
-        category: normalizeStockCategory(activeStockTab),
+        name: trimmedName,
+        category: normalizedCategory,
 
         price: parseFloat(stockFormData.price) || 0,
 
         quantity: parseInt(stockFormData.quantity) || 0,
 
         is_available: stockFormData.is_available, // Corrected: send is_available
+
+        wrapper_group_name: normalizedCategory === 'Wrappers' ? trimmedName : null,
+        wrapper_color: normalizedCategory === 'Wrappers' && trimmedWrapperColor ? trimmedWrapperColor : null,
 
         image: stockFormData.image,
 
@@ -310,10 +339,12 @@ const StockTab = () => {
   const filteredStock = stockItems.filter(item =>
     normalizeStockCategory(item.category) === activeStockTab
   );
+  const modalStockCategory = normalizeStockCategory(editingStock?.category || activeStockTab);
+  const isWrapperForm = modalStockCategory === 'Wrappers';
 
   const renderStockItem = ({ item }) => {
     const imageUrl = item.image_url
-      ? item.image_url.startsWith('http')
+      ? item.image_url.startsWith('http') || item.image_url.startsWith('data:')
         ? item.image_url
         : `${BASE_URL}${item.image_url}`
       : null;
@@ -321,8 +352,10 @@ const StockTab = () => {
     return (
       <ProductCard
         imageUrl={imageUrl}
-        name={item.name}
+        name={getStockDisplayName(item)}
         category={item.category || 'Uncategorized'}
+        description={getStockDescription(item)}
+        showDescription={Boolean(getStockDescription(item))}
         priceText={`₱${item.price || '0'} / ${item.unit || 'unit'}`}
         stockText={`Qty: ${item.quantity}`}
         showActions
@@ -464,19 +497,25 @@ const StockTab = () => {
 
             <ScrollView showsVerticalScrollIndicator={false}>
 
-              <Text style={styles.inputLabel}>Item Name *</Text>
+              <Text style={styles.inputLabel}>{isWrapperForm ? 'Wrapper Design Name *' : 'Item Name *'}</Text>
 
               <TextInput
 
                 style={styles.input}
 
-                placeholder="Enter item name"
+                placeholder={isWrapperForm ? 'e.g. Classic Wrap' : 'Enter item name'}
 
                 value={stockFormData.name}
 
                 onChangeText={(text) => setStockFormData({ ...stockFormData, name: text })}
 
               />
+
+              {isWrapperForm && (
+                <Text style={styles.inputHelperText}>
+                  Use the same design name on multiple wrapper entries, then give each entry its own color variation.
+                </Text>
+              )}
 
               <View style={styles.rowInputs}>
 
@@ -543,6 +582,28 @@ const StockTab = () => {
                 </View>
 
               </View>
+
+              {isWrapperForm && (
+                <>
+                  <Text style={styles.inputLabel}>Color Variation</Text>
+
+                  <TextInput
+
+                    style={styles.input}
+
+                    placeholder="e.g. Dark Blue"
+
+                    value={stockFormData.wrapper_color}
+
+                    onChangeText={(text) => setStockFormData({ ...stockFormData, wrapper_color: text })}
+
+                  />
+
+                  <Text style={styles.inputHelperText}>
+                    Leave this empty when the wrapper is a single design with no color choices.
+                  </Text>
+                </>
+              )}
 
               <Text style={styles.inputLabel}>Status</Text>
 

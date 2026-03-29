@@ -2166,6 +2166,8 @@ export const adminAPI = {
             reorder_level: parseInt(formData.reorder_level, 10) || 10,
             is_available: formData.is_available, // Mapped from is_available in form
             image_url: imageUrl,
+            wrapper_group_name: formData.wrapper_group_name || null,
+            wrapper_color: formData.wrapper_color || null,
         };
 
         const { data: newStock, error } = await supabase
@@ -2243,6 +2245,8 @@ export const adminAPI = {
             reorder_level: parseInt(formData.reorder_level, 10) || 10,
             is_available: formData.is_available, // Mapped from is_available in form
             image_url: imageUrl,
+            wrapper_group_name: formData.wrapper_group_name || null,
+            wrapper_color: formData.wrapper_color || null,
             updated_at: new Date().toISOString(),
         };
 

@@ -6,17 +6,12 @@ import RequestSuccessModal from '../components/RequestSuccessModal';
 import InfoModal from '../components/InfoModal'; // Import InfoModal
 import { supabase } from '../config/supabase';
 import { stockAPI } from '../config/api'; // Import stockAPI
-import naturalArchWrapImg from '../assets/wrappers/natural-arch-wrap-cutout.png';
-import naturalFanWrapImg from '../assets/wrappers/natural-fan-wrap-cutout.png';
-import naturalPalmWrapImg from '../assets/wrappers/natural-palm-wrap-cutout.png';
 import '../styles/Customized.css';
 
 const placeholderStemImg = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 const placeholderImg = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodGg9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiPjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodGg9IjEwMCIgZmlsbD0iI2UwZTBlMCIvPjx0ZXh0IHg9IjUwIiB5PSI1MCIgZm9udC1mYW1pbHk9ImFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjMzMzIiBhbmNob3ItcGVudD0ibWlkZGxlIiB0ZXh0LWFuY2hvcnM9Im1pZGRsZSI+Tm8gSW1hZ2U8L3RleHQ+PC9zdmc+'; // SVG "No Image" placeholder
 
 const MAX_STEM_COUNT = 500; // Maximum number of stems allowed for performance reasons.
-const DEFAULT_LOCAL_WRAPPER_PRICE = 60;
-const DEFAULT_LOCAL_WRAPPER_QUANTITY = 24;
 const bundleOptions = [3, 6, 12];
 const steps = [
   { id: 1, icon: <FaScroll />, label: 'Wrapper' },
@@ -48,6 +43,7 @@ const WRAPPER_COLOR_SWATCH_MAP = {
   'Sky Blue': '#38bdf8',
   Purple: '#8b5cf6',
 };
+const normalizeText = (value) => String(value || '').trim();
 
 const normalizeStockCategory = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
@@ -68,6 +64,21 @@ const getOptionStockLabel = (item) => {
 const isOptionSelectable = (item) => item.is_available !== false && (item.quantity || 0) > 0;
 const isLikelyColorVariant = (value) => COLOR_VARIANT_NAMES.has(String(value || '').trim().toLowerCase());
 const getWrapperSwatch = (value) => WRAPPER_COLOR_SWATCH_MAP[String(value || '').trim()] || '#94a3b8';
+const createWrapperGroupId = (value) => normalizeText(value)
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, '-')
+  .replace(/^-+|-+$/g, '')
+  || 'wrapper-group';
+const getWrapperGroupName = (item) => {
+  const explicitGroupName = normalizeText(item.wrapper_group_name);
+  if (explicitGroupName) return explicitGroupName;
+  return isLikelyColorVariant(item.name) ? 'Classic Wrap' : normalizeText(item.name);
+};
+const getWrapperColorName = (item) => {
+  const explicitColor = normalizeText(item.wrapper_color);
+  if (explicitColor) return explicitColor;
+  return isLikelyColorVariant(item.name) ? normalizeText(item.name) : '';
+};
 const buildWrapperVariant = ({
   groupId,
   groupName,
@@ -84,77 +95,47 @@ const buildWrapperVariant = ({
   name: colorName ? `${groupName} (${colorName})` : groupName,
 });
 const buildWrapperGroups = (stockWrappers) => {
-  const colorVariants = stockWrappers.filter((item) => isLikelyColorVariant(item.name));
-  const standaloneWrappers = stockWrappers.filter((item) => !isLikelyColorVariant(item.name));
-  const prices = stockWrappers.map((item) => Number(item.price) || 0).filter((value) => value > 0);
-  const quantities = stockWrappers.map((item) => Number(item.quantity) || 0).filter((value) => value > 0);
-  const localPrice = prices.length ? Math.max(...prices) : DEFAULT_LOCAL_WRAPPER_PRICE;
-  const localQuantity = quantities.length ? Math.max(...quantities) : DEFAULT_LOCAL_WRAPPER_QUANTITY;
-  const groups = [];
+  const groups = new Map();
 
-  if (colorVariants.length > 0) {
-    const sortedVariants = [...colorVariants].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
-    const groupName = 'Classic Wrap';
-    const variants = sortedVariants.map((item) => buildWrapperVariant({
+  stockWrappers.forEach((item) => {
+    const groupName = getWrapperGroupName(item);
+    if (!groupName) return;
+
+    const groupId = createWrapperGroupId(groupName);
+    const colorName = getWrapperColorName(item);
+    const variant = buildWrapperVariant({
       ...item,
-      groupId: 'classic-wrap',
+      groupId,
       groupName,
-      colorName: item.name,
-    }));
-
-    groups.push({
-      id: 'classic-wrap',
-      name: groupName,
-      img: variants[0]?.img || placeholderImg,
-      layerImg: variants[0]?.layerImg || variants[0]?.img || placeholderImg,
-      variants,
+      colorName,
     });
-  }
 
-  standaloneWrappers.forEach((item) => {
-    const groupId = `wrapper-${item.id}`;
-    groups.push({
-      id: groupId,
-      name: item.name,
-      img: item.img,
-      layerImg: item.layerImg,
-      variants: [
-        buildWrapperVariant({
-          ...item,
-          groupId,
-          groupName: item.name,
-        }),
-      ],
-    });
+    if (!groups.has(groupId)) {
+      groups.set(groupId, {
+        id: groupId,
+        name: groupName,
+        img: item.img || placeholderImg,
+        layerImg: item.layerImg || item.img || placeholderImg,
+        variants: [],
+      });
+    }
+
+    const group = groups.get(groupId);
+    if (!group.img && variant.img) group.img = variant.img;
+    if (!group.layerImg && (variant.layerImg || variant.img)) group.layerImg = variant.layerImg || variant.img;
+    group.variants.push(variant);
   });
 
-  [
-    { id: 'leaf-fan-wrap', name: 'Leaf Fan Wrap', image: naturalFanWrapImg },
-    { id: 'leaf-arch-wrap', name: 'Leaf Arch Wrap', image: naturalArchWrapImg },
-    { id: 'palm-halo-wrap', name: 'Palm Halo Wrap', image: naturalPalmWrapImg },
-  ].forEach((item) => {
-    groups.push({
-      id: item.id,
-      name: item.name,
-      img: item.image,
-      layerImg: item.image,
-      variants: [
-        buildWrapperVariant({
-          id: item.id,
-          price: localPrice,
-          img: item.image,
-          layerImg: item.image,
-          quantity: localQuantity,
-          is_available: true,
-          groupId: item.id,
-          groupName: item.name,
-          stockLabel: 'Available',
-        }),
-      ],
-    });
-  });
-
-  return groups;
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      variants: [...group.variants].sort((a, b) => {
+        const labelA = normalizeText(a.colorName || a.groupName || a.name);
+        const labelB = normalizeText(b.colorName || b.groupName || b.name);
+        return labelA.localeCompare(labelB);
+      }),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 };
 
 const BASE_PRESET_POSITIONS = {
@@ -246,6 +227,8 @@ const Customized = ({ addToCart }) => {
             layerImg: item.layerImg,
             quantity: item.quantity || 0,
             is_available: item.is_available !== false,
+            wrapper_group_name: item.wrapper_group_name || '',
+            wrapper_color: item.wrapper_color || '',
           }));
 
         const processedRibbons = allStockItems
