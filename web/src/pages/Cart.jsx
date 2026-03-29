@@ -506,7 +506,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                             {showCustomized && customizedItems.length > 0 && (
                                 <div className="mb-5" style={isTypeDisabled('customized') ? disabledSectionStyle : {}}>
                                     <div className="d-flex align-items-center justify-content-between mb-3 pb-2 border-bottom">
-                                        <h5 className="fw-bold mb-0">Customized Bouquets</h5>
+                <h5 className="fw-bold mb-0">Customizer Studio</h5>
                                         {isTypeDisabled('customized') && (
                                             <span className="badge bg-light text-muted border small"><i className="fas fa-lock me-1"></i>Deselect current items first</span>
                                         )}

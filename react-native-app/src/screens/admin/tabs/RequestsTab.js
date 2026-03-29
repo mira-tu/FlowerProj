@@ -1504,7 +1504,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
           value={request.delivery_method === 'delivery' ? 'Delivery' : 'Pick-up'}
         />
         <DetailSection
-          label="Customized Bouquets:"
+                  label="Customizer Studio:"
           value={customizedItems.length ? String(customizedItems.length) : null}
         />
 
@@ -2359,7 +2359,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
           <View style={styles.eoSection}>
             <View style={styles.eoSectionHeader}>
               <Ionicons name="image-outline" size={16} color="#6B7280" />
-              <Text style={styles.eoSectionTitle}>Customized Bouquets ({customizedItems.length})</Text>
+                    <Text style={styles.eoSectionTitle}>Customizer Studio ({customizedItems.length})</Text>
             </View>
             {customizedItems.map((customizedItem, index) => (
               <TouchableOpacity

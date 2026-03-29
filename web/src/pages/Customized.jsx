@@ -482,7 +482,7 @@ const Customized = ({ addToCart }) => {
         setInfoModal({
           show: true,
           title: 'Login Required',
-          message: 'You need to be logged in to add customized bouquets to your cart.',
+          message: 'You need to be logged in to add Customizer Studio items to your cart.',
           linkTo: '/login',
           linkText: 'Log In'
         });

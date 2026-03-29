@@ -176,14 +176,14 @@ const About = () => {
                                         <img
                                             src={aboutData.customBouquetsImage || customBouquetsImg}
                                             className="w-100 h-100 object-fit-cover"
-                                            alt="Customized Bouquets"
+                        alt="Customizer Studio"
                                             loading="lazy"
                                             decoding="async"
                                         />
                                     </Link>
                                 </div>
                                 <div className="card-body p-4 text-center d-flex flex-column">
-                                    <h3 className="h4 fw-bold mb-3">Customized Bouquets</h3>
+                  <h3 className="h4 fw-bold mb-3">Customizer Studio</h3>
                                     <p className="text-muted mb-4">{aboutData.customBouquetsDescription}</p>
                                     <div className="mt-auto">
                                         <Link to="/customized" className="btn btn-pink rounded-pill px-4 fw-semibold w-50">Learn More</Link>
