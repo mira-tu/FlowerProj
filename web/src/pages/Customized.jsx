@@ -6,18 +6,48 @@ import RequestSuccessModal from '../components/RequestSuccessModal';
 import InfoModal from '../components/InfoModal'; // Import InfoModal
 import { supabase } from '../config/supabase';
 import { stockAPI } from '../config/api'; // Import stockAPI
+import naturalArchWrapImg from '../assets/wrappers/natural-arch-wrap-cutout.png';
+import naturalFanWrapImg from '../assets/wrappers/natural-fan-wrap-cutout.png';
+import naturalPalmWrapImg from '../assets/wrappers/natural-palm-wrap-cutout.png';
 import '../styles/Customized.css';
 
 const placeholderStemImg = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 const placeholderImg = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodGg9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiPjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodGg9IjEwMCIgZmlsbD0iI2UwZTBlMCIvPjx0ZXh0IHg9IjUwIiB5PSI1MCIgZm9udC1mYW1pbHk9ImFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjMzMzIiBhbmNob3ItcGVudD0ibWlkZGxlIiB0ZXh0LWFuY2hvcnM9Im1pZGRsZSI+Tm8gSW1hZ2U8L3RleHQ+PC9zdmc+'; // SVG "No Image" placeholder
 
 const MAX_STEM_COUNT = 500; // Maximum number of stems allowed for performance reasons.
+const DEFAULT_LOCAL_WRAPPER_PRICE = 60;
+const DEFAULT_LOCAL_WRAPPER_QUANTITY = 24;
 const bundleOptions = [3, 6, 12];
 const steps = [
   { id: 1, icon: <FaScroll />, label: 'Wrapper' },
   { id: 2, icon: <FaRibbon />, label: 'Ribbon' },
   { id: 3, icon: <FaSeedling />, label: 'Flowers' }
 ];
+const COLOR_VARIANT_NAMES = new Set([
+  'black',
+  'blue',
+  'dark blue',
+  'gold',
+  'green',
+  'lavender',
+  'light blue',
+  'maroon',
+  'navy blue',
+  'orange',
+  'pink',
+  'purple',
+  'red',
+  'royal blue',
+  'silver',
+  'sky blue',
+  'white',
+  'yellow',
+]);
+const WRAPPER_COLOR_SWATCH_MAP = {
+  'Dark Blue': '#1d4ed8',
+  'Sky Blue': '#38bdf8',
+  Purple: '#8b5cf6',
+};
 
 const normalizeStockCategory = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
@@ -28,6 +58,7 @@ const normalizeStockCategory = (value) => {
 };
 
 const getOptionStockLabel = (item) => {
+  if (item.stockLabel) return item.stockLabel;
   if (item.is_available === false) return 'Unavailable';
   if ((item.quantity || 0) <= 0) return 'Out of Stock';
   if ((item.quantity || 0) <= 5) return `Only ${item.quantity} left!`;
@@ -35,6 +66,96 @@ const getOptionStockLabel = (item) => {
 };
 
 const isOptionSelectable = (item) => item.is_available !== false && (item.quantity || 0) > 0;
+const isLikelyColorVariant = (value) => COLOR_VARIANT_NAMES.has(String(value || '').trim().toLowerCase());
+const getWrapperSwatch = (value) => WRAPPER_COLOR_SWATCH_MAP[String(value || '').trim()] || '#94a3b8';
+const buildWrapperVariant = ({
+  groupId,
+  groupName,
+  colorName = '',
+  stockLabel = '',
+  ...item
+}) => ({
+  ...item,
+  groupId,
+  groupName,
+  colorName,
+  stockLabel,
+  swatch: colorName ? getWrapperSwatch(colorName) : getWrapperSwatch(groupName),
+  name: colorName ? `${groupName} (${colorName})` : groupName,
+});
+const buildWrapperGroups = (stockWrappers) => {
+  const colorVariants = stockWrappers.filter((item) => isLikelyColorVariant(item.name));
+  const standaloneWrappers = stockWrappers.filter((item) => !isLikelyColorVariant(item.name));
+  const prices = stockWrappers.map((item) => Number(item.price) || 0).filter((value) => value > 0);
+  const quantities = stockWrappers.map((item) => Number(item.quantity) || 0).filter((value) => value > 0);
+  const localPrice = prices.length ? Math.max(...prices) : DEFAULT_LOCAL_WRAPPER_PRICE;
+  const localQuantity = quantities.length ? Math.max(...quantities) : DEFAULT_LOCAL_WRAPPER_QUANTITY;
+  const groups = [];
+
+  if (colorVariants.length > 0) {
+    const sortedVariants = [...colorVariants].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    const groupName = 'Classic Wrap';
+    const variants = sortedVariants.map((item) => buildWrapperVariant({
+      ...item,
+      groupId: 'classic-wrap',
+      groupName,
+      colorName: item.name,
+    }));
+
+    groups.push({
+      id: 'classic-wrap',
+      name: groupName,
+      img: variants[0]?.img || placeholderImg,
+      layerImg: variants[0]?.layerImg || variants[0]?.img || placeholderImg,
+      variants,
+    });
+  }
+
+  standaloneWrappers.forEach((item) => {
+    const groupId = `wrapper-${item.id}`;
+    groups.push({
+      id: groupId,
+      name: item.name,
+      img: item.img,
+      layerImg: item.layerImg,
+      variants: [
+        buildWrapperVariant({
+          ...item,
+          groupId,
+          groupName: item.name,
+        }),
+      ],
+    });
+  });
+
+  [
+    { id: 'leaf-fan-wrap', name: 'Leaf Fan Wrap', image: naturalFanWrapImg },
+    { id: 'leaf-arch-wrap', name: 'Leaf Arch Wrap', image: naturalArchWrapImg },
+    { id: 'palm-halo-wrap', name: 'Palm Halo Wrap', image: naturalPalmWrapImg },
+  ].forEach((item) => {
+    groups.push({
+      id: item.id,
+      name: item.name,
+      img: item.image,
+      layerImg: item.image,
+      variants: [
+        buildWrapperVariant({
+          id: item.id,
+          price: localPrice,
+          img: item.image,
+          layerImg: item.image,
+          quantity: localQuantity,
+          is_available: true,
+          groupId: item.id,
+          groupName: item.name,
+          stockLabel: 'Available',
+        }),
+      ],
+    });
+  });
+
+  return groups;
+};
 
 const BASE_PRESET_POSITIONS = {
   3: [
@@ -94,6 +215,7 @@ const Customized = ({ addToCart }) => {
   const [loadingCustomizationData, setLoadingCustomizationData] = useState(true);
   const [stemLayouts, setStemLayouts] = useState([]);
   const [draggingStemId, setDraggingStemId] = useState(null);
+  const [wrapperColorModal, setWrapperColorModal] = useState({ open: false, groupId: null });
 
   useEffect(() => {
     const fetchCustomizationData = async () => {
@@ -139,7 +261,7 @@ const Customized = ({ addToCart }) => {
           }));
 
         setFlowers(processedFlowers);
-        setWrappers(processedWrappers);
+        setWrappers(buildWrapperGroups(processedWrappers));
         setRibbons(processedRibbons);
 
       } catch (error) {
@@ -259,9 +381,7 @@ const Customized = ({ addToCart }) => {
     }
 
     let item = null;
-    if (type === 'wrappers') {
-      item = wrappers.find((entry) => entry.id === id);
-    } else if (type === 'ribbons') {
+    if (type === 'ribbons') {
       item = ribbons.find((entry) => entry.id === id);
     }
     if (!item) return;
@@ -269,10 +389,44 @@ const Customized = ({ addToCart }) => {
       setInfoModal({ show: true, title: 'Unavailable', message: `${item.name} is currently unavailable for customized orders.` });
       return;
     }
-    setSelection((prev) => ({ ...prev, [type === 'wrappers' ? 'wrapper' : 'ribbon']: item }));
+    setSelection((prev) => ({ ...prev, ribbon: item }));
+  };
+
+  const handleWrapperSelect = (groupId, variantId = null) => {
+    const wrapperGroup = wrappers.find((entry) => entry.id === groupId);
+    if (!wrapperGroup) return;
+
+    const selectedVariant = variantId != null
+      ? wrapperGroup.variants.find((entry) => String(entry.id) === String(variantId))
+      : null;
+    const activeVariant = selectedVariant
+      || (selection.wrapper?.groupId === groupId
+        ? wrapperGroup.variants.find((entry) => String(entry.id) === String(selection.wrapper.id))
+        : null)
+      || wrapperGroup.variants.find(isOptionSelectable)
+      || wrapperGroup.variants[0];
+
+    if (!activeVariant) return;
+    if (!isOptionSelectable(activeVariant)) {
+      setInfoModal({ show: true, title: 'Unavailable', message: `${activeVariant.name} is currently unavailable for customized orders.` });
+      return;
+    }
+
+    setSelection((prev) => ({ ...prev, wrapper: activeVariant }));
+  };
+  const openWrapperColorModal = (groupId) => {
+    setWrapperColorModal({ open: true, groupId });
+  };
+  const closeWrapperColorModal = () => {
+    setWrapperColorModal({ open: false, groupId: null });
+  };
+  const handleWrapperColorSelect = (groupId, variantId) => {
+    handleWrapperSelect(groupId, variantId);
+    closeWrapperColorModal();
   };
   const handleReset = () => {
     setSelection({ flowers: [], bundleSize: 0, wrapper: null, ribbon: null });
+    closeWrapperColorModal();
     setActiveStep(1);
   };
 
@@ -353,7 +507,13 @@ const Customized = ({ addToCart }) => {
         image: photoBase64,
         flowers: selection.flowers.map(f => ({ id: f.id, name: f.name, price: f.price })),
         bundleSize: selection.bundleSize,
-        wrapper: selection.wrapper ? { id: selection.wrapper.id, name: selection.wrapper.name, price: selection.wrapper.price } : null,
+        wrapper: selection.wrapper ? {
+          id: selection.wrapper.id,
+          name: selection.wrapper.name,
+          price: selection.wrapper.price,
+          groupName: selection.wrapper.groupName,
+          colorName: selection.wrapper.colorName || null,
+        } : null,
         ribbon: selection.ribbon ? { id: selection.ribbon.id, name: selection.ribbon.name, price: selection.ribbon.price } : null,
         price: totalPrice,
         qty: 1
@@ -463,8 +623,6 @@ const Customized = ({ addToCart }) => {
     let options = [];
     if (groupKey === 'flowers') {
       options = flowers;
-    } else if (groupKey === 'wrappers') {
-      options = wrappers;
     } else if (groupKey === 'ribbons') {
       options = ribbons;
     }
@@ -504,6 +662,77 @@ const Customized = ({ addToCart }) => {
       </div>
     );
   };
+
+  const renderWrapperOptions = () => {
+    if (loadingCustomizationData) {
+      return <div className="loading-indicator">Loading options...</div>;
+    }
+    if (wrappers.length === 0) {
+      return <div className="no-options">No wrappers available.</div>;
+    }
+
+    return (
+      <div className="grid-options" id="wrappersOptions">
+        {wrappers.map((group) => {
+          const selectedVariant = selection.wrapper?.groupId === group.id
+            ? group.variants.find((entry) => String(entry.id) === String(selection.wrapper.id)) || selection.wrapper
+            : null;
+          const previewVariant = selectedVariant || group.variants.find(isOptionSelectable) || group.variants[0];
+          const isSelected = Boolean(selectedVariant);
+          const isSelectable = group.variants.some(isOptionSelectable);
+          const hasColorOptions = group.variants.length > 1;
+
+          return (
+            <div
+              key={group.id}
+              className={`option-card wrapper-card ${hasColorOptions ? 'has-colors' : ''} ${isSelected ? 'selected' : ''} ${!isSelectable ? 'disabled' : ''}`}
+              role="button"
+              tabIndex={isSelectable ? 0 : -1}
+              aria-disabled={!isSelectable}
+              onClick={() => {
+                if (isSelectable) handleWrapperSelect(group.id);
+              }}
+              onKeyDown={(event) => {
+                if (!isSelectable) return;
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  handleWrapperSelect(group.id);
+                }
+              }}
+            >
+              <img src={previewVariant?.img || group.img || placeholderImg} alt={group.name} className="option-img" />
+              <div className="option-name">{group.name}</div>
+              {group.variants.length > 1 && (
+                <div className="option-variant">
+                  {selectedVariant?.colorName ? `Color: ${selectedVariant.colorName}` : `${group.variants.length} colors available`}
+                </div>
+              )}
+              <div className="option-price">+{formatPrice(previewVariant?.price || 0)}</div>
+              <div className={`option-stock ${!isSelectable ? 'danger' : ((previewVariant?.quantity || 0) <= 5 && !previewVariant?.stockLabel ? 'warning' : '')}`}>
+                {previewVariant ? getOptionStockLabel(previewVariant) : 'Unavailable'}
+              </div>
+
+              {hasColorOptions && (
+                <button
+                  type="button"
+                  className="wrapper-color-trigger"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openWrapperColorModal(group.id);
+                  }}
+                >
+                  Select Color
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+  const activeWrapperColorGroup = wrapperColorModal.groupId
+    ? wrappers.find((entry) => entry.id === wrapperColorModal.groupId) || null
+    : null;
   return (
     <div className="customize-page">
       <header className="app-header">
@@ -548,6 +777,45 @@ const Customized = ({ addToCart }) => {
         linkText={infoModal.linkText}
         linkState={infoModal.linkState}
       />
+
+      {wrapperColorModal.open && activeWrapperColorGroup && (
+        <div className="wrapper-color-modal-backdrop" onClick={closeWrapperColorModal}>
+          <div className="wrapper-color-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="wrapper-color-modal-header">
+              <div>
+                <h4>{activeWrapperColorGroup.name}</h4>
+                <p>Choose a color variation for this wrapper.</p>
+              </div>
+              <button type="button" className="wrapper-color-modal-close" onClick={closeWrapperColorModal}>
+                ×
+              </button>
+            </div>
+
+            <div className="wrapper-color-modal-grid">
+              {activeWrapperColorGroup.variants.map((variant) => {
+                const isVariantSelected = selection.wrapper?.id === variant.id;
+                const isVariantSelectable = isOptionSelectable(variant);
+
+                return (
+                  <button
+                    key={variant.id}
+                    type="button"
+                    className={`wrapper-color-pill modal-pill ${isVariantSelected ? 'selected' : ''}`}
+                    onClick={() => handleWrapperColorSelect(activeWrapperColorGroup.id, variant.id)}
+                    disabled={!isVariantSelectable}
+                  >
+                    <span className="wrapper-color-swatch" style={{ backgroundColor: variant.swatch }} />
+                    <span className="wrapper-color-pill-text">
+                      <strong>{variant.colorName}</strong>
+                      <small>{getOptionStockLabel(variant)}</small>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="editor-layout">
         <section className="preview-canvas">
@@ -643,7 +911,7 @@ const Customized = ({ addToCart }) => {
               </div>
               <div className="control-group">
                 <label>Wrapper Style</label>
-                {renderOptions('wrappers', selection.wrapper?.id || null)}
+                {renderWrapperOptions()}
               </div>
             </div>
 

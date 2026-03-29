@@ -30,6 +30,24 @@ import {
 
 const STORAGE_BUCKET = 'product-images';
 const STORAGE_FOLDER = 'custom-order-catalog';
+const IMAGE_EXTENSION_TO_MIME_TYPE = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  heic: 'image/heic',
+  heif: 'image/heif',
+};
+const IMAGE_MIME_TYPE_TO_EXTENSION = {
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/heic': 'heic',
+  'image/heif': 'heif',
+};
 
 const SECTION_CONFIG = [
   {
@@ -56,6 +74,95 @@ const SECTION_CONFIG = [
 ];
 
 const trimText = (value) => String(value || '').trim();
+
+const normalizeFileExtension = (value) => {
+  const sanitized = trimText(value).toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!sanitized) return '';
+  return sanitized === 'jpeg' ? 'jpg' : sanitized;
+};
+
+const extractImageDataUrlParts = (value) => {
+  const match = trimText(value).match(/^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i);
+  if (!match) return null;
+
+  return {
+    mimeType: match[1].toLowerCase(),
+    base64: match[2],
+  };
+};
+
+const getFileExtensionFromPath = (value) => {
+  const normalizedValue = trimText(value);
+  if (!normalizedValue || normalizedValue.startsWith('data:')) return '';
+
+  const cleanValue = normalizedValue.split('?')[0].split('#')[0];
+  const fileName = cleanValue.split('/').pop() || cleanValue;
+  if (!fileName.includes('.')) return '';
+
+  return normalizeFileExtension(fileName.split('.').pop());
+};
+
+const sanitizeStoragePathSegment = (value, fallback) => {
+  const sanitized = trimText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return sanitized || fallback;
+};
+
+const getCatalogImageUploadPayload = (image) => {
+  if (!image) {
+    return { kind: 'empty' };
+  }
+
+  if (typeof image === 'string') {
+    const stringDataUrl = extractImageDataUrlParts(image);
+    if (stringDataUrl) {
+      return {
+        kind: 'upload',
+        base64: stringDataUrl.base64,
+        mimeType: stringDataUrl.mimeType,
+        extension: IMAGE_MIME_TYPE_TO_EXTENSION[stringDataUrl.mimeType] || 'jpg',
+      };
+    }
+
+    return {
+      kind: 'existing',
+      uri: image,
+    };
+  }
+
+  const uriDataUrl = extractImageDataUrlParts(image.uri);
+  const base64DataUrl = extractImageDataUrlParts(image.base64);
+  const base64Payload = trimText(base64DataUrl?.base64 || image.base64 || uriDataUrl?.base64);
+
+  if (!base64Payload) {
+    return {
+      kind: 'existing',
+      uri: image.uri || '',
+    };
+  }
+
+  const mimeType = trimText(image.mimeType).toLowerCase()
+    || base64DataUrl?.mimeType
+    || uriDataUrl?.mimeType
+    || IMAGE_EXTENSION_TO_MIME_TYPE[
+      getFileExtensionFromPath(image.fileName) || getFileExtensionFromPath(image.uri)
+    ]
+    || 'image/jpeg';
+  const extension = IMAGE_MIME_TYPE_TO_EXTENSION[mimeType]
+    || getFileExtensionFromPath(image.fileName)
+    || getFileExtensionFromPath(image.uri)
+    || 'jpg';
+
+  return {
+    kind: 'upload',
+    base64: base64Payload,
+    mimeType,
+    extension,
+  };
+};
 
 const getImageUri = (image) => {
   if (!image) return '';
@@ -290,19 +397,20 @@ const CustomOrderTab = () => {
   };
 
   const uploadCatalogImage = async (image, sectionType, itemId) => {
-    if (!image) return '';
-    if (typeof image === 'string') return image;
-    if (!image.base64) return image.uri || '';
+    const uploadPayload = getCatalogImageUploadPayload(image);
 
-    const fileExtension = image.fileName?.split('.').pop()
-      || image.uri?.split('.').pop()
-      || (image.mimeType === 'image/png' ? 'png' : 'jpg');
-    const contentType = image.mimeType || (fileExtension === 'png' ? 'image/png' : 'image/jpeg');
-    const filePath = `${STORAGE_FOLDER}/${sectionType}/${itemId}-${Date.now()}.${fileExtension.replace(/[^a-z0-9]/gi, '') || 'jpg'}`;
+    if (uploadPayload.kind === 'empty') return '';
+    if (uploadPayload.kind === 'existing') return uploadPayload.uri;
+
+    const normalizedSection = sanitizeStoragePathSegment(sectionType, 'custom-order');
+    const normalizedItemId = sanitizeStoragePathSegment(itemId, `${normalizedSection}-item`);
+    const fileExtension = normalizeFileExtension(uploadPayload.extension) || 'jpg';
+    const contentType = uploadPayload.mimeType || IMAGE_EXTENSION_TO_MIME_TYPE[fileExtension] || 'image/jpeg';
+    const filePath = `${STORAGE_FOLDER}/${normalizedSection}/${normalizedItemId}-${Date.now()}.${fileExtension}`;
 
     const { error: uploadError } = await supabase.storage
       .from(STORAGE_BUCKET)
-      .upload(filePath, decode(image.base64), {
+      .upload(filePath, decode(uploadPayload.base64), {
         contentType,
         upsert: true,
       });
