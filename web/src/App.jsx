@@ -66,6 +66,7 @@ import CustomizedCheckout from './pages/CustomizedCheckout';
 import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
 import InfoModal from './components/InfoModal';
+import { fetchCustomOrderCatalog } from './utils/customOrderCatalog';
 
 import { supabase } from './config/supabase';
 
@@ -84,10 +85,12 @@ function ScrollToTop() {
 function AppContent() {
   const location = useLocation();
   const isAuthRoute = ['/login', '/signup', '/reset-password'].includes(location.pathname);
+  const isCustomOrderCatalogRoute = location.pathname === '/custom-order';
   const showNavbar = !isAuthRoute;
   const [user, setUser] = useState(null);
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [preloadedCustomOrderCatalog, setPreloadedCustomOrderCatalog] = useState(null);
 
   // Use a ref to track the current auth state for synchronous access in cart functions
   const userRef = useRef(null);
@@ -121,7 +124,8 @@ function AppContent() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [{ data: categoriesData, error: categoriesError }, { data: productsData, error: productsError }] = await Promise.all([
+        const [catalogData, { data: categoriesData, error: categoriesError }, { data: productsData, error: productsError }] = await Promise.all([
+          isCustomOrderCatalogRoute ? fetchCustomOrderCatalog() : Promise.resolve(null),
           supabase.from('categories').select('id, name').eq('is_active', true).order('name', { ascending: true }),
           supabase
             .from('products')
@@ -129,6 +133,10 @@ function AppContent() {
             .eq('is_active', true)
             .limit(200)
         ]);
+
+        if (catalogData) {
+          setPreloadedCustomOrderCatalog(catalogData);
+        }
 
         if (categoriesError) {
           console.error('Error fetching categories:', categoriesError);
@@ -391,7 +399,7 @@ function AppContent() {
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/privacy" element={<Privacy />} />
-        <Route path="/custom-order" element={<CustomOrderCatalog />} />
+        <Route path="/custom-order" element={<CustomOrderCatalog initialCatalog={preloadedCustomOrderCatalog} />} />
         <Route path="/custom-order/form" element={<CustomOrder user={user} />} />
         <Route path="/custom-order/request" element={<Navigate to="/custom-order" replace />} />
         <Route path="/custom-order-v2" element={<Navigate to="/custom-order" replace />} />

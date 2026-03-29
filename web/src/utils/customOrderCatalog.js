@@ -190,6 +190,13 @@ export const DEFAULT_CUSTOM_ORDER_CATALOG = {
   })),
 };
 
+export const EMPTY_CUSTOM_ORDER_CATALOG = Object.freeze({
+  version: 0,
+  flowers: [],
+  arrangements: [],
+  colors: [],
+});
+
 const makeCatalogItemId = (value, prefix) => {
   const normalized = String(value || '')
     .trim()
@@ -209,6 +216,23 @@ const toPositiveInteger = (value, fallback = 0) => {
 };
 
 const normalizeCatalogImage = (value) => String(value || '').trim();
+const appendCatalogImageCacheKey = (value, cacheKey) => {
+  const normalizedValue = normalizeCatalogImage(value);
+  const normalizedCacheKey = String(cacheKey || '').trim();
+
+  if (!normalizedValue || !normalizedCacheKey || normalizedValue.startsWith('data:')) {
+    return normalizedValue;
+  }
+
+  try {
+    const imageUrl = new URL(normalizedValue);
+    imageUrl.searchParams.set('catalog_v', normalizedCacheKey);
+    return imageUrl.toString();
+  } catch (error) {
+    const separator = normalizedValue.includes('?') ? '&' : '?';
+    return `${normalizedValue}${separator}catalog_v=${encodeURIComponent(normalizedCacheKey)}`;
+  }
+};
 
 const normalizeCatalogColorSwatches = (colors = []) => (
   Array.isArray(colors)
@@ -291,6 +315,18 @@ export const normalizeCustomOrderCatalog = (catalog) => {
   };
 };
 
+const applyCatalogImageCacheKey = (catalog, cacheKey) => ({
+  ...catalog,
+  flowers: (catalog.flowers || []).map((item) => ({
+    ...item,
+    img: appendCatalogImageCacheKey(item.img, cacheKey),
+  })),
+  arrangements: (catalog.arrangements || []).map((item) => ({
+    ...item,
+    img: appendCatalogImageCacheKey(item.img, cacheKey),
+  })),
+});
+
 export const buildGroupedArrangementOptions = (arrangements = []) => {
   const groupedOptions = new Map();
 
@@ -323,7 +359,7 @@ export const fetchCustomOrderCatalog = async () => {
   try {
     const { data, error } = await supabase
       .from('app_content')
-      .select('value')
+      .select('value, updated_at')
       .eq('key', CUSTOM_ORDER_CATALOG_KEY)
       .maybeSingle();
 
@@ -331,7 +367,10 @@ export const fetchCustomOrderCatalog = async () => {
       return normalizeCustomOrderCatalog(DEFAULT_CUSTOM_ORDER_CATALOG);
     }
 
-    return normalizeCustomOrderCatalog(JSON.parse(data.value));
+    const normalizedCatalog = normalizeCustomOrderCatalog(JSON.parse(data.value));
+    const cacheKey = data.updated_at || normalizedCatalog.version || '';
+
+    return applyCatalogImageCacheKey(normalizedCatalog, cacheKey);
   } catch (error) {
     console.error('Error loading custom order catalog:', error);
     return normalizeCustomOrderCatalog(DEFAULT_CUSTOM_ORDER_CATALOG);

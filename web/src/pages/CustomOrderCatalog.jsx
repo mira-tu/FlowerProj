@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { buildGroupedArrangementOptions, DEFAULT_CUSTOM_ORDER_CATALOG, fetchCustomOrderCatalog, normalizeCustomOrderCatalog } from '../utils/customOrderCatalog';
+import { buildGroupedArrangementOptions, EMPTY_CUSTOM_ORDER_CATALOG, fetchCustomOrderCatalog } from '../utils/customOrderCatalog';
 import '../styles/CustomOrderCatalog.css';
 
 const GROUP_COPY = {
@@ -44,15 +44,21 @@ const buildFormPath = (arrangementValue = '') => (
     : '/custom-order/form'
 );
 
-const CustomOrderCatalog = () => {
+const CustomOrderCatalog = ({ initialCatalog = null }) => {
   const navigate = useNavigate();
   const previewRef = useRef(null);
-  const [catalog, setCatalog] = useState(() => normalizeCustomOrderCatalog(DEFAULT_CUSTOM_ORDER_CATALOG));
-  const [isLoading, setIsLoading] = useState(true);
+  const [catalog, setCatalog] = useState(initialCatalog || EMPTY_CUSTOM_ORDER_CATALOG);
+  const [isLoading, setIsLoading] = useState(!initialCatalog);
   const [activeCategory, setActiveCategory] = useState('All');
   const [selectedArrangementValue, setSelectedArrangementValue] = useState('');
 
   useEffect(() => {
+    if (initialCatalog) {
+      setCatalog(initialCatalog);
+      setIsLoading(false);
+      return undefined;
+    }
+
     let isMounted = true;
 
     const loadCatalog = async () => {
@@ -67,7 +73,7 @@ const CustomOrderCatalog = () => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [initialCatalog]);
 
   const activeArrangements = useMemo(
     () => catalog.arrangements.filter((item) => item.isActive !== false),
@@ -139,7 +145,7 @@ const CustomOrderCatalog = () => {
     });
   };
 
-  if (isLoading && !activeArrangements.length) {
+  if (isLoading) {
     return (
       <div className="custom-order-catalog-page">
         <div className="container custom-order-catalog-loading">
