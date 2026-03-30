@@ -24,6 +24,7 @@ import {
   createEmptyCustomOrderItem,
   CUSTOM_ORDER_CATALOG_KEY,
   DEFAULT_CUSTOM_ORDER_ADMIN_CATALOG,
+  formatCustomOrderArrangementPriceRange,
   normalizeCustomOrderAdminCatalog,
   parseColorSwatchText,
 } from './customOrderAdminConfig';
@@ -74,6 +75,11 @@ const SECTION_CONFIG = [
 ];
 
 const trimText = (value) => String(value || '').trim();
+const sanitizePriceInput = (value) => (
+  String(value || '')
+    .replace(/[^0-9.]/g, '')
+    .replace(/(\..*)\./g, '$1')
+);
 
 const normalizeFileExtension = (value) => {
   const sanitized = trimText(value).toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -263,6 +269,15 @@ const CustomOrderTab = () => {
       flowersPerArrangement: type === 'arrangement'
         ? String(item?.flowersPerArrangement ?? '0')
         : undefined,
+      estimatedPriceMin: type === 'arrangement'
+        ? String(item?.estimatedPriceMin ?? '')
+        : undefined,
+      estimatedPriceMax: type === 'arrangement'
+        ? String(item?.estimatedPriceMax ?? '')
+        : undefined,
+      estimatedPriceNote: type === 'arrangement'
+        ? String(item?.estimatedPriceNote ?? '')
+        : undefined,
       colorsText: type === 'color'
         ? (Array.isArray(item?.colors) ? item.colors.join(', ') : '')
         : undefined,
@@ -364,6 +379,9 @@ const CustomOrderTab = () => {
       description: trimText(editorForm.description),
       img: editorForm.img || '',
       flowersPerArrangement: trimText(editorForm.flowersPerArrangement),
+      estimatedPriceMin: trimText(editorForm.estimatedPriceMin),
+      estimatedPriceMax: trimText(editorForm.estimatedPriceMax),
+      estimatedPriceNote: trimText(editorForm.estimatedPriceNote),
       isActive: editorForm.isActive !== false,
       isCustomOption: Boolean(editorForm.isCustomOption),
     };
@@ -433,6 +451,9 @@ const CustomOrderTab = () => {
       ...item,
       id: trimText(item.id) || buildCustomOrderItemId(item.value || item.label || `arrangement-${index + 1}`, 'arrangement'),
       flowersPerArrangement: Number.parseInt(item.flowersPerArrangement, 10) || 0,
+      estimatedPriceMin: Number.parseFloat(item.estimatedPriceMin) || 0,
+      estimatedPriceMax: Number.parseFloat(item.estimatedPriceMax) || Number.parseFloat(item.estimatedPriceMin) || 0,
+      estimatedPriceNote: trimText(item.estimatedPriceNote),
       img: await uploadCatalogImage(item.img, 'arrangements', trimText(item.id) || `arrangement-${index + 1}`),
     })));
 
@@ -595,6 +616,11 @@ const CustomOrderTab = () => {
                       </View>
                     </View>
                     <Text style={styles.customOrderAdminItemMeta}>{renderSectionMeta(section.type, item)}</Text>
+                    {section.type === 'arrangement' && formatCustomOrderArrangementPriceRange(item) ? (
+                      <Text style={styles.customOrderAdminPriceText}>
+                        Estimated Price: {formatCustomOrderArrangementPriceRange(item)}
+                      </Text>
+                    ) : null}
                     {section.type === 'arrangement' && item.description ? (
                       <Text style={styles.customOrderAdminItemDescription}>{item.description}</Text>
                     ) : null}
@@ -702,6 +728,47 @@ const CustomOrderTab = () => {
                     keyboardType="number-pad"
                     placeholder="0 for customer-specified"
                   />
+
+                  <Text style={styles.inputLabel}>Estimated Price Range</Text>
+                  <View style={styles.customOrderAdminPriceRow}>
+                    <View style={styles.customOrderAdminPriceField}>
+                      <Text style={styles.customOrderAdminPriceLabel}>From</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editorForm.estimatedPriceMin}
+                        onChangeText={(text) => setEditorForm((currentForm) => ({
+                          ...currentForm,
+                          estimatedPriceMin: sanitizePriceInput(text),
+                        }))}
+                        keyboardType="decimal-pad"
+                        placeholder="5000"
+                      />
+                    </View>
+                    <View style={styles.customOrderAdminPriceField}>
+                      <Text style={styles.customOrderAdminPriceLabel}>To</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editorForm.estimatedPriceMax}
+                        onChangeText={(text) => setEditorForm((currentForm) => ({
+                          ...currentForm,
+                          estimatedPriceMax: sanitizePriceInput(text),
+                        }))}
+                        keyboardType="decimal-pad"
+                        placeholder="10000"
+                      />
+                    </View>
+                  </View>
+
+                  <Text style={styles.inputLabel}>Price Note</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={editorForm.estimatedPriceNote}
+                    onChangeText={(text) => setEditorForm((currentForm) => ({ ...currentForm, estimatedPriceNote: text }))}
+                    placeholder="Optional, e.g. per piece"
+                  />
+                  <Text style={styles.customOrderAdminHelperText}>
+                    Leave blank if the range is a standard total price.
+                  </Text>
                 </>
               ) : null}
 

@@ -398,11 +398,26 @@ const buildManualQuoteRows = (bookingItems, storedQuoteBreakdown) => {
   }
 
   const items = Array.isArray(bookingItems) ? bookingItems : [];
-  const arrangementLabels = items
-    .map((item) => item.arrangementSummary || item.arrangementType || item.name)
-    .filter(Boolean);
-  if (arrangementLabels.length) {
-    return arrangementLabels.map((label) => createManualQuoteRow('', '', label));
+  const seededRows = items
+    .map((item, index) => {
+      const arrangementLabel = firstNonEmpty(
+        item?.arrangementSummary,
+        getBookingArrangementText(item),
+        item?.arrangementType,
+        item?.arrangement_type
+      );
+      const productName = firstNonEmpty(
+        item?.name,
+        arrangementLabel,
+        item?.occasion
+      ) || `Custom Order ${index + 1}`;
+
+      return createManualQuoteRow(productName, '', arrangementLabel || productName);
+    })
+    .filter((row) => row.productName);
+
+  if (seededRows.length) {
+    return seededRows;
   }
 
   return [createManualQuoteRow('', '')];
@@ -613,6 +628,14 @@ const quoteStyles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: '#be185d',
+  },
+  quoteFieldLabel: {
+    marginBottom: 6,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#9f1239',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   quoteCurrencyInputRow: {
     flexDirection: 'row',
@@ -1126,6 +1149,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
   const [quoteModalVisible, setQuoteModalVisible] = useState(false);
   const [requestToQuote, setRequestToQuote] = useState(null);
   const [quoteAmount, setQuoteAmount] = useState('');
+  const [quoteShippingFee, setQuoteShippingFee] = useState('');
   const [quoteFlowerContext, setQuoteFlowerContext] = useState(null);
   const [quoteManualRows, setQuoteManualRows] = useState([]);
   const [receiptModalVisible, setReceiptModalVisible] = useState(false);
@@ -1818,9 +1842,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
     [quoteManualRows]
   );
 
-  const quoteShippingValue = requestToQuote?.shipping_fee !== null && requestToQuote?.shipping_fee !== undefined
-    ? parseCurrencyNumber(requestToQuote.shipping_fee)
-    : 0;
+  const quoteShippingValue = parseCurrencyNumber(quoteShippingFee);
   const quoteTotalToPay = quoteFlowerSubtotal + quoteShippingValue;
   const quoteArrangementSelections = quoteFlowerContext?.arrangementSelections || [];
   const quoteFlowerTypes = quoteFlowerContext?.flowerTypes || [];
@@ -1865,6 +1887,8 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
   const closeQuoteModal = () => {
     setQuoteModalVisible(false);
     setRequestToQuote(null);
+    setQuoteAmount('');
+    setQuoteShippingFee('');
     setQuoteFlowerContext(null);
     setQuoteManualRows([]);
   };
@@ -1894,19 +1918,22 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
   const openQuoteModal = (request) => {
     setRequestToQuote(request);
 
-    const initialShipping = request.shipping_fee !== null && request.shipping_fee !== undefined
-      ? parseCurrencyNumber(request.shipping_fee)
-      : 0;
-
-    const initialPrice = request.final_price !== null && request.final_price !== undefined
-      ? String(parseCurrencyNumber(request.final_price) - initialShipping)
-      : '';
-
     const requestData = normalizeRequestData(request);
     const bookingItems = getBookingItemsFromData(requestData);
     const storedQuoteBreakdown = requestData?.quote_breakdown;
 
+    const initialShipping = request.shipping_fee !== null && request.shipping_fee !== undefined
+      ? parseCurrencyNumber(request.shipping_fee)
+      : (storedQuoteBreakdown?.shipping_fee !== null && storedQuoteBreakdown?.shipping_fee !== undefined
+        ? parseCurrencyNumber(storedQuoteBreakdown.shipping_fee)
+        : 0);
+
+    const initialPrice = request.final_price !== null && request.final_price !== undefined
+      ? String(Math.max(parseCurrencyNumber(request.final_price) - initialShipping, 0))
+      : '';
+
     setQuoteAmount(initialPrice);
+    setQuoteShippingFee(initialShipping > 0 ? String(initialShipping) : '');
     setQuoteFlowerContext(buildFlowerPricingContext(request));
     setQuoteManualRows(buildManualQuoteRows(bookingItems, storedQuoteBreakdown));
     setQuoteModalVisible(true);
@@ -1915,9 +1942,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
   const handleProvideQuote = async () => {
     if (!requestToQuote) return;
 
-    const parsedShippingFee = requestToQuote?.shipping_fee !== null && requestToQuote?.shipping_fee !== undefined
-      ? parseCurrencyNumber(requestToQuote.shipping_fee)
-      : 0;
+    const parsedShippingFee = parseCurrencyNumber(quoteShippingFee);
 
     let parsedItemPrice = 0;
     let quoteBreakdownPayload = null;
@@ -3174,7 +3199,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
 
                   <View style={quoteStyles.quoteSectionHeader}>
                     <Text style={quoteStyles.quoteSectionTitle}>Custom Order Breakdown</Text>
-                    <Text style={quoteStyles.quoteSectionHint}>Enter the price for each product. Add or remove rows as needed.</Text>
+                    <Text style={quoteStyles.quoteSectionHint}>Enter the price for each product, then set the delivery fee for the exact venue.</Text>
                   </View>
 
                   {quoteManualRows.length ? (() => {
@@ -3217,6 +3242,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                                   <Text style={quoteStyles.quoteInputLineTotal}>{formatCurrency(parsedPrice)}</Text>
                                 </View>
 
+                                <Text style={quoteStyles.quoteFieldLabel}>Product Name</Text>
                                 <TextInput
                                   style={[quoteStyles.quoteCurrencyInput, { marginBottom: 10, borderWidth: 1, borderColor: '#fdba74', borderRadius: 10, paddingHorizontal: 12 }]}
                                   placeholder="Product name (e.g. Signature Bouquet)"
@@ -3224,6 +3250,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                                   onChangeText={(value) => updateQuoteManualRow(manualRow.id, 'productName', value)}
                                 />
 
+                                <Text style={quoteStyles.quoteFieldLabel}>Product Price</Text>
                                 <View style={quoteStyles.quoteCurrencyInputRow}>
                                   <View style={quoteStyles.quoteCurrencyPrefix}>
                                     <Text style={quoteStyles.quoteCurrencyPrefixText}>PHP</Text>
@@ -3261,10 +3288,36 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                     <Text style={{ color: '#9a3412', fontWeight: '700' }}>+ Add Product</Text>
                   </TouchableOpacity>
 
-                  <View style={quoteStyles.quoteInfoCard}>
-                    <Text style={quoteStyles.quoteInfoLabel}>Applied Delivery Fee</Text>
-                    <Text style={quoteStyles.quoteInfoValue}>{formatCurrency(quoteShippingValue)}</Text>
-                    <Text style={quoteStyles.quoteInfoHint}>This comes from the saved barangay delivery fee or pickup selection.</Text>
+                  <View style={quoteStyles.quoteInputCard}>
+                    <View style={quoteStyles.quoteInputHeader}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={quoteStyles.quoteInputTitle}>Delivery Fee</Text>
+                        <Text style={quoteStyles.quoteInputHint}>Enter the delivery fee manually for this venue. Use 0.00 for pickup or free delivery.</Text>
+                      </View>
+                      <Text style={quoteStyles.quoteInputLineTotal}>{formatCurrency(quoteShippingValue)}</Text>
+                    </View>
+
+                    <View style={quoteStyles.quoteCurrencyInputRow}>
+                      <View style={quoteStyles.quoteCurrencyPrefix}>
+                        <Text style={quoteStyles.quoteCurrencyPrefixText}>PHP</Text>
+                      </View>
+                      <TextInput
+                        style={quoteStyles.quoteCurrencyInput}
+                        placeholder="0.00"
+                        keyboardType="decimal-pad"
+                        value={quoteShippingFee}
+                        onChangeText={(value) => setQuoteShippingFee(sanitizeQuoteCurrencyInput(value))}
+                      />
+                      <Text style={quoteStyles.quoteCurrencySuffix}>/ venue</Text>
+                    </View>
+
+                    <Text style={quoteStyles.quoteInfoHint}>
+                      Saved request fee: {formatCurrency(
+                        requestToQuote?.shipping_fee !== null && requestToQuote?.shipping_fee !== undefined
+                          ? parseCurrencyNumber(requestToQuote.shipping_fee)
+                          : 0
+                      )}. You can change it here before sending the quote.
+                    </Text>
                   </View>
 
                   <View style={quoteStyles.quoteTotalCard}>
@@ -3320,7 +3373,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                 <>
                   <View style={quoteStyles.quoteSectionHeader}>
                     <Text style={quoteStyles.quoteSectionTitle}>Quote Details</Text>
-                    <Text style={quoteStyles.quoteSectionHint}>Enter the item price. Delivery fee is taken from the saved request fee setup.</Text>
+                    <Text style={quoteStyles.quoteSectionHint}>Enter the item price and set the delivery fee for this request.</Text>
                   </View>
 
                   <View style={quoteStyles.quoteInputCard}>
@@ -3347,10 +3400,36 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                     </View>
                   </View>
 
-                  <View style={quoteStyles.quoteInfoCard}>
-                    <Text style={quoteStyles.quoteInfoLabel}>Applied Delivery Fee</Text>
-                    <Text style={quoteStyles.quoteInfoValue}>{formatCurrency(quoteShippingValue)}</Text>
-                    <Text style={quoteStyles.quoteInfoHint}>This comes from the saved barangay delivery fee or pickup selection.</Text>
+                  <View style={quoteStyles.quoteInputCard}>
+                    <View style={quoteStyles.quoteInputHeader}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={quoteStyles.quoteInputTitle}>Delivery Fee</Text>
+                        <Text style={quoteStyles.quoteInputHint}>Enter the delivery fee manually for the customer venue. Use 0.00 for pickup or free delivery.</Text>
+                      </View>
+                      <Text style={quoteStyles.quoteInputLineTotal}>{formatCurrency(quoteShippingValue)}</Text>
+                    </View>
+
+                    <View style={quoteStyles.quoteCurrencyInputRow}>
+                      <View style={quoteStyles.quoteCurrencyPrefix}>
+                        <Text style={quoteStyles.quoteCurrencyPrefixText}>PHP</Text>
+                      </View>
+                      <TextInput
+                        style={quoteStyles.quoteCurrencyInput}
+                        placeholder="0.00"
+                        keyboardType="decimal-pad"
+                        value={quoteShippingFee}
+                        onChangeText={(value) => setQuoteShippingFee(sanitizeQuoteCurrencyInput(value))}
+                      />
+                      <Text style={quoteStyles.quoteCurrencySuffix}>/ venue</Text>
+                    </View>
+
+                    <Text style={quoteStyles.quoteInfoHint}>
+                      Saved request fee: {formatCurrency(
+                        requestToQuote?.shipping_fee !== null && requestToQuote?.shipping_fee !== undefined
+                          ? parseCurrencyNumber(requestToQuote.shipping_fee)
+                          : 0
+                      )}. You can update it here before sending the quote.
+                    </Text>
                   </View>
 
                   <View style={quoteStyles.quoteTotalCard}>

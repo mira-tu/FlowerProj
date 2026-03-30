@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { buildGroupedArrangementOptions, EMPTY_CUSTOM_ORDER_CATALOG, fetchCustomOrderCatalog } from '../utils/customOrderCatalog';
+import { supabase } from '../config/supabase';
+import {
+  buildGroupedArrangementOptions,
+  EMPTY_CUSTOM_ORDER_CATALOG,
+  fetchCustomOrderCatalog,
+  formatCustomOrderArrangementPriceRange,
+} from '../utils/customOrderCatalog';
 import '../styles/CustomOrderCatalog.css';
 
 const GROUP_COPY = {
@@ -44,6 +50,10 @@ const buildFormPath = (arrangementValue = '') => (
     : '/custom-order/form'
 );
 
+const getArrangementPriceLabel = (arrangement) => (
+  formatCustomOrderArrangementPriceRange(arrangement) || 'Price on request'
+);
+
 const CustomOrderCatalog = ({ initialCatalog = null }) => {
   const navigate = useNavigate();
   const previewRef = useRef(null);
@@ -56,7 +66,6 @@ const CustomOrderCatalog = ({ initialCatalog = null }) => {
     if (initialCatalog) {
       setCatalog(initialCatalog);
       setIsLoading(false);
-      return undefined;
     }
 
     let isMounted = true;
@@ -68,10 +77,29 @@ const CustomOrderCatalog = ({ initialCatalog = null }) => {
       setIsLoading(false);
     };
 
-    loadCatalog();
+    if (!initialCatalog) {
+      loadCatalog();
+    }
+
+    const channel = supabase
+      .channel('custom-order-catalog-updates')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'app_content',
+          filter: 'key=eq.custom_order_catalog',
+        },
+        () => {
+          loadCatalog();
+        },
+      )
+      .subscribe();
 
     return () => {
       isMounted = false;
+      supabase.removeChannel(channel);
     };
   }, [initialCatalog]);
 
@@ -181,6 +209,7 @@ const CustomOrderCatalog = ({ initialCatalog = null }) => {
                     >
                       {selectedArrangement.label}
                     </h2>
+                    <div className="custom-order-spotlight__price">{getArrangementPriceLabel(selectedArrangement)}</div>
                     <p className="custom-order-spotlight__lead">{selectedArrangement.description}</p>
 
                     <p className="custom-order-spotlight__note">{selectedGroupCopy.detail}</p>
@@ -268,6 +297,7 @@ const CustomOrderCatalog = ({ initialCatalog = null }) => {
                             <span>{isSelected ? 'Previewing now' : 'Tap to preview'}</span>
                           </div>
                           <h4>{option.label}</h4>
+                          <div className="custom-order-card__price">{getArrangementPriceLabel(option)}</div>
                           <p>{option.description}</p>
                         </div>
 

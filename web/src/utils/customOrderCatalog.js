@@ -159,6 +159,44 @@ const colorOptions = [
 
 export const CUSTOM_ORDER_CATALOG_KEY = 'custom_order_catalog';
 
+const DEFAULT_ARRANGEMENT_PRICE_RANGES = Object.freeze({
+  'Funeral Wreath (Large, 100 flowers)': {
+    estimatedPriceMin: 5000,
+    estimatedPriceMax: 10000,
+    estimatedPriceNote: '',
+  },
+  'Funeral Flower Stand (Medium, 50 flowers)': {
+    estimatedPriceMin: 1000,
+    estimatedPriceMax: 1500,
+    estimatedPriceNote: '',
+  },
+  'Bridal Bouquet (20 flowers)': {
+    estimatedPriceMin: 1000,
+    estimatedPriceMax: 2000,
+    estimatedPriceNote: '',
+  },
+  'Table Centerpiece (12 flowers)': {
+    estimatedPriceMin: 1000,
+    estimatedPriceMax: 1500,
+    estimatedPriceNote: '',
+  },
+  'Corsage (3 flowers)': {
+    estimatedPriceMin: 200,
+    estimatedPriceMax: 500,
+    estimatedPriceNote: 'per piece',
+  },
+  'Flower Box (Medium, 9 flowers)': {
+    estimatedPriceMin: 800,
+    estimatedPriceMax: 1000,
+    estimatedPriceNote: '',
+  },
+  'Heart-Shaped Funeral Wreath (Medium, 50 flowers)': {
+    estimatedPriceMin: 3000,
+    estimatedPriceMax: 5000,
+    estimatedPriceNote: '',
+  },
+});
+
 export const DEFAULT_CUSTOM_ORDER_CATALOG = {
   version: 1,
   flowers: flowerOptions.map((item, index) => ({
@@ -216,6 +254,62 @@ const toPositiveInteger = (value, fallback = 0) => {
 };
 
 const normalizeCatalogImage = (value) => String(value || '').trim();
+const normalizeCatalogPriceNote = (value) => String(value || '').trim();
+const toNonNegativeNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallback;
+  }
+  return parsed;
+};
+const normalizeCatalogPriceValue = (value, fallback = 0) => {
+  const parsed = toNonNegativeNumber(value, fallback);
+  return Math.round(parsed * 100) / 100;
+};
+const resolveArrangementPriceDefaults = (item, label, value) => {
+  const lookupKeys = [label, value].map((entry) => String(entry || '').trim()).filter(Boolean);
+  const fallback = lookupKeys
+    .map((key) => DEFAULT_ARRANGEMENT_PRICE_RANGES[key])
+    .find(Boolean);
+
+  const nextMin = normalizeCatalogPriceValue(
+    item?.estimatedPriceMin ?? item?.priceRangeMin ?? fallback?.estimatedPriceMin,
+    0,
+  );
+  const nextMaxCandidate = normalizeCatalogPriceValue(
+    item?.estimatedPriceMax ?? item?.priceRangeMax ?? fallback?.estimatedPriceMax ?? nextMin,
+    nextMin,
+  );
+
+  return {
+    estimatedPriceMin: nextMin,
+    estimatedPriceMax: nextMaxCandidate < nextMin ? nextMin : nextMaxCandidate,
+    estimatedPriceNote: normalizeCatalogPriceNote(
+      item?.estimatedPriceNote ?? item?.priceRangeNote ?? fallback?.estimatedPriceNote,
+    ),
+  };
+};
+
+const formatPesoAmount = (value) => `\u20b1${Number(value || 0).toLocaleString('en-PH', {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+})}`;
+
+export const formatCustomOrderArrangementPriceRange = (arrangement) => {
+  const min = normalizeCatalogPriceValue(arrangement?.estimatedPriceMin, 0);
+  const max = normalizeCatalogPriceValue(arrangement?.estimatedPriceMax, 0);
+  const note = normalizeCatalogPriceNote(arrangement?.estimatedPriceNote);
+
+  if (min <= 0 && max <= 0) {
+    return '';
+  }
+
+  const rangeLabel = max > min
+    ? `${formatPesoAmount(min)}\u2013${formatPesoAmount(max)}`
+    : formatPesoAmount(Math.max(min, max));
+
+  return note ? `${rangeLabel} ${note}` : rangeLabel;
+};
 const appendCatalogImageCacheKey = (value, cacheKey) => {
   const normalizedValue = normalizeCatalogImage(value);
   const normalizedCacheKey = String(cacheKey || '').trim();
@@ -264,6 +358,7 @@ const normalizeArrangementCatalogItem = (item, index) => {
     item?.flowersPerArrangement,
     extractFlowersPerArrangement(label),
   );
+  const priceDefaults = resolveArrangementPriceDefaults(item, label, value);
 
   return {
     id: String(item?.id || makeCatalogItemId(value || label, 'arrangement')),
@@ -273,6 +368,9 @@ const normalizeArrangementCatalogItem = (item, index) => {
     description: String(item?.description || '').trim(),
     img: normalizeCatalogImage(item?.img),
     flowersPerArrangement,
+    estimatedPriceMin: priceDefaults.estimatedPriceMin,
+    estimatedPriceMax: priceDefaults.estimatedPriceMax,
+    estimatedPriceNote: priceDefaults.estimatedPriceNote,
     isActive: item?.isActive !== false,
     isCustomOption: Boolean(item?.isCustomOption),
   };
@@ -343,6 +441,9 @@ export const buildGroupedArrangementOptions = (arrangements = []) => {
       description: item.description || '',
       img: item.img || '',
       flowersPerArrangement: item.flowersPerArrangement || 0,
+      estimatedPriceMin: item.estimatedPriceMin || 0,
+      estimatedPriceMax: item.estimatedPriceMax || 0,
+      estimatedPriceNote: item.estimatedPriceNote || '',
       isCustomOption: Boolean(item.isCustomOption),
     });
   });

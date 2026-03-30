@@ -1,5 +1,43 @@
 export const CUSTOM_ORDER_CATALOG_KEY = 'custom_order_catalog';
 
+const DEFAULT_ARRANGEMENT_PRICE_RANGES = Object.freeze({
+  'Funeral Wreath (Large, 100 flowers)': {
+    estimatedPriceMin: 5000,
+    estimatedPriceMax: 10000,
+    estimatedPriceNote: '',
+  },
+  'Funeral Flower Stand (Medium, 50 flowers)': {
+    estimatedPriceMin: 1000,
+    estimatedPriceMax: 1500,
+    estimatedPriceNote: '',
+  },
+  'Bridal Bouquet (20 flowers)': {
+    estimatedPriceMin: 1000,
+    estimatedPriceMax: 2000,
+    estimatedPriceNote: '',
+  },
+  'Table Centerpiece (12 flowers)': {
+    estimatedPriceMin: 1000,
+    estimatedPriceMax: 1500,
+    estimatedPriceNote: '',
+  },
+  'Corsage (3 flowers)': {
+    estimatedPriceMin: 200,
+    estimatedPriceMax: 500,
+    estimatedPriceNote: 'per piece',
+  },
+  'Flower Box (Medium, 9 flowers)': {
+    estimatedPriceMin: 800,
+    estimatedPriceMax: 1000,
+    estimatedPriceNote: '',
+  },
+  'Heart-Shaped Funeral Wreath (Medium, 50 flowers)': {
+    estimatedPriceMin: 3000,
+    estimatedPriceMax: 5000,
+    estimatedPriceNote: '',
+  },
+});
+
 const DEFAULT_FLOWERS = [
   { value: 'Roses', label: 'Roses', img: 'https://images.pexels.com/photos/56866/garden-rose-red-pink-56866.jpeg?auto=compress&cs=tinysrgb&w=800' },
   { value: 'Tulips', label: 'Tulips', img: 'https://images.pexels.com/photos/36753/flower-purple-lical-blosso.jpg?auto=compress&cs=tinysrgb&w=800' },
@@ -148,6 +186,66 @@ const toPositiveInteger = (value, fallback = 0) => {
   return parsed;
 };
 
+const toNonNegativeNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallback;
+  }
+  return parsed;
+};
+
+const normalizePriceValue = (value, fallback = 0) => {
+  const parsed = toNonNegativeNumber(value, fallback);
+  return Math.round(parsed * 100) / 100;
+};
+
+const normalizePriceNote = (value) => trimText(value);
+
+const resolveArrangementPriceDefaults = (item, label, value) => {
+  const lookupKeys = [label, value].map((entry) => trimText(entry)).filter(Boolean);
+  const fallback = lookupKeys
+    .map((key) => DEFAULT_ARRANGEMENT_PRICE_RANGES[key])
+    .find(Boolean);
+
+  const estimatedPriceMin = normalizePriceValue(
+    item?.estimatedPriceMin ?? item?.priceRangeMin ?? fallback?.estimatedPriceMin,
+    0,
+  );
+  const estimatedPriceMaxCandidate = normalizePriceValue(
+    item?.estimatedPriceMax ?? item?.priceRangeMax ?? fallback?.estimatedPriceMax ?? estimatedPriceMin,
+    estimatedPriceMin,
+  );
+
+  return {
+    estimatedPriceMin,
+    estimatedPriceMax: estimatedPriceMaxCandidate < estimatedPriceMin ? estimatedPriceMin : estimatedPriceMaxCandidate,
+    estimatedPriceNote: normalizePriceNote(
+      item?.estimatedPriceNote ?? item?.priceRangeNote ?? fallback?.estimatedPriceNote,
+    ),
+  };
+};
+
+const formatPesoAmount = (value) => `\u20b1${Number(value || 0).toLocaleString('en-PH', {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+})}`;
+
+export const formatCustomOrderArrangementPriceRange = (item) => {
+  const min = normalizePriceValue(item?.estimatedPriceMin, 0);
+  const max = normalizePriceValue(item?.estimatedPriceMax, 0);
+  const note = normalizePriceNote(item?.estimatedPriceNote);
+
+  if (min <= 0 && max <= 0) {
+    return '';
+  }
+
+  const rangeText = max > min
+    ? `${formatPesoAmount(min)}\u2013${formatPesoAmount(max)}`
+    : formatPesoAmount(Math.max(min, max));
+
+  return note ? `${rangeText} ${note}` : rangeText;
+};
+
 const normalizeColorSwatches = (colors = []) => (
   Array.isArray(colors)
     ? colors
@@ -178,6 +276,7 @@ const normalizeFlower = (item, index) => {
 const normalizeArrangement = (item, index) => {
   const label = trimText(item?.label || item?.value || `Arrangement ${index + 1}`);
   const value = trimText(item?.value || label) || `arrangement-${index + 1}`;
+  const priceDefaults = resolveArrangementPriceDefaults(item, label, value);
 
   return {
     id: trimText(item?.id) || buildCustomOrderItemId(value, 'arrangement'),
@@ -187,6 +286,9 @@ const normalizeArrangement = (item, index) => {
     description: trimText(item?.description),
     img: typeof item?.img === 'string' ? item.img : item?.img || '',
     flowersPerArrangement: toPositiveInteger(item?.flowersPerArrangement, 0),
+    estimatedPriceMin: priceDefaults.estimatedPriceMin,
+    estimatedPriceMax: priceDefaults.estimatedPriceMax,
+    estimatedPriceNote: priceDefaults.estimatedPriceNote,
     isActive: item?.isActive !== false,
     isCustomOption: Boolean(item?.isCustomOption),
   };
@@ -249,6 +351,9 @@ export const createEmptyCustomOrderItem = (type) => {
       description: '',
       img: '',
       flowersPerArrangement: '0',
+      estimatedPriceMin: '',
+      estimatedPriceMax: '',
+      estimatedPriceNote: '',
       isActive: true,
       isCustomOption: false,
     };

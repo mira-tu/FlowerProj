@@ -3010,6 +3010,12 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginTop: 4,
   },
+  customOrderAdminPriceText: {
+    fontSize: 13,
+    color: '#BE185D',
+    marginTop: 6,
+    fontWeight: '700',
+  },
   customOrderAdminItemDescription: {
     fontSize: 13,
     lineHeight: 18,
@@ -3114,6 +3120,19 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginTop: 6,
     marginBottom: 4,
+  },
+  customOrderAdminPriceRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  customOrderAdminPriceField: {
+    flex: 1,
+  },
+  customOrderAdminPriceLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '600',
+    marginBottom: 6,
   },
   customOrderAdminRemoveImageButton: {
     alignSelf: 'flex-start',
