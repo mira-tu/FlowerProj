@@ -89,6 +89,70 @@ const getOptionPriceText = (item, groupKey, formatPrice) => {
   return `+${formatPrice(item.price || 0)}`;
 };
 
+const cropCanvasToContent = (sourceCanvas, padding = 24) => {
+  if (!sourceCanvas) return sourceCanvas;
+
+  const context = sourceCanvas.getContext('2d');
+  if (!context) return sourceCanvas;
+
+  const { width, height } = sourceCanvas;
+  if (!width || !height) return sourceCanvas;
+
+  const { data } = context.getImageData(0, 0, width, height);
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const alpha = data[((y * width) + x) * 4 + 3];
+      if (alpha === 0) continue;
+
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+
+  if (maxX < minX || maxY < minY) {
+    return sourceCanvas;
+  }
+
+  const cropLeft = Math.max(0, minX - padding);
+  const cropTop = Math.max(0, minY - padding);
+  const cropRight = Math.min(width, maxX + padding + 1);
+  const cropBottom = Math.min(height, maxY + padding + 1);
+  const cropWidth = cropRight - cropLeft;
+  const cropHeight = cropBottom - cropTop;
+
+  if (cropWidth <= 0 || cropHeight <= 0) {
+    return sourceCanvas;
+  }
+
+  const croppedCanvas = document.createElement('canvas');
+  croppedCanvas.width = cropWidth;
+  croppedCanvas.height = cropHeight;
+
+  const croppedContext = croppedCanvas.getContext('2d');
+  if (!croppedContext) return sourceCanvas;
+
+  croppedContext.drawImage(
+    sourceCanvas,
+    cropLeft,
+    cropTop,
+    cropWidth,
+    cropHeight,
+    0,
+    0,
+    cropWidth,
+    cropHeight
+  );
+
+  return croppedCanvas;
+};
+
 const isOptionSelectable = (item) => item.is_available !== false && (item.quantity || 0) > 0;
 const isLikelyColorVariant = (value) => COLOR_VARIANT_NAMES.has(String(value || '').trim().toLowerCase());
 const getWrapperSwatch = (value) => WRAPPER_COLOR_SWATCH_MAP[String(value || '').trim()] || '#94a3b8';
@@ -833,7 +897,8 @@ const Customized = ({ addToCart }) => {
           const canvas = await html2canvas(previewRef.current, {
             backgroundColor: null, scale: 1, logging: false, useCORS: true,
           });
-          photoBase64 = canvas.toDataURL('image/png');
+          const croppedCanvas = cropCanvasToContent(canvas);
+          photoBase64 = croppedCanvas.toDataURL('image/png');
         } catch (canvasError) {
           console.error('Error capturing screenshot:', canvasError);
         }
