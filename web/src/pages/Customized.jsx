@@ -906,7 +906,7 @@ const Customized = ({ addToCart }) => {
 
       const customizedBouquet = {
         id: `custom-${Date.now()}`,
-        name: 'Customized Bouquet',
+        name: 'Customizer Studio',
         image: photoBase64,
         flowers: selection.flowers.map(f => ({ id: f.id, name: f.name, price: f.price })),
         bundleSize: selection.bundleSize,

@@ -21,7 +21,7 @@ const getCustomizedPreviewItems = (order) => {
     if (sourceItems.length) {
         return sourceItems.map((item, index) => ({
             key: item.id || item.listId || `${order?.id || 'customized'}-${index}`,
-            name: item.name || (item.bundleSize ? `Customized Bouquet (${item.bundleSize} stems)` : `Customized Bouquet ${index + 1}`),
+    name: item.name || (item.bundleSize ? `Customizer Studio (${item.bundleSize} stems)` : `Customizer Studio ${index + 1}`),
             image: item.image_url || item.image || item.photo || order?.photo || order?.photo_url || null,
             quantity: item.qty || item.quantity || 1,
             price: Number(item.price || 0),
@@ -35,7 +35,7 @@ const getCustomizedPreviewItems = (order) => {
 
     return [{
         key: `${order?.id || 'customized'}-legacy`,
-        name: order?.bundleSize ? `Customized Bouquet (${order.bundleSize} stems)` : 'Customized Bouquet',
+    name: order?.bundleSize ? `Customizer Studio (${order.bundleSize} stems)` : 'Customizer Studio',
         image: order?.photo || order?.photo_url || null,
         quantity: 1,
         price: 0,
@@ -508,7 +508,7 @@ const MyOrders = () => {
                 orderToCancel.type
                     ? (orderToCancel.type === 'booking' ? 'Custom Order'
                         : orderToCancel.type === 'special_order' ? 'Special Order'
-                            : orderToCancel.type === 'customized' ? 'Customized Bouquet'
+                : orderToCancel.type === 'customized' ? 'Customizer Studio'
                                 : 'Request')
                     : 'Order';
             const orderId = orderToCancel.order_number || orderToCancel.request_number || orderToCancel.id
@@ -541,7 +541,7 @@ const MyOrders = () => {
         const labels = {
             booking: 'Custom Order',
             special_order: 'Special Order',
-            customized: 'Customized Bouquet',
+    customized: 'Customizer Studio',
             regular: 'Regular Order'
         };
         return labels[type] || 'Order';
@@ -677,7 +677,7 @@ const MyOrders = () => {
         const orderType = selectedOrderForChat.type
             ? (selectedOrderForChat.type === 'booking' ? 'Custom Order'
                 : selectedOrderForChat.type === 'special_order' ? 'Special Order'
-                    : selectedOrderForChat.type === 'customized' ? 'Customized Bouquet'
+                : selectedOrderForChat.type === 'customized' ? 'Customizer Studio'
                         : 'Request')
             : 'Order';
 
@@ -847,7 +847,7 @@ const MyOrders = () => {
                                             {order.isFromRequest && !order.order_number && (order.type === 'inquiry' ? 'Inquiry' : order.type === 'booking' ? 'Custom Order' : 'Request')}
                                             {order.type === 'booking' && !order.isFromRequest && 'Custom Order'}
                                             {order.type === 'special_order' && 'Special Order'}
-                                            {order.type === 'customized' && 'Customized Bouquet'}
+                                  {order.type === 'customized' && 'Customizer Studio'}
                                             {order.type === 'inquiry' && 'Inquiry'}
                                             {!order.type && !order.isFromRequest && `Order #${order.order_number || order.id || index + 1}`}
                                         </div>
@@ -946,7 +946,7 @@ const MyOrders = () => {
                                                         <>Special Order Request</>
                                                     )}
                                                     {order.type === 'customized' && (
-                                                        <>Customized Bouquet Request</>
+                                                        <>Customizer Studio Request</>
                                                     )}
                                                     {order.type === 'inquiry' && (
                                                         <>Inquiry: {order.data?.subject || order.data?.message || 'General Inquiry'}</>
@@ -1435,7 +1435,7 @@ const MyOrders = () => {
                                 <small className="text-muted">
                                     {selectedOrderForChat.type === 'booking' && 'Custom Order'}
                                     {selectedOrderForChat.type === 'special_order' && 'Special Order'}
-                                    {selectedOrderForChat.type === 'customized' && 'Customized Bouquet'}
+                  {selectedOrderForChat.type === 'customized' && 'Customizer Studio'}
                                     {!selectedOrderForChat.type && `Order #${selectedOrderForChat.id}`}
                                 </small>
                             </div>

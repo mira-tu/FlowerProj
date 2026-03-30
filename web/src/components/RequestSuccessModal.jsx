@@ -40,11 +40,11 @@ const RequestSuccessModal = ({ show, onClose, message, photo }) => {
                 {photo && (
                     <div style={{ marginBottom: '1rem' }}>
                         <p style={{ marginBottom: '0.5rem', color: '#4b5563', fontSize: '0.9rem', fontWeight: '600' }}>
-                            Your Customized Bouquet Preview:
+                    Your Customizer Studio Preview:
                         </p>
                         <img 
                             src={photo} 
-                            alt="Customized bouquet preview" 
+                alt="Customizer Studio preview"
                             style={{
                                 maxWidth: '100%',
                                 maxHeight: '300px',

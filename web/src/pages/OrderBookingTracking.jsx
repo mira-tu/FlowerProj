@@ -579,7 +579,7 @@ const OrderBookingTracking = () => {
         const typeMap = {
             'booking': 'Custom Order',
             'special_order': 'Special Order',
-            'customized': 'Customized Bouquet',
+      'customized': 'Customizer Studio',
         };
         return typeMap[request.type] || 'Request';
     };

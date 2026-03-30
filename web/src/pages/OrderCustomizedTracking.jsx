@@ -42,7 +42,7 @@ const getCustomizedTrackingItems = (request) => {
     if (sourceItems.length) {
         return sourceItems.map((item, index) => ({
             key: item.id || item.listId || `${request?.id || 'customized'}-${index}`,
-            name: item.name || (item.bundleSize ? `Customized Bouquet (${item.bundleSize} stems)` : `Customized Bouquet ${index + 1}`),
+            name: item.name || (item.bundleSize ? `Customizer Studio (${item.bundleSize} stems)` : `Customizer Studio ${index + 1}`),
             image: item.image_url || item.image || request?.imageUrl || null,
             quantity: Number(item.qty || item.quantity || 1) || 1,
             price: Number(item.price || 0),
@@ -56,8 +56,8 @@ const getCustomizedTrackingItems = (request) => {
     return [{
         key: `${request?.id || 'customized'}-legacy`,
         name: request?.requestData?.bundleSize
-            ? `Customized Bouquet (${request.requestData.bundleSize} stems)`
-            : 'Customized Bouquet',
+            ? `Customizer Studio (${request.requestData.bundleSize} stems)`
+            : 'Customizer Studio',
         image: request?.imageUrl || null,
         quantity: 1,
         price: Number(request?.finalPrice || 0),
@@ -644,7 +644,7 @@ const OrderCustomizedTracking = ({ user }) => {
                                 })}
                             </div>
                             <span className="badge mt-2" style={{ background: 'rgba(255,255,255,0.2)', fontSize: '0.8rem' }}>
-                                Customized Bouquet
+                Customizer Studio
                             </span>
                         </div>
                         <div className="tracking-current-status">

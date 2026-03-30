@@ -81,7 +81,7 @@ export const generateAndShareReceipt = async (item, isRequest = false) => {
                 itemsHtml = `
                     <tr>
                         <td class="item-name">
-                            <strong>Customized Bouquet</strong><br>
+        <strong>Customizer Studio</strong><br>
                             <small class="text-muted">
                                 Flowers: ${flowersString}<br>
                                 Wrapper: ${customItem.wrapper?.name || 'N/A'}<br>

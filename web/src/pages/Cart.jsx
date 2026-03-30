@@ -255,7 +255,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
         // CustomizedCheckout.jsx reads from 'checkoutItems' in localStorage
         const selectedBouquets = customizedItems.filter(item => item.selected).map(item => ({
             ...item,
-            name: `Customized Bouquet (${item.bundleSize || '?'} stems)`,
+            name: `Customizer Studio (${item.bundleSize || '?'} stems)`,
             qty: 1,
         }));
         localStorage.setItem('checkoutItems', JSON.stringify(selectedBouquets));
@@ -528,7 +528,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                                             <img src={item.image} alt="Custom Bouquet" className="rounded border bg-light flex-shrink-0" style={{ width: '80px', height: '80px', objectFit: 'contain' }} />
                                                         )}
                                                         <div className="ms-3 pe-4 flex-grow-1">
-                                                            <h6 className="mb-1 fw-bold">Customized Bouquet ({item.bundleSize || '?'} stems)</h6>
+                                                            <h6 className="mb-1 fw-bold">Customizer Studio ({item.bundleSize || '?'} stems)</h6>
                                                             <div className="text-muted small">
                                                                 <div><strong>Flowers:</strong> {(item.flowers || []).map(f => f.name).join(', ')}</div>
                                                                 {item.wrapper && <div><strong>Wrapper:</strong> {item.wrapper.name}</div>}

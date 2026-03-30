@@ -124,7 +124,7 @@ const CustomizedCart = ({ user }) => {
 
     return (
         <div className="container py-5 mt-5 bg-light" style={{ minHeight: '80vh', overflowX: 'hidden' }}>
-            <h2 className="fw-bold mb-4"><i className="fas fa-shopping-cart me-2"></i> Custom Bouquets Cart</h2>
+            <h2 className="fw-bold mb-4"><i className="fas fa-shopping-cart me-2"></i> Customizer Studio Cart</h2>
 
             {cartItems.length === 0 ? (
                 <div className="text-center py-5 bg-white rounded shadow-sm">

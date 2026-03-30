@@ -748,7 +748,7 @@ const Profile = ({ user, logout }) => {
         const labels = {
             booking: 'Custom Order',
             special_order: 'Special Order',
-            customized: 'Customized Bouquet',
+    customized: 'Customizer Studio',
             regular: 'Regular Order'
         };
         return labels[type] || 'Order';
@@ -922,7 +922,7 @@ const Profile = ({ user, logout }) => {
             const orderTypeLabel = orderToCancel.type
                 ? (orderToCancel.type === 'booking' ? 'Custom Order'
                     : orderToCancel.type === 'special_order' ? 'Special Order'
-                        : orderToCancel.type === 'customized' ? 'Customized Bouquet'
+                : orderToCancel.type === 'customized' ? 'Customizer Studio'
                             : 'Request')
                 : 'Order';
             const orderNumber = orderToCancel.order_number ? `#${orderToCancel.order_number}` : '';
@@ -1049,7 +1049,7 @@ const Profile = ({ user, logout }) => {
                                     <div className="order-id">
                                         {order.type === 'booking' && 'Custom Order'}
                                         {order.type === 'special_order' && 'Special Order'}
-                                        {order.type === 'customized' && 'Customized Bouquet'}
+                                  {order.type === 'customized' && 'Customizer Studio'}
                                         {!order.type && `Order #${order.order_number || order.id}`}
                                     </div>
                                     {order.type && (
@@ -1172,7 +1172,7 @@ const Profile = ({ user, logout }) => {
                                             )}
                                             {order.type === 'customized' && (
                                                 <>
-                                                    <div className="order-item-name">Customized Bouquet {order.data?.items?.length > 1 ? `(${order.data.items.length} items)` : ''}</div>
+                                                    <div className="order-item-name">Customizer Studio {order.data?.items?.length > 1 ? `(${order.data.items.length} items)` : ''}</div>
                                                     {order.flower && <div className="order-item-variant"><strong>Flower:</strong> {typeof order.flower === 'object' ? order.flower.name : order.flower}</div>}
                                                     {order.bundleSize && <div className="order-item-variant"><strong>Bundle Size:</strong> {order.bundleSize}</div>}
                                                     {order.wrapper && <div className="order-item-variant"><strong>Wrapper:</strong> {typeof order.wrapper === 'object' ? order.wrapper.name : order.wrapper}</div>}
