@@ -6,6 +6,7 @@ import customImg from '../assets/pictures/aboutpage/Customized-image.jpg';
 import specialImg from '../assets/pictures/aboutpage/Custom-Order.jpg';
 import ProductModal from '../components/ProductModal';
 import InfoModal from '../components/InfoModal';
+import { formatProductDiscountLabel } from '../utils/productPricing';
 
 // Import Occasion Images
 import allSouls1 from '../assets/pictures/occasions/ALLSOULSDAY1.png';
@@ -123,6 +124,8 @@ const Home = ({ addToCart, products, categories, user }) => {
     const isInWishlist = (productName) => {
         return wishlist.some(item => item.name === productName);
     };
+
+    const formatCurrency = (value) => `\u20b1${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 
     const filteredProducts = products
         .filter(product => product.name && product.name.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -267,6 +270,9 @@ const Home = ({ addToCart, products, categories, user }) => {
                                                 {product.stock_quantity} in stock
                                             </div>
                                         )}
+                                        {product.has_discount ? (
+                                            <div className="product-discount-badge">{formatProductDiscountLabel(product.discount_percentage)}</div>
+                                        ) : null}
                                         <button
                                             className={`wishlist-heart-btn ${isInWishlist(product.name) ? 'active' : ''}`}
                                             onClick={(e) => toggleWishlist(product, e)}
@@ -277,7 +283,14 @@ const Home = ({ addToCart, products, categories, user }) => {
                                     </div>
                                     <div className="product-body">
                                         <h5 className="product-title">{product.name}</h5>
-                                        <p className="product-price">₱{product.price.toLocaleString()}</p>
+                                        <div className="product-price-wrap">
+                                            <p className="product-price">{formatCurrency(product.price)}</p>
+                                            {product.has_discount ? (
+                                                <div className="product-price-meta">
+                                                    <span className="product-original-price">{formatCurrency(product.original_price)}</span>
+                                                </div>
+                                            ) : null}
+                                        </div>
                                         {product.description && <p className="product-description">{product.description}</p>}
                                     </div>
                                     <div className="product-body pt-0">

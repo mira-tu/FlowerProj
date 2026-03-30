@@ -61,6 +61,7 @@ export const stockAPI = {
                 is_available: item.is_available,
                 wrapper_group_name: item.wrapper_group_name ?? null,
                 wrapper_color: item.wrapper_color ?? null,
+                ribbon_scope: item.ribbon_scope ?? null,
                 updated_at: item.updated_at ?? null,
             }));
 

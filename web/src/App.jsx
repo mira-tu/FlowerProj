@@ -67,6 +67,7 @@ import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
 import InfoModal from './components/InfoModal';
 import { fetchCustomOrderCatalog } from './utils/customOrderCatalog';
+import { normalizeProductPricing } from './utils/productPricing';
 
 import { supabase } from './config/supabase';
 
@@ -111,6 +112,33 @@ function AppContent() {
   const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
   const isLoggedIn = !!user;
 
+  const applyProductCatalog = (productsData = []) => {
+    const productsWithCategories = (productsData || []).map(product => normalizeProductPricing({
+      ...product,
+      category_name: product.categories?.name || product.category_name || 'Uncategorized'
+    }));
+    const sortedProducts = productsWithCategories.sort((a, b) => b.id - a.id);
+
+    setProducts(sortedProducts);
+
+    try {
+      localStorage.setItem('products', JSON.stringify(sortedProducts));
+    } catch (storageError) {
+      console.error('Error caching products for detail pages:', storageError);
+    }
+
+    setCart(prevCart => {
+      const activeCart = prevCart.filter(cartItem =>
+        sortedProducts.some(p =>
+          String(p.id) === String(cartItem.productId || cartItem.id) ||
+          p.name === cartItem.name
+        )
+      );
+
+      return activeCart;
+    });
+  };
+
   useEffect(() => {
     // Ensure the loading spinner is visible for a short, minimum duration
     // so automated tests and users can reliably see it on first load.
@@ -147,24 +175,7 @@ function AppContent() {
         if (productsError) {
           console.error('Error fetching products:', productsError);
         } else {
-          const productsWithCategories = (productsData || []).map(product => ({
-            ...product,
-            category_name: product.categories?.name || 'Uncategorized'
-          }));
-          const sortedProducts = productsWithCategories.sort((a, b) => b.id - a.id);
-          setProducts(sortedProducts);
-
-          // Clean up strictly deleted/inactive products from the user's cart
-          setCart(prevCart => {
-            const activeCart = prevCart.filter(cartItem =>
-              sortedProducts.some(p =>
-                String(p.id) === String(cartItem.productId || cartItem.id) ||
-                p.name === cartItem.name
-              )
-            );
-            // We'll let the user-specific useEffect handle saving to localStorage
-            return activeCart;
-          });
+          applyProductCatalog(productsData);
         }
       } catch (err) {
         // Catch any unexpected thrown errors (network timeouts, etc.)
@@ -177,6 +188,38 @@ function AppContent() {
     };
 
     fetchData();
+  }, []);
+
+  useEffect(() => {
+    const refreshProducts = async () => {
+      const { data: productsData, error: productsError } = await supabase
+        .from('products')
+        .select('*, categories ( name )')
+        .eq('is_active', true)
+        .limit(200);
+
+      if (productsError) {
+        console.error('Error refreshing products:', productsError);
+        return;
+      }
+
+      applyProductCatalog(productsData);
+    };
+
+    const channel = supabase
+      .channel('public:catalog-products')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'products' },
+        () => {
+          refreshProducts();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   useEffect(() => {

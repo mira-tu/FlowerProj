@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { formatProductDiscountLabel } from '../utils/productPricing';
 
 const ProductModal = ({ product, onClose, onAddToCart }) => {
   const [quantity, setQuantity] = useState(1);
@@ -19,13 +20,23 @@ const ProductModal = ({ product, onClose, onAddToCart }) => {
     setQuantity(1);
   };
 
+  const formatCurrency = (value) => `\u20b1${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+
   return (
     <div className="product-modal-overlay" onClick={onClose}>
       <div className="product-modal-card" onClick={(e) => e.stopPropagation()}>
         <button type="button" className="product-modal-close" onClick={onClose}>×</button>
         <img src={product.image_url} alt={product.name} className="product-modal-image" />
         <h4>{product.name}</h4>
-        <p className="product-price">₱{product.price?.toLocaleString()}</p>
+        <div className="product-price-wrap mb-2">
+          <p className="product-price mb-1">{formatCurrency(product.price)}</p>
+          {product.has_discount ? (
+            <div className="product-price-meta">
+              <span className="product-original-price">{formatCurrency(product.original_price)}</span>
+              <span className="product-inline-discount-badge">{formatProductDiscountLabel(product.discount_percentage)}</span>
+            </div>
+          ) : null}
+        </div>
         {product.description && <p className="text-muted">{product.description}</p>}
 
         <div className="d-flex align-items-center gap-2 mb-3 justify-content-center">

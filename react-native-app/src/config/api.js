@@ -917,11 +917,60 @@ const completeRefundRequestDirect = async (refundId, options = {}) => {
 };
 
 // Products API
-export const productAPI = {
-    getAll: async (params) => {
-        let query = supabase
-            .from('products')
-            .select(`
+const clampDiscountPercentage = (value) => {
+    const numericValue = parseFloat(value);
+
+    if (!Number.isFinite(numericValue) || numericValue <= 0) return 0;
+    if (numericValue >= 100) return 100;
+
+    return Math.round(numericValue * 100) / 100;
+};
+
+const roundCurrencyValue = (value) => Math.round(((parseFloat(value) || 0) + Number.EPSILON) * 100) / 100;
+
+const computeDiscountedPrice = (originalPrice, discountPercentage) => {
+    const safeOriginalPrice = Math.max(0, roundCurrencyValue(originalPrice));
+    const safeDiscountPercentage = clampDiscountPercentage(discountPercentage);
+
+    if (safeDiscountPercentage <= 0) {
+        return safeOriginalPrice;
+    }
+
+    return roundCurrencyValue(safeOriginalPrice * (1 - safeDiscountPercentage / 100));
+};
+
+const normalizeProductDiscountFields = (product) => {
+    const originalPrice = Math.max(0, roundCurrencyValue(product?.original_price ?? product?.price ?? 0));
+    const discountPercentage = clampDiscountPercentage(product?.discount_percentage ?? 0);
+    const discountedPrice = discountPercentage > 0
+        ? roundCurrencyValue(product?.discounted_price ?? computeDiscountedPrice(originalPrice, discountPercentage))
+        : originalPrice;
+
+    return {
+        ...product,
+        original_price: originalPrice,
+        discount_percentage: discountPercentage,
+        discounted_price: discountedPrice,
+        effective_price: discountPercentage > 0 ? discountedPrice : originalPrice,
+    };
+};
+
+const PRODUCT_SELECT_WITH_DISCOUNTS = `
+                id,
+                name,
+                description,
+                price,
+                original_price,
+                discount_percentage,
+                discounted_price,
+                category_id,
+                image_url,
+                stock_quantity,
+                is_active,
+                categories ( name )
+            `;
+
+const PRODUCT_SELECT_LEGACY = `
                 id,
                 name,
                 description,
@@ -931,27 +980,93 @@ export const productAPI = {
                 stock_quantity,
                 is_active,
                 categories ( name )
-            `);
+            `;
 
-        if (!params?.includeInactive) {
-            query = query.eq('is_active', true);
+const shouldRetryLegacyProductQuery = (error) => {
+    const message = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+    const code = `${error?.code || ''}`.toLowerCase();
+
+    return (
+        !!error &&
+        (
+            error?.status === 400 ||
+            error?.status === 406 ||
+            code === 'pgrst204' ||
+            code === '42703' ||
+            message.includes('original_price') ||
+            message.includes('discount_percentage') ||
+            message.includes('discounted_price') ||
+            message.includes('could not find the') ||
+            message.includes('column') && (
+                message.includes('original_price') ||
+                message.includes('discount_percentage') ||
+                message.includes('discounted_price')
+            )
+        )
+    );
+};
+
+const buildProductsQuery = ({ params, includeDiscountFields = true }) => {
+    let query = supabase
+        .from('products')
+        .select(includeDiscountFields ? PRODUCT_SELECT_WITH_DISCOUNTS : PRODUCT_SELECT_LEGACY);
+
+    if (!params?.includeInactive) {
+        query = query.eq('is_active', true);
+    }
+
+    if (params?.category_id) {
+        query = query.eq('category_id', parseInt(params.category_id, 10));
+    }
+
+    return query;
+};
+
+const formatProductsForAdmin = (products = []) => (
+    products.map(p => normalizeProductDiscountFields({
+        ...p,
+        category_name: p.categories ? p.categories.name : 'Uncategorized'
+    }))
+);
+
+const buildProductPayload = ({ formData, imageUrl, includeDiscountFields = true }) => {
+    const originalPrice = Math.max(0, roundCurrencyValue(formData.price));
+    const discountPercentage = clampDiscountPercentage(formData.discount_percentage);
+    const discountedPrice = computeDiscountedPrice(originalPrice, discountPercentage);
+    const payload = {
+        name: formData.name,
+        price: originalPrice,
+        stock_quantity: parseInt(formData.stock_quantity, 10) || 0,
+        description: formData.description || '',
+        category_id: parseInt(formData.category_id, 10),
+        image_url: imageUrl,
+        is_active: formData.is_active !== false,
+    };
+
+    if (includeDiscountFields) {
+        payload.original_price = originalPrice;
+        payload.discount_percentage = discountPercentage;
+        payload.discounted_price = discountedPrice;
+    }
+
+    return payload;
+};
+
+export const productAPI = {
+    getAll: async (params) => {
+        let { data: products, error } = await buildProductsQuery({ params, includeDiscountFields: true });
+
+        if (error && shouldRetryLegacyProductQuery(error)) {
+            console.warn('Discount-aware product query failed. Falling back to the legacy catalogue query until the migration is applied.', error);
+            ({ data: products, error } = await buildProductsQuery({ params, includeDiscountFields: false }));
         }
-
-        if (params?.category_id) {
-            query = query.eq('category_id', parseInt(params.category_id, 10));
-        }
-
-        const { data: products, error } = await query;
 
         if (error) {
             console.error('Error fetching products:', error);
             return { data: { products: [] } };
         }
 
-        const formattedProducts = products.map(p => ({
-            ...p,
-            category_name: p.categories ? p.categories.name : 'Uncategorized'
-        }));
+        const formattedProducts = formatProductsForAdmin(products);
 
         return { data: { products: formattedProducts || [] } };
     },
@@ -969,7 +1084,7 @@ export const productAPI = {
         }
 
         const formattedProduct = {
-            ...product,
+            ...normalizeProductDiscountFields(product),
             category_name: product.categories ? product.categories.name : 'Uncategorized'
         };
 
@@ -1011,21 +1126,25 @@ export const productAPI = {
             }
         }
 
-        const productToInsert = {
-            name: formData.name,
-            price: parseFloat(formData.price),
-            stock_quantity: parseInt(formData.stock_quantity, 10) || 0,
-            description: formData.description || '',
-            category_id: parseInt(formData.category_id, 10),
-            image_url: imageUrl,
-            is_active: formData.is_active !== false,
-        };
+        const productToInsert = buildProductPayload({ formData, imageUrl, includeDiscountFields: true });
 
-        const { data: newProduct, error } = await supabase
+        let { data: newProduct, error } = await supabase
             .from('products')
             .insert(productToInsert)
             .select()
             .single();
+
+        if (error && shouldRetryLegacyProductQuery(error)) {
+            if (clampDiscountPercentage(formData.discount_percentage) > 0) {
+                throw new Error('Discount fields are not available in the database yet. Please apply migration 20260330120000_add_product_discounts.sql first.');
+            }
+
+            ({ data: newProduct, error } = await supabase
+                .from('products')
+                .insert(buildProductPayload({ formData, imageUrl, includeDiscountFields: false }))
+                .select()
+                .single());
+        }
 
         if (error) {
             console.error('Database insert error:', error);
@@ -1067,24 +1186,32 @@ export const productAPI = {
             imageUrl = imageFile.uri;
         }
 
-        const productToUpdate = {
-            name: formData.name,
-            price: parseFloat(formData.price),
-            stock_quantity: parseInt(formData.stock_quantity, 10),
-            description: formData.description,
-            category_id: parseInt(formData.category_id, 10),
-            image_url: imageUrl,
-            is_active: formData.is_active !== false,
-        };
+        const productToUpdate = buildProductPayload({ formData, imageUrl, includeDiscountFields: true });
 
         Object.keys(productToUpdate).forEach(key => (productToUpdate[key] === undefined || Number.isNaN(productToUpdate[key])) && delete productToUpdate[key]);
 
-        const { data: updatedProduct, error } = await supabase
+        let { data: updatedProduct, error } = await supabase
             .from('products')
             .update(productToUpdate)
             .eq('id', parseInt(id, 10))
             .select()
             .single();
+
+        if (error && shouldRetryLegacyProductQuery(error)) {
+            if (clampDiscountPercentage(formData.discount_percentage) > 0) {
+                throw new Error('Discount fields are not available in the database yet. Please apply migration 20260330120000_add_product_discounts.sql first.');
+            }
+
+            const legacyProductUpdate = buildProductPayload({ formData, imageUrl, includeDiscountFields: false });
+            Object.keys(legacyProductUpdate).forEach(key => (legacyProductUpdate[key] === undefined || Number.isNaN(legacyProductUpdate[key])) && delete legacyProductUpdate[key]);
+
+            ({ data: updatedProduct, error } = await supabase
+                .from('products')
+                .update(legacyProductUpdate)
+                .eq('id', parseInt(id, 10))
+                .select()
+                .single());
+        }
 
         if (error) {
             console.error('Error updating product:', error);
@@ -2168,6 +2295,7 @@ export const adminAPI = {
             image_url: imageUrl,
             wrapper_group_name: formData.wrapper_group_name || null,
             wrapper_color: formData.wrapper_color || null,
+            ribbon_scope: formData.ribbon_scope || null,
         };
 
         const { data: newStock, error } = await supabase
@@ -2247,6 +2375,7 @@ export const adminAPI = {
             image_url: imageUrl,
             wrapper_group_name: formData.wrapper_group_name || null,
             wrapper_color: formData.wrapper_color || null,
+            ribbon_scope: formData.ribbon_scope || null,
             updated_at: new Date().toISOString(),
         };
 

@@ -495,6 +495,19 @@
     color: #c53030;
 }
 
+.customize-page .loading-indicator,
+.customize-page .no-options,
+.customize-page .ribbon-helper {
+    border: 1px dashed rgba(214, 51, 132, 0.22);
+    background: #fff7fa;
+    color: var(--text-muted);
+    border-radius: 18px;
+    padding: 1rem 1.1rem;
+    text-align: center;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
 .customize-page .option-card.disabled {
     opacity: 0.6;
     cursor: not-allowed;
@@ -843,12 +856,6 @@
         object-fit: contain;
     }
 
-    .customize-page .flower-zone {
-        width: 160px !important;
-        height: 150px !important;
-        top: 5% !important;
-    }
-
     .customize-page .drag-handle {
         width: 68px;
         height: 68px;
@@ -1028,12 +1035,6 @@
         height: 42%;
     }
 
-    .customize-page .flower-zone {
-        width: 130px !important;
-        height: 120px !important;
-        top: 3% !important;
-    }
-
     .customize-page .drag-handle {
         width: 56px;
         height: 56px;
@@ -1139,11 +1140,6 @@
     .customize-page .preview-canvas {
         flex: 0 0 38%;
         height: 38%;
-    }
-
-    .customize-page .flower-zone {
-        width: 110px !important;
-        height: 100px !important;
     }
 
     .customize-page .drag-handle {

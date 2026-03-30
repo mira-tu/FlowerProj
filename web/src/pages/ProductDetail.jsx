@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import '../styles/Shop.css';
 import InfoModal from '../components/InfoModal';
+import { formatProductDiscountLabel, normalizeProductPricing } from '../utils/productPricing';
 
 import allSouls1 from '../assets/pictures/occasions/ALLSOULSDAY1.png';
 import allSouls2 from '../assets/pictures/occasions/ALLSOULSDAY2.png';
@@ -115,7 +116,7 @@ const ProductDetail = ({ addToCart, user }) => {
             if (savedProducts) {
                 const allProducts = JSON.parse(savedProducts);
                 // Try to find by ID
-                productData = allProducts.find(p => p.id === productId);
+                productData = allProducts.find(p => String(p.id) === String(productId));
             }
 
             // If not found in localStorage, try local products object
@@ -128,12 +129,12 @@ const ProductDetail = ({ addToCart, user }) => {
                 productData = Object.values(products)[0] || products['md1'];
             }
 
-            setProduct(productData);
+            setProduct(normalizeProductPricing(productData));
         } catch (error) {
             console.error('Error loading product:', error);
             // Fallback to local products
             const localProduct = products[productId] || products['md1'];
-            setProduct(localProduct);
+            setProduct(normalizeProductPricing(localProduct));
         } finally {
             setLoading(false);
         }
@@ -153,7 +154,8 @@ const ProductDetail = ({ addToCart, user }) => {
 
     const handleQuantityChange = (change) => {
         const newQty = quantity + change;
-        if (newQty >= 1 && newQty <= product.stock) {
+        const stockLimit = product.stock_quantity || product.stock || 0;
+        if (newQty >= 1 && newQty <= stockLimit) {
             setQuantity(newQty);
         }
     };
@@ -171,7 +173,7 @@ const ProductDetail = ({ addToCart, user }) => {
             return;
         }
         for (let i = 0; i < quantity; i++) {
-            addToCart(product.name, product.price, product.image, product.id, product.stock_quantity || product.stock);
+            addToCart(product.name, product.price, product.image_url || product.image, product.id, product.stock_quantity || product.stock);
         }
         navigate('/cart');
     };
@@ -189,7 +191,7 @@ const ProductDetail = ({ addToCart, user }) => {
             return;
         }
         for (let i = 0; i < quantity; i++) {
-            addToCart(product.name, product.price, product.image, product.id, product.stock_quantity || product.stock);
+            addToCart(product.name, product.price, product.image_url || product.image, product.id, product.stock_quantity || product.stock);
         }
         navigate('/checkout');
     };
@@ -215,7 +217,7 @@ const ProductDetail = ({ addToCart, user }) => {
                 <nav aria-label="breadcrumb" className="mb-3">
                     <ol className="breadcrumb">
                         <li className="breadcrumb-item"><Link to="/">Home</Link></li>
-                        <li className="breadcrumb-item"><Link to="/">{product.category}</Link></li>
+                        <li className="breadcrumb-item"><Link to="/">{product.category_name || product.category}</Link></li>
                         <li className="breadcrumb-item active">{product.name}</li>
                     </ol>
                 </nav>
@@ -224,11 +226,11 @@ const ProductDetail = ({ addToCart, user }) => {
                     <div className="col-lg-5">
                         <div className="product-detail-card">
                             <div className="product-gallery">
-                                <img src={product.image} alt={product.name} className="main-product-image" />
+                                <img src={product.image_url || product.image} alt={product.name} className="main-product-image" />
                                 <div className="thumbnail-gallery">
-                                    <img src={product.image} alt="" className="thumbnail-item active" />
-                                    <img src={product.image} alt="" className="thumbnail-item" />
-                                    <img src={product.image} alt="" className="thumbnail-item" />
+                                    <img src={product.image_url || product.image} alt="" className="thumbnail-item active" />
+                                    <img src={product.image_url || product.image} alt="" className="thumbnail-item" />
+                                    <img src={product.image_url || product.image} alt="" className="thumbnail-item" />
                                 </div>
                             </div>
                         </div>
@@ -247,6 +249,12 @@ const ProductDetail = ({ addToCart, user }) => {
 
                                 <div className="product-price-box">
                                     <span className="current-price">₱{product.price.toLocaleString()}</span>
+                                    {product.has_discount ? (
+                                        <>
+                                            <span className="original-price">₱{product.original_price.toLocaleString()}</span>
+                                            <span className="discount-badge">{formatProductDiscountLabel(product.discount_percentage)}</span>
+                                        </>
+                                    ) : null}
                                 </div>
 
                                 <div className="quantity-selector">

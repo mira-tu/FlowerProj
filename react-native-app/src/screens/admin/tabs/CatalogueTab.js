@@ -21,6 +21,39 @@ import styles from '../../AdminDashboard.styles';
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal';
 import ProductCard from '../components/ProductCard';
 
+const clampDiscountPercentage = (value) => {
+  const numericValue = parseFloat(value);
+
+  if (!Number.isFinite(numericValue) || numericValue <= 0) return 0;
+  if (numericValue >= 100) return 100;
+
+  return Math.round(numericValue * 100) / 100;
+};
+
+const roundCurrencyValue = (value) => Math.round(((parseFloat(value) || 0) + Number.EPSILON) * 100) / 100;
+
+const computeDiscountedPrice = (originalPrice, discountPercentage) => {
+  const safeOriginalPrice = Math.max(0, roundCurrencyValue(originalPrice));
+  const safeDiscountPercentage = clampDiscountPercentage(discountPercentage);
+
+  if (safeDiscountPercentage <= 0) {
+    return safeOriginalPrice;
+  }
+
+  return roundCurrencyValue(safeOriginalPrice * (1 - safeDiscountPercentage / 100));
+};
+
+const formatCurrency = (value) => `\u20b1${roundCurrencyValue(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const formatDiscountLabel = (value) => {
+  const safeDiscountPercentage = clampDiscountPercentage(value);
+  const formattedValue = Number.isInteger(safeDiscountPercentage)
+    ? String(safeDiscountPercentage)
+    : safeDiscountPercentage.toFixed(2).replace(/\.?0+$/, '');
+
+  return `${formattedValue}% OFF`;
+};
+
 const CatalogueTab = () => {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -42,6 +75,7 @@ const CatalogueTab = () => {
   const [formData, setFormData] = useState({
     name: '',
     price: '',
+    discount_percentage: '0',
     category_id: '',
     stock_quantity: '',
     description: '',
@@ -152,7 +186,7 @@ const CatalogueTab = () => {
   };
 
   const handleSubmit = async () => {
-    const { name, price, stock_quantity, category_id } = formData;
+    const { name, price, discount_percentage, stock_quantity, category_id } = formData;
     const errors = [];
 
     if (!name.trim()) {
@@ -172,6 +206,12 @@ const CatalogueTab = () => {
       errors.push('• Category is required.');
     }
 
+    if (discount_percentage && !/^\d+(\.\d{1,2})?$/.test(discount_percentage)) {
+      errors.push('Discount must be a valid percentage (e.g., 5 or 10.5).');
+    } else if (parseFloat(discount_percentage || '0') > 100) {
+      errors.push('Discount cannot be greater than 100%.');
+    }
+
     if (errors.length > 0) {
       Alert.alert('Please fix the following issues:', errors.join('\n'));
       return;
@@ -182,6 +222,7 @@ const CatalogueTab = () => {
       const productData = {
         name: formData.name,
         price: formData.price,
+        discount_percentage: formData.discount_percentage || '0',
         stock_quantity: formData.stock_quantity || '0',
         description: formData.description || '',
         category_id: formData.category_id || '1',
@@ -216,6 +257,7 @@ const CatalogueTab = () => {
     setFormData({
       name: product.name,
       price: product.price.toString(),
+      discount_percentage: product.discount_percentage?.toString() || '0',
       category_id: product.category_id?.toString() || '1',
       stock_quantity: product.stock_quantity?.toString() || '0',
       description: product.description || '',
@@ -234,6 +276,7 @@ const CatalogueTab = () => {
     setFormData({
       name: '',
       price: '',
+      discount_percentage: '0',
       category_id: '',
       stock_quantity: '',
       description: '',
@@ -293,6 +336,10 @@ const CatalogueTab = () => {
         ? item.image_url
         : `${BASE_URL}${item.image_url}`
       : null;
+    const originalPrice = roundCurrencyValue(item.original_price ?? item.price ?? 0);
+    const discountPercentage = clampDiscountPercentage(item.discount_percentage);
+    const discountedPrice = computeDiscountedPrice(originalPrice, discountPercentage);
+    const hasDiscount = discountPercentage > 0 && discountedPrice < originalPrice;
 
     return (
       <ProductCard
@@ -302,6 +349,9 @@ const CatalogueTab = () => {
         description={item.description}
         priceText={`₱${item.price}`}
         stockText={`Qty: ${item.stock_quantity || 0}`}
+        discountedPriceText={hasDiscount ? formatCurrency(discountedPrice) : formatCurrency(originalPrice)}
+        originalPriceText={hasDiscount ? formatCurrency(originalPrice) : null}
+        discountBadgeText={hasDiscount ? formatDiscountLabel(discountPercentage) : null}
         showDescription
         showActions
         statusBadge={item.is_active === false ? 'Unavailable' : null}
@@ -319,6 +369,11 @@ const CatalogueTab = () => {
       </View>
     );
   }
+
+  const originalPricePreview = roundCurrencyValue(formData.price);
+  const discountPercentagePreview = clampDiscountPercentage(formData.discount_percentage);
+  const discountedPricePreview = computeDiscountedPrice(originalPricePreview, discountPercentagePreview);
+  const hasDiscountPreview = discountPercentagePreview > 0 && discountedPricePreview < originalPricePreview;
 
   return (
     <View style={styles.tabContent}>
@@ -408,6 +463,29 @@ const CatalogueTab = () => {
                 value={formData.price}
                 onChangeText={(text) => handleNumericInput('price', text)}
               />
+
+              <Text style={styles.inputLabel}>Discount Percentage</Text>
+              <Text style={styles.inputHelperText}>Use 0 if there is no discount.</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter discount percentage"
+                keyboardType="numeric"
+                value={formData.discount_percentage}
+                onChangeText={(text) => handleNumericInput('discount_percentage', text)}
+              />
+
+              <View style={styles.catalogueDiscountPreview}>
+                <Text style={styles.catalogueDiscountPreviewLabel}>Selling Price</Text>
+                <Text style={styles.catalogueDiscountPreviewValue}>{formatCurrency(discountedPricePreview)}</Text>
+                {hasDiscountPreview ? (
+                  <View style={styles.catalogueDiscountMetaRow}>
+                    <Text style={styles.catalogueDiscountOriginalPrice}>{formatCurrency(originalPricePreview)}</Text>
+                    <Text style={styles.catalogueDiscountBadge}>{formatDiscountLabel(discountPercentagePreview)}</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.catalogueDiscountHint}>No discount applied. Customers will only see the original price.</Text>
+                )}
+              </View>
 
               <Text style={styles.inputLabel}>Quantity *</Text>
               <TextInput

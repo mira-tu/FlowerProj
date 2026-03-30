@@ -9,6 +9,9 @@ const ProductCard = ({
   category,
   description,
   priceText,
+  discountedPriceText,
+  originalPriceText,
+  discountBadgeText,
   stockText,
   showDescription = false,
   showActions = false,
@@ -40,7 +43,19 @@ const ProductCard = ({
       {statusBadge && <Text style={styles.unavailableBadge}>{statusBadge}</Text>}
 
       <View style={styles.priceRow}>
-        <Text style={styles.productPrice}>{priceText}</Text>
+        <View style={styles.productPriceBlock}>
+          <Text style={styles.productPrice}>{discountedPriceText || priceText}</Text>
+          {(originalPriceText || discountBadgeText) && (
+            <View style={styles.productDiscountRow}>
+              {originalPriceText ? (
+                <Text style={styles.productOriginalPrice}>{originalPriceText}</Text>
+              ) : null}
+              {discountBadgeText ? (
+                <Text style={styles.productDiscountBadge}>{discountBadgeText}</Text>
+              ) : null}
+            </View>
+          )}
+        </View>
         <Text style={styles.productStock}>{stockText}</Text>
       </View>
       {children}

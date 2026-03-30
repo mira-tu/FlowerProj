@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef, useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { FaChevronLeft, FaArrowRotateLeft, FaScroll, FaRibbon, FaSeedling } from 'react-icons/fa6';
 import html2canvas from 'html2canvas';
@@ -6,14 +6,30 @@ import RequestSuccessModal from '../components/RequestSuccessModal';
 import InfoModal from '../components/InfoModal'; // Import InfoModal
 import { supabase } from '../config/supabase';
 import { stockAPI } from '../config/api'; // Import stockAPI
+import palmHaloRibbonSource from '../assets/ribbons/palm-halo-ribbon-source.jpg';
+import {
+  applyNaturalWrapperPreviewCropping,
+  buildPalmHaloRibbonOptions,
+  getWrapperFlowerZoneConfig,
+  getWrapperPreviewStyle,
+  getWrapperRibbonPreviewConfig,
+  getWrapperRibbonMode,
+  normalizeRibbonScope,
+  RIBBON_SCOPE,
+} from '../utils/customizedRibbonOptions';
 import '../styles/Customized.css';
 
 const placeholderStemImg = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 const placeholderImg = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodGg9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiPjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodGg9IjEwMCIgZmlsbD0iI2UwZTBlMCIvPjx0ZXh0IHg9IjUwIiB5PSI1MCIgZm9udC1mYW1pbHk9ImFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjMzMzIiBhbmNob3ItcGVudD0ibWlkZGxlIiB0ZXh0LWFuY2hvcnM9Im1pZGRsZSI+Tm8gSW1hZ2U8L3RleHQ+PC9zdmc+'; // SVG "No Image" placeholder
 
 const MAX_STEM_COUNT = 500; // Maximum number of stems allowed for performance reasons.
+const STEM_HANDLE_SIZE = 100;
+const CLASSIC_FLOWER_ZONE_WIDTH = 320;
+const CLASSIC_FLOWER_ZONE_HEIGHT = 250;
+const BASE_STEM_MAX_X = CLASSIC_FLOWER_ZONE_WIDTH - STEM_HANDLE_SIZE;
+const BASE_STEM_MAX_Y = CLASSIC_FLOWER_ZONE_HEIGHT - STEM_HANDLE_SIZE;
 const bundleOptions = [3, 6, 12];
-const steps = [
+const BASE_STEPS = [
   { id: 1, icon: <FaScroll />, label: 'Wrapper' },
   { id: 2, icon: <FaRibbon />, label: 'Ribbon' },
   { id: 3, icon: <FaSeedling />, label: 'Flowers' }
@@ -59,6 +75,18 @@ const getOptionStockLabel = (item) => {
   if ((item.quantity || 0) <= 0) return 'Out of Stock';
   if ((item.quantity || 0) <= 5) return `Only ${item.quantity} left!`;
   return `${item.quantity} pieces available`;
+};
+
+const getOptionPriceText = (item, groupKey, formatPrice) => {
+  if (groupKey === 'flowers') {
+    return `+${formatPrice(item.price)}/pc`;
+  }
+
+  if (groupKey === 'ribbons' && (Number(item.price) || 0) <= 0) {
+    return 'Included';
+  }
+
+  return `+${formatPrice(item.price || 0)}`;
 };
 
 const isOptionSelectable = (item) => item.is_available !== false && (item.quantity || 0) > 0;
@@ -156,21 +184,129 @@ const BASE_PRESET_POSITIONS = {
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
-const getStemPosition = (index, count) => {
+const constrainStemToBounds = ({
+  x,
+  y,
+  maxX,
+  maxY,
+  zoneWidth,
+  zoneHeight,
+  shape = 'rectangle',
+  handleWidth = STEM_HANDLE_SIZE,
+  handleHeight = STEM_HANDLE_SIZE,
+}) => {
+  const clampedX = clamp(x, 0, maxX);
+  const clampedY = clamp(y, 0, maxY);
+
+  if (shape !== 'ellipse') {
+    return { x: clampedX, y: clampedY };
+  }
+
+  const radiusX = Math.max((zoneWidth - handleWidth) / 2, 0);
+  const radiusY = Math.max((zoneHeight - handleHeight) / 2, 0);
+
+  if (!radiusX || !radiusY) {
+    return { x: clampedX, y: clampedY };
+  }
+
+  const centerX = clampedX + handleWidth / 2;
+  const centerY = clampedY + handleHeight / 2;
+  const ellipseCenterX = zoneWidth / 2;
+  const ellipseCenterY = zoneHeight / 2;
+  const normalizedX = (centerX - ellipseCenterX) / radiusX;
+  const normalizedY = (centerY - ellipseCenterY) / radiusY;
+  const distance = (normalizedX ** 2) + (normalizedY ** 2);
+
+  if (distance <= 1) {
+    return { x: clampedX, y: clampedY };
+  }
+
+  const scale = 1 / Math.sqrt(distance);
+  const adjustedCenterX = ellipseCenterX + (centerX - ellipseCenterX) * scale;
+  const adjustedCenterY = ellipseCenterY + (centerY - ellipseCenterY) * scale;
+
+  return {
+    x: clamp(adjustedCenterX - handleWidth / 2, 0, maxX),
+    y: clamp(adjustedCenterY - handleHeight / 2, 0, maxY),
+  };
+};
+
+const getStemPosition = (index, count, maxX = BASE_STEM_MAX_X, maxY = BASE_STEM_MAX_Y) => {
   const preset = BASE_PRESET_POSITIONS[count];
   if (preset?.[index]) {
-    return { ...preset[index] };
+    return {
+      ...preset[index],
+      x: clamp((preset[index].x / BASE_STEM_MAX_X) * maxX, 0, maxX),
+      y: clamp((preset[index].y / BASE_STEM_MAX_Y) * maxY, 0, maxY),
+    };
   }
 
   const angle = index * 0.82;
   const radius = 18 + Math.sqrt(index + 1) * 18;
+  const baseX = clamp(70 + Math.cos(angle) * radius, 0, BASE_STEM_MAX_X);
+  const baseY = clamp(45 + Math.sin(angle) * radius * 0.62, 0, BASE_STEM_MAX_Y);
 
   return {
-    x: clamp(70 + Math.cos(angle) * radius, 0, 220),
-    y: clamp(45 + Math.sin(angle) * radius * 0.62, 0, 150),
+    x: clamp((baseX / BASE_STEM_MAX_X) * maxX, 0, maxX),
+    y: clamp((baseY / BASE_STEM_MAX_Y) * maxY, 0, maxY),
     rotate: Math.sin(index * 1.35) * 18,
     zIndex: index + 1,
   };
+};
+
+const resolveZoneLayout = (zoneLayouts, zoneKey, fallbackIndex = 0) => (
+  zoneLayouts.find((zone) => zone.id === zoneKey) || zoneLayouts[fallbackIndex] || null
+);
+
+const buildStemZonePlan = (count, zoneLayouts) => {
+  if (!count || zoneLayouts.length === 0) {
+    return [];
+  }
+
+  if (zoneLayouts.length === 1) {
+    return Array.from({ length: count }, (_, zoneStemIndex) => ({
+      zoneIndex: 0,
+      zoneKey: zoneLayouts[0].id,
+      zoneStemIndex,
+      zoneStemCount: count,
+    }));
+  }
+
+  const weights = zoneLayouts.map((zone) => (
+    Number.isFinite(zone.stemShare) && zone.stemShare > 0 ? zone.stemShare : 1
+  ));
+  const totalWeight = weights.reduce((sum, value) => sum + value, 0) || zoneLayouts.length;
+  const exactCounts = weights.map((weight) => (count * weight) / totalWeight);
+  const allocations = exactCounts.map((value) => Math.floor(value));
+  let assignedCount = allocations.reduce((sum, value) => sum + value, 0);
+  const remainders = exactCounts
+    .map((value, zoneIndex) => ({
+      zoneIndex,
+      fraction: value - allocations[zoneIndex],
+    }))
+    .sort((a, b) => b.fraction - a.fraction);
+
+  let remainderIndex = 0;
+  while (assignedCount < count && remainders.length > 0) {
+    const nextZone = remainders[remainderIndex % remainders.length];
+    allocations[nextZone.zoneIndex] += 1;
+    assignedCount += 1;
+    remainderIndex += 1;
+  }
+
+  const plan = [];
+  allocations.forEach((zoneStemCount, zoneIndex) => {
+    for (let zoneStemIndex = 0; zoneStemIndex < zoneStemCount; zoneStemIndex += 1) {
+      plan.push({
+        zoneIndex,
+        zoneKey: zoneLayouts[zoneIndex].id,
+        zoneStemIndex,
+        zoneStemCount,
+      });
+    }
+  });
+
+  return plan;
 };
 
 const Customized = ({ addToCart }) => {
@@ -185,7 +321,7 @@ const Customized = ({ addToCart }) => {
   const [customBundleSizeInput, setCustomBundleSizeInput] = useState('');
   const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null }); // State for InfoModal
   const previewRef = useRef(null);
-  const flowerZoneRef = useRef(null);
+  const wrapperLayerRef = useRef(null);
   const dragStateRef = useRef(null);
   const stemIdRef = useRef(0);
 
@@ -193,10 +329,43 @@ const Customized = ({ addToCart }) => {
   const [flowers, setFlowers] = useState([]);
   const [wrappers, setWrappers] = useState([]);
   const [ribbons, setRibbons] = useState([]);
+  const [palmHaloFallbackRibbons, setPalmHaloFallbackRibbons] = useState([]);
   const [loadingCustomizationData, setLoadingCustomizationData] = useState(true);
+  const [loadingPalmHaloRibbons, setLoadingPalmHaloRibbons] = useState(true);
   const [stemLayouts, setStemLayouts] = useState([]);
   const [draggingStemId, setDraggingStemId] = useState(null);
   const [wrapperColorModal, setWrapperColorModal] = useState({ open: false, groupId: null });
+  const [wrapperLayerBox, setWrapperLayerBox] = useState(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadPalmHaloRibbonVariants = async () => {
+      setLoadingPalmHaloRibbons(true);
+
+      try {
+        const options = await buildPalmHaloRibbonOptions(palmHaloRibbonSource);
+        if (isMounted) {
+          setPalmHaloFallbackRibbons(options);
+        }
+      } catch (error) {
+        console.error('Error preparing Palm Halo ribbon options:', error);
+        if (isMounted) {
+          setPalmHaloFallbackRibbons([]);
+        }
+      } finally {
+        if (isMounted) {
+          setLoadingPalmHaloRibbons(false);
+        }
+      }
+    };
+
+    loadPalmHaloRibbonVariants();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     const fetchCustomizationData = async () => {
@@ -241,10 +410,15 @@ const Customized = ({ addToCart }) => {
             layerImg: item.layerImg,
             quantity: item.quantity || 0,
             is_available: item.is_available !== false,
+            ribbon_scope: item.ribbon_scope || '',
           }));
 
+        const preparedWrapperGroups = await applyNaturalWrapperPreviewCropping(
+          buildWrapperGroups(processedWrappers)
+        );
+
         setFlowers(processedFlowers);
-        setWrappers(buildWrapperGroups(processedWrappers));
+        setWrappers(preparedWrapperGroups);
         setRibbons(processedRibbons);
 
       } catch (error) {
@@ -257,6 +431,69 @@ const Customized = ({ addToCart }) => {
 
     fetchCustomizationData();
   }, []); // Run once on component mount
+
+  const ribbonMode = useMemo(() => getWrapperRibbonMode(selection.wrapper), [selection.wrapper]);
+  const classicRibbonOptions = useMemo(() => (
+    ribbons.filter((item) => normalizeRibbonScope(item.ribbon_scope) !== RIBBON_SCOPE.PALM_HALO_WRAP)
+  ), [ribbons]);
+  const palmHaloStockRibbonOptions = useMemo(() => (
+    ribbons.filter((item) => normalizeRibbonScope(item.ribbon_scope) === RIBBON_SCOPE.PALM_HALO_WRAP)
+  ), [ribbons]);
+  const availableRibbonOptions = useMemo(() => {
+    if (ribbonMode === 'classic') {
+      return classicRibbonOptions;
+    }
+
+    if (ribbonMode === 'palm-halo') {
+      return palmHaloStockRibbonOptions.length > 0 ? palmHaloStockRibbonOptions : palmHaloFallbackRibbons;
+    }
+
+    return [];
+  }, [classicRibbonOptions, palmHaloFallbackRibbons, palmHaloStockRibbonOptions, ribbonMode]);
+  const visibleSteps = useMemo(() => (
+    ribbonMode === 'none'
+      ? BASE_STEPS.filter((step) => step.id !== 2)
+      : BASE_STEPS
+  ), [ribbonMode]);
+
+  useEffect(() => {
+    if (ribbonMode === 'none' && activeStep === 2) {
+      setActiveStep(3);
+    }
+  }, [activeStep, ribbonMode]);
+
+  useEffect(() => {
+    setSelection((previous) => {
+      if (ribbonMode === 'pending') {
+        return previous;
+      }
+
+      if (ribbonMode === 'none') {
+        if (!previous.ribbon) return previous;
+        return { ...previous, ribbon: null };
+      }
+
+      const nextRibbon = availableRibbonOptions.find((item) => String(item.id) === String(previous.ribbon?.id));
+
+      if (nextRibbon) {
+        return previous.ribbon === nextRibbon
+          ? previous
+          : { ...previous, ribbon: nextRibbon };
+      }
+
+      if (ribbonMode === 'palm-halo') {
+        const defaultPalmHaloRibbon = availableRibbonOptions.find(isOptionSelectable) || availableRibbonOptions[0] || null;
+        if (!defaultPalmHaloRibbon && !previous.ribbon) return previous;
+        return { ...previous, ribbon: defaultPalmHaloRibbon };
+      }
+
+      if (!previous.ribbon) {
+        return previous;
+      }
+
+      return { ...previous, ribbon: null };
+    });
+  }, [availableRibbonOptions, ribbonMode]);
 
   const getMaxAllowedBundleSize = (selectedFlowers) => {
     if (!selectedFlowers || selectedFlowers.length === 0) return MAX_STEM_COUNT;
@@ -365,7 +602,7 @@ const Customized = ({ addToCart }) => {
 
     let item = null;
     if (type === 'ribbons') {
-      item = ribbons.find((entry) => entry.id === id);
+      item = availableRibbonOptions.find((entry) => String(entry.id) === String(id));
     }
     if (!item) return;
     if (!isOptionSelectable(item)) {
@@ -396,6 +633,7 @@ const Customized = ({ addToCart }) => {
     }
 
     setSelection((prev) => ({ ...prev, wrapper: activeVariant }));
+    setActiveStep(getWrapperRibbonMode(activeVariant) === 'none' ? 3 : 2);
   };
   const openWrapperColorModal = (groupId) => {
     setWrapperColorModal({ open: true, groupId });
@@ -432,6 +670,123 @@ const Customized = ({ addToCart }) => {
     if (selection.bundleSize <= 1) return 1;
     return Math.max(0.52, 1 - Math.min(selection.bundleSize - 1, 24) * 0.02);
   }, [selection.bundleSize]);
+  const flowerZoneConfig = useMemo(() => (
+    getWrapperFlowerZoneConfig(selection.wrapper)
+  ), [selection.wrapper]);
+  const wrapperPreviewStyle = useMemo(() => (
+    selection.wrapper
+      ? getWrapperPreviewStyle(selection.wrapper)
+      : getWrapperPreviewStyle(null)
+  ), [selection.wrapper]);
+  const ribbonPreviewConfig = useMemo(() => (
+    getWrapperRibbonPreviewConfig(selection.wrapper)
+  ), [selection.wrapper]);
+  const flowerZoneLayouts = useMemo(() => {
+    const zoneConfigs = Array.isArray(flowerZoneConfig.zones) && flowerZoneConfig.zones.length > 0
+      ? flowerZoneConfig.zones
+      : [flowerZoneConfig];
+
+    return zoneConfigs.map((zoneConfig, zoneIndex) => {
+      if (zoneConfig.mode === 'relative' && wrapperLayerBox) {
+        const width = Math.max(wrapperLayerBox.width * zoneConfig.widthFactor, STEM_HANDLE_SIZE + 40);
+        const height = Math.max(wrapperLayerBox.height * zoneConfig.heightFactor, STEM_HANDLE_SIZE + 40);
+
+        return {
+          id: zoneConfig.id || `flower-zone-${zoneIndex}`,
+          left: wrapperLayerBox.left + (wrapperLayerBox.width * zoneConfig.leftFactor),
+          top: wrapperLayerBox.top + (wrapperLayerBox.height * zoneConfig.topFactor),
+          width,
+          height,
+          transform: 'none',
+          shape: zoneConfig.shape || 'rectangle',
+          stemShare: zoneConfig.stemShare,
+          maxX: Math.max(width - STEM_HANDLE_SIZE, 0),
+          maxY: Math.max(height - STEM_HANDLE_SIZE, 0),
+        };
+      }
+
+      const width = zoneConfig.width ?? CLASSIC_FLOWER_ZONE_WIDTH;
+      const height = zoneConfig.height ?? CLASSIC_FLOWER_ZONE_HEIGHT;
+
+      return {
+        id: zoneConfig.id || `flower-zone-${zoneIndex}`,
+        left: zoneConfig.left ?? '50%',
+        top: zoneConfig.top ?? 0,
+        width,
+        height,
+        transform: zoneConfig.transform ?? 'translateX(-50%)',
+        shape: zoneConfig.shape || 'rectangle',
+        stemShare: zoneConfig.stemShare,
+        maxX: Math.max(width - STEM_HANDLE_SIZE, 0),
+        maxY: Math.max(height - STEM_HANDLE_SIZE, 0),
+      };
+    });
+  }, [flowerZoneConfig, wrapperLayerBox]);
+  const stemZonePlan = useMemo(() => (
+    buildStemZonePlan(selection.bundleSize, flowerZoneLayouts)
+  ), [flowerZoneLayouts, selection.bundleSize]);
+  const ribbonPreviewStyle = useMemo(() => {
+    if (!selection.ribbon) {
+      return null;
+    }
+
+    const baseStyle = selection.ribbon.previewStyle || {};
+
+    if (ribbonPreviewConfig.mode === 'relative') {
+      if (!wrapperLayerBox) {
+        return {
+          ...ribbonPreviewConfig.fallbackStyle,
+          ...baseStyle,
+        };
+      }
+
+      return {
+        ...baseStyle,
+        left: wrapperLayerBox.left + (wrapperLayerBox.width * ribbonPreviewConfig.leftFactor),
+        top: wrapperLayerBox.top + (wrapperLayerBox.height * ribbonPreviewConfig.topFactor),
+        width: wrapperLayerBox.width * ribbonPreviewConfig.widthFactor,
+        transform: ribbonPreviewConfig.transform || baseStyle.transform || 'translate(-50%, -50%)',
+      };
+    }
+
+    return baseStyle;
+  }, [ribbonPreviewConfig, selection.ribbon, wrapperLayerBox]);
+  const syncWrapperLayerBox = () => {
+    if (!selection.wrapper || !previewRef.current || !wrapperLayerRef.current) {
+      setWrapperLayerBox(null);
+      return;
+    }
+
+    const stageRect = previewRef.current.getBoundingClientRect();
+    const wrapperRect = wrapperLayerRef.current.getBoundingClientRect();
+
+    setWrapperLayerBox({
+      left: wrapperRect.left - stageRect.left,
+      top: wrapperRect.top - stageRect.top,
+      width: wrapperRect.width,
+      height: wrapperRect.height,
+    });
+  };
+
+  useEffect(() => {
+    if (!selection.wrapper) {
+      setWrapperLayerBox(null);
+      return undefined;
+    }
+
+    const measure = () => {
+      window.requestAnimationFrame(() => {
+        syncWrapperLayerBox();
+      });
+    };
+
+    measure();
+    window.addEventListener('resize', measure);
+
+    return () => {
+      window.removeEventListener('resize', measure);
+    };
+  }, [selection.wrapper, wrapperPreviewStyle]);
 
   const handleAddToCart = async () => {
     if (selection.flowers.length < 1 || selection.flowers.length > 2 || !selection.bundleSize) {
@@ -516,31 +871,47 @@ const Customized = ({ addToCart }) => {
   };
 
   useEffect(() => {
-    if (selection.flowers.length === 0 || !selection.bundleSize) {
+    if (selection.flowers.length === 0 || !selection.bundleSize || flowerZoneLayouts.length === 0) {
       setStemLayouts([]);
       setDraggingStemId(null);
       dragStateRef.current = null;
       return;
     }
 
-    setStemLayouts((previousLayouts) => {
-      const nextLayouts = previousLayouts
-        .slice(0, selection.bundleSize)
-        .map((layout, index) => ({
-          ...layout,
-          zIndex: index + 1,
-        }));
+    setStemLayouts((previousLayouts) => stemZonePlan.map((stemPlan, index) => {
+      const zoneLayout = resolveZoneLayout(flowerZoneLayouts, stemPlan.zoneKey, stemPlan.zoneIndex);
+      const previousLayout = previousLayouts[index];
+      const shouldReusePosition = previousLayout?.zoneKey === stemPlan.zoneKey;
+      const fallbackPosition = getStemPosition(
+        stemPlan.zoneStemIndex,
+        stemPlan.zoneStemCount,
+        zoneLayout?.maxX ?? BASE_STEM_MAX_X,
+        zoneLayout?.maxY ?? BASE_STEM_MAX_Y
+      );
+      const basePosition = shouldReusePosition
+        ? previousLayout
+        : fallbackPosition;
+      const constrainedPosition = constrainStemToBounds({
+        x: basePosition.x,
+        y: basePosition.y,
+        maxX: zoneLayout?.maxX ?? BASE_STEM_MAX_X,
+        maxY: zoneLayout?.maxY ?? BASE_STEM_MAX_Y,
+        zoneWidth: zoneLayout?.width ?? CLASSIC_FLOWER_ZONE_WIDTH,
+        zoneHeight: zoneLayout?.height ?? CLASSIC_FLOWER_ZONE_HEIGHT,
+        shape: zoneLayout?.shape || 'rectangle',
+      });
 
-      for (let index = nextLayouts.length; index < selection.bundleSize; index += 1) {
-        nextLayouts.push({
-          id: `stem-${stemIdRef.current += 1}`,
-          ...getStemPosition(index, selection.bundleSize),
-        });
-      }
-
-      return nextLayouts;
-    });
-  }, [selection.bundleSize, selection.flowers.length]);
+      return {
+        id: previousLayout?.id || `stem-${stemIdRef.current += 1}`,
+        rotate: shouldReusePosition ? previousLayout.rotate : fallbackPosition.rotate,
+        zIndex: previousLayout?.zIndex ?? (index + 1),
+        zoneIndex: stemPlan.zoneIndex,
+        zoneKey: stemPlan.zoneKey,
+        x: constrainedPosition.x,
+        y: constrainedPosition.y,
+      };
+    }));
+  }, [flowerZoneLayouts, selection.bundleSize, selection.flowers.length, stemZonePlan]);
 
   const isEmpty = selection.flowers.length === 0 && !selection.wrapper && !selection.ribbon;
 
@@ -555,14 +926,12 @@ const Customized = ({ addToCart }) => {
   };
 
   const handleStemPointerDown = (stemId, index) => (event) => {
-    if (!flowerZoneRef.current) return;
     if (event.pointerType === 'mouse' && event.button !== 0) return;
-
-    const zoneRect = flowerZoneRef.current.getBoundingClientRect();
-    const targetRect = event.currentTarget.getBoundingClientRect();
     const layout = stemLayouts[index];
+    const zoneLayout = resolveZoneLayout(flowerZoneLayouts, layout?.zoneKey, layout?.zoneIndex ?? 0);
+    const targetRect = event.currentTarget.getBoundingClientRect();
 
-    if (!layout) return;
+    if (!layout || !zoneLayout) return;
 
     dragStateRef.current = {
       index,
@@ -571,8 +940,14 @@ const Customized = ({ addToCart }) => {
       startY: event.clientY,
       originX: layout.x,
       originY: layout.y,
-      maxX: Math.max(zoneRect.width - targetRect.width, 0),
-      maxY: Math.max(zoneRect.height - targetRect.height, 0),
+      zoneKey: zoneLayout.id,
+      maxX: Math.max(zoneLayout.width - targetRect.width, 0),
+      maxY: Math.max(zoneLayout.height - targetRect.height, 0),
+      zoneWidth: zoneLayout.width,
+      zoneHeight: zoneLayout.height,
+      shape: zoneLayout.shape,
+      handleWidth: targetRect.width,
+      handleHeight: targetRect.height,
     };
 
     setDraggingStemId(stemId);
@@ -590,12 +965,21 @@ const Customized = ({ addToCart }) => {
     const dragState = dragStateRef.current;
     if (!dragState || dragState.index !== index) return;
 
-    const nextX = clamp(dragState.originX + (event.clientX - dragState.startX), 0, dragState.maxX);
-    const nextY = clamp(dragState.originY + (event.clientY - dragState.startY), 0, dragState.maxY);
+    const constrainedPosition = constrainStemToBounds({
+      x: dragState.originX + (event.clientX - dragState.startX),
+      y: dragState.originY + (event.clientY - dragState.startY),
+      maxX: dragState.maxX,
+      maxY: dragState.maxY,
+      zoneWidth: dragState.zoneWidth,
+      zoneHeight: dragState.zoneHeight,
+      shape: dragState.shape,
+      handleWidth: dragState.handleWidth,
+      handleHeight: dragState.handleHeight,
+    });
 
     setStemLayouts((previousLayouts) => previousLayouts.map((layout, layoutIndex) => (
       layoutIndex === index
-        ? { ...layout, x: nextX, y: nextY }
+        ? { ...layout, x: constrainedPosition.x, y: constrainedPosition.y }
         : layout
     )));
 
@@ -607,13 +991,19 @@ const Customized = ({ addToCart }) => {
     if (groupKey === 'flowers') {
       options = flowers;
     } else if (groupKey === 'ribbons') {
-      options = ribbons;
+      if (ribbonMode === 'pending') {
+        return <div className="no-options ribbon-helper">Select a wrapper first to see matching ribbon options.</div>;
+      }
+      options = availableRibbonOptions;
     }
 
-    if (loadingCustomizationData) {
+    if (loadingCustomizationData || (groupKey === 'ribbons' && ribbonMode === 'palm-halo' && loadingPalmHaloRibbons && palmHaloStockRibbonOptions.length === 0)) {
       return <div className="loading-indicator">Loading options...</div>;
     }
     if (options.length === 0) {
+      if (groupKey === 'ribbons' && ribbonMode === 'palm-halo') {
+        return <div className="no-options ribbon-helper">No Palm Halo ribbon colors are ready yet.</div>;
+      }
       return <div className="no-options">No {groupKey} available.</div>;
     }
 
@@ -637,7 +1027,7 @@ const Customized = ({ addToCart }) => {
             >
               <img src={item.img || placeholderImg} alt={item.name} className="option-img" />
               <div className="option-name">{item.name}</div>
-              <div className="option-price">+{formatPrice(item.price)}{groupKey === "flowers" ? "/pc" : ""}</div>
+              <div className="option-price">{getOptionPriceText(item, groupKey, formatPrice)}</div>
               <div className={`option-stock ${!isSelectable ? "danger" : (item.quantity <= 5 ? "warning" : "")}`}>{stockLabel}</div>
             </button>
           );
@@ -716,6 +1106,12 @@ const Customized = ({ addToCart }) => {
   const activeWrapperColorGroup = wrapperColorModal.groupId
     ? wrappers.find((entry) => entry.id === wrapperColorModal.groupId) || null
     : null;
+  const ribbonPanelTitle = ribbonMode === 'palm-halo' ? 'Palm Halo Ribbon' : 'Pick Ribbon';
+  const ribbonPanelSubtitle = ribbonMode === 'palm-halo'
+    ? 'Palm Halo uses its own bow colors.'
+    : 'Add the finishing touch';
+  const ribbonPanelLabel = ribbonMode === 'palm-halo' ? 'Palm Halo Bow Color' : 'Ribbon Color';
+
   return (
     <div className="customize-page">
       <header className="app-header">
@@ -805,59 +1201,74 @@ const Customized = ({ addToCart }) => {
           <div className="canvas-container">
             <div className="bouquet-stage" ref={previewRef}>
               {selection.wrapper && (
-                <img src={selection.wrapper.layerImg || selection.wrapper.img || placeholderImg} alt="Wrapper" className="layer" style={{ zIndex: 1, top: '50%' }} />
+                <img
+                  ref={wrapperLayerRef}
+                  src={selection.wrapper.layerImg || selection.wrapper.img || placeholderImg}
+                  alt="Wrapper"
+                  className="layer"
+                  onLoad={() => syncWrapperLayerBox()}
+                  style={{ zIndex: 1, ...wrapperPreviewStyle }}
+                />
               )}
 
-              {/* Flower Zone - Constrained Area */}
-              <div
-                ref={flowerZoneRef}
-                className="flower-zone"
-                style={{
-                  position: 'absolute',
-                  top: '0%',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  zIndex: 2,
-                  touchAction: 'none'
-                }}
-              >
-                {stemLayouts.map((slot, index) => {
-                  const flowerIndex = index % selection.flowers.length;
-                  const flower = selection.flowers[flowerIndex];
-                  const stemImage = flower?.stemImg || flower?.layerImg || placeholderStemImg;
+              {flowerZoneLayouts.map((zoneLayout) => (
+                <div
+                  key={zoneLayout.id}
+                  className="flower-zone"
+                  data-zone-id={zoneLayout.id}
+                  style={{
+                    position: 'absolute',
+                    top: zoneLayout.top,
+                    left: zoneLayout.left,
+                    width: zoneLayout.width,
+                    height: zoneLayout.height,
+                    transform: zoneLayout.transform,
+                    zIndex: 2,
+                    touchAction: 'none'
+                  }}
+                >
+                  {stemLayouts.map((slot, index) => {
+                    if (slot.zoneKey !== zoneLayout.id) {
+                      return null;
+                    }
 
-                  return (
-                    <div
-                      key={slot.id}
-                      className={`drag-handle ${draggingStemId === slot.id ? 'is-dragging' : ''}`}
-                      style={{
-                        position: 'absolute',
-                        left: slot.x,
-                        top: slot.y,
-                        zIndex: slot.zIndex,
-                        transform: `scale(${stemScale})`,
-                        transformOrigin: 'center center'
-                      }}
-                      onPointerDown={handleStemPointerDown(slot.id, index)}
-                      onPointerMove={handleStemPointerMove(index)}
-                      onPointerUp={releaseDraggedStem}
-                      onPointerCancel={releaseDraggedStem}
-                      onLostPointerCapture={releaseDraggedStem}
-                    >
-                      <div style={{ transform: `rotate(${slot.rotate}deg)`, width: '100%', height: '100%' }}>
-                        <img src={stemImage} alt="Selected stem" className="stem-slot" draggable="false" />
+                    const flowerIndex = index % selection.flowers.length;
+                    const flower = selection.flowers[flowerIndex];
+                    const stemImage = flower?.stemImg || flower?.layerImg || placeholderStemImg;
+
+                    return (
+                      <div
+                        key={slot.id}
+                        className={`drag-handle ${draggingStemId === slot.id ? 'is-dragging' : ''}`}
+                        style={{
+                          position: 'absolute',
+                          left: slot.x,
+                          top: slot.y,
+                          zIndex: slot.zIndex,
+                          transform: `scale(${stemScale})`,
+                          transformOrigin: 'center center'
+                        }}
+                        onPointerDown={handleStemPointerDown(slot.id, index)}
+                        onPointerMove={handleStemPointerMove(index)}
+                        onPointerUp={releaseDraggedStem}
+                        onPointerCancel={releaseDraggedStem}
+                        onLostPointerCapture={releaseDraggedStem}
+                      >
+                        <div style={{ transform: `rotate(${slot.rotate}deg)`, width: '100%', height: '100%' }}>
+                          <img src={stemImage} alt="Selected stem" className="stem-slot" draggable="false" />
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              ))}
 
               {selection.ribbon && (
                 <img
                   src={selection.ribbon.layerImg || selection.ribbon.img || placeholderImg}
                   alt="Ribbon"
                   className="layer"
-                  style={{ zIndex: 3, top: '65%' }}
+                  style={{ zIndex: 3, top: '65%', ...(ribbonPreviewStyle || {}) }}
                 />
               )}
 
@@ -873,7 +1284,7 @@ const Customized = ({ addToCart }) => {
 
         <section className="tools-interface">
           <nav className="vertical-toolbar">
-            {steps.map((step) => (
+            {visibleSteps.map((step) => (
               <button
                 key={step.id}
                 type="button"
@@ -898,16 +1309,18 @@ const Customized = ({ addToCart }) => {
               </div>
             </div>
 
-            <div className={`panel-content ${activeStep === 2 ? 'active' : ''}`} id="step2">
-              <div className="panel-header">
-                <h4>Pick Ribbon</h4>
-                <p>Add the finishing touch</p>
+            {ribbonMode !== 'none' && (
+              <div className={`panel-content ${activeStep === 2 ? 'active' : ''}`} id="step2">
+                <div className="panel-header">
+                  <h4>{ribbonPanelTitle}</h4>
+                  <p>{ribbonPanelSubtitle}</p>
+                </div>
+                <div className="control-group">
+                  <label>{ribbonPanelLabel}</label>
+                  {renderOptions('ribbons', selection.ribbon?.id || null)}
+                </div>
               </div>
-              <div className="control-group">
-                <label>Ribbon Color</label>
-                {renderOptions('ribbons', selection.ribbon?.id || null)}
-              </div>
-            </div>
+            )}
 
             <div className={`panel-content ${activeStep === 3 ? 'active' : ''}`} id="step3">
               <div className="panel-header">

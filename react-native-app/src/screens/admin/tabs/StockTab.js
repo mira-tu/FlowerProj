@@ -32,7 +32,30 @@ const normalizeStockCategory = (value) => {
   if (normalized === 'flower' || normalized === 'flowers') return 'Flowers';
   return String(value || '').trim();
 };
+const RIBBON_SCOPE_OPTIONS = [
+  { value: 'classic_bouquet', label: 'Classic Bouquet' },
+  { value: 'palm_halo_wrap', label: 'Palm Halo Wrap' },
+];
+const normalizeRibbonScope = (value) => {
+  const normalized = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+
+  if (!normalized || normalized === 'classic' || normalized === 'classic_wrap' || normalized === 'classic_bouquet') {
+    return 'classic_bouquet';
+  }
+
+  if (normalized === 'palm_halo' || normalized === 'palm_halo_wrap' || normalized === 'palmhalo') {
+    return 'palm_halo_wrap';
+  }
+
+  return normalized;
+};
+const getRibbonScopeLabel = (value) => (
+  normalizeRibbonScope(value) === 'palm_halo_wrap'
+    ? 'Palm Halo Wrap'
+    : 'Classic Bouquet'
+);
 const isWrapperStockItem = (item) => normalizeStockCategory(item?.category) === 'Wrappers';
+const isRibbonStockItem = (item) => normalizeStockCategory(item?.category) === 'Ribbons';
 const getWrapperDesignName = (item) => {
   const explicitGroupName = String(item?.wrapper_group_name || '').trim();
   if (explicitGroupName) return explicitGroupName;
@@ -47,6 +70,11 @@ const getStockDescription = (item) => {
   if (!isWrapperStockItem(item)) return '';
   const colorName = getWrapperColorName(item);
   return colorName ? `Color variation: ${colorName}` : 'Single wrapper design';
+};
+const getStockMetadataDescription = (item) => {
+  if (isWrapperStockItem(item)) return getStockDescription(item);
+  if (isRibbonStockItem(item)) return `Applies to: ${getRibbonScopeLabel(item?.ribbon_scope)}`;
+  return '';
 };
 
 const StockTab = () => {
@@ -67,6 +95,7 @@ const StockTab = () => {
     unit: '',
     is_available: true, // Boolean status field
     wrapper_color: '',
+    ribbon_scope: 'classic_bouquet',
     image: null,
   });
 
@@ -127,6 +156,8 @@ const StockTab = () => {
       is_available: true, // Boolean status field
 
       wrapper_color: '',
+
+      ribbon_scope: normalizeStockCategory(activeStockTab) === 'Ribbons' ? 'classic_bouquet' : '',
 
       image: null,
 
@@ -242,6 +273,8 @@ const StockTab = () => {
 
       wrapper_color: getWrapperColorName(item),
 
+      ribbon_scope: isRibbonStockItem(item) ? normalizeRibbonScope(item.ribbon_scope) : '',
+
       image: item.image_url ? { uri: item.image_url.startsWith('http') || item.image_url.startsWith('data:') ? item.image_url : `${BASE_URL}${item.image_url}` } : null,
 
     });
@@ -308,6 +341,7 @@ const StockTab = () => {
 
         wrapper_group_name: normalizedCategory === 'Wrappers' ? trimmedName : null,
         wrapper_color: normalizedCategory === 'Wrappers' && trimmedWrapperColor ? trimmedWrapperColor : null,
+        ribbon_scope: normalizedCategory === 'Ribbons' ? normalizeRibbonScope(stockFormData.ribbon_scope) : null,
 
         image: stockFormData.image,
 
@@ -341,6 +375,7 @@ const StockTab = () => {
   );
   const modalStockCategory = normalizeStockCategory(editingStock?.category || activeStockTab);
   const isWrapperForm = modalStockCategory === 'Wrappers';
+  const isRibbonForm = modalStockCategory === 'Ribbons';
 
   const renderStockItem = ({ item }) => {
     const imageUrl = item.image_url
@@ -354,8 +389,8 @@ const StockTab = () => {
         imageUrl={imageUrl}
         name={getStockDisplayName(item)}
         category={item.category || 'Uncategorized'}
-        description={getStockDescription(item)}
-        showDescription={Boolean(getStockDescription(item))}
+        description={getStockMetadataDescription(item)}
+        showDescription={Boolean(getStockMetadataDescription(item))}
         priceText={`₱${item.price || '0'} / ${item.unit || 'unit'}`}
         stockText={`Qty: ${item.quantity}`}
         showActions
@@ -515,6 +550,38 @@ const StockTab = () => {
                 <Text style={styles.inputHelperText}>
                   Use the same design name on multiple wrapper entries, then give each entry its own color variation.
                 </Text>
+              )}
+
+              {isRibbonForm && (
+                <>
+                  <Text style={styles.inputLabel}>Ribbon Scope</Text>
+
+                  <View style={styles.categoryGrid}>
+                    {RIBBON_SCOPE_OPTIONS.map((option) => (
+                      <TouchableOpacity
+                        key={option.value}
+                        style={[
+                          styles.modalCategoryChip,
+                          normalizeRibbonScope(stockFormData.ribbon_scope) === option.value && styles.modalCategoryChipActive
+                        ]}
+                        onPress={() => setStockFormData({ ...stockFormData, ribbon_scope: option.value })}
+                      >
+                        <Text
+                          style={[
+                            styles.modalCategoryChipText,
+                            normalizeRibbonScope(stockFormData.ribbon_scope) === option.value && styles.modalCategoryChipTextActive
+                          ]}
+                        >
+                          {option.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <Text style={styles.inputHelperText}>
+                    Use Classic Bouquet for the normal bouquet ribbons, and Palm Halo Wrap for the stand-flower ribbon.
+                  </Text>
+                </>
               )}
 
               <View style={styles.rowInputs}>

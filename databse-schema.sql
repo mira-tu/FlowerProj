@@ -46,6 +46,9 @@ CREATE TABLE products (
   name VARCHAR(255) NOT NULL,
   description TEXT,
   price DECIMAL(10, 2) NOT NULL,
+  original_price DECIMAL(10, 2),
+  discount_percentage DECIMAL(5, 2) NOT NULL DEFAULT 0,
+  discounted_price DECIMAL(10, 2),
   category_id INT,
   image_url VARCHAR(255),
   stock_quantity INT NOT NULL DEFAULT 0,
@@ -261,6 +264,29 @@ CREATE TRIGGER on_request_complete
 AFTER UPDATE ON requests
 FOR EACH ROW
 EXECUTE PROCEDURE record_request_sale();
+
+CREATE OR REPLACE FUNCTION sync_product_discount_fields()
+RETURNS TRIGGER AS $$
+DECLARE
+  base_price NUMERIC(10, 2);
+  safe_discount NUMERIC(5, 2);
+BEGIN
+  base_price := COALESCE(NEW.original_price, NEW.price, 0);
+  safe_discount := GREATEST(0, LEAST(100, COALESCE(NEW.discount_percentage, 0)));
+
+  NEW.price := ROUND(base_price::NUMERIC, 2);
+  NEW.original_price := NEW.price;
+  NEW.discount_percentage := safe_discount;
+  NEW.discounted_price := ROUND((NEW.price * (1 - (safe_discount / 100.0)))::NUMERIC, 2);
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER sync_product_discount_fields_trigger
+BEFORE INSERT OR UPDATE ON products
+FOR EACH ROW
+EXECUTE PROCEDURE sync_product_discount_fields();
 
 -- Refund Requests
 CREATE TABLE refund_requests (
