@@ -9,6 +9,52 @@ import {
 
 const ADMIN_WORKFLOW_FUNCTION = 'manage-admin-workflows';
 
+const getStoredStaffToken = async () => {
+    try {
+        const token = await AsyncStorage.getItem('token');
+        return typeof token === 'string' ? token.trim() : '';
+    } catch (error) {
+        console.warn('Unable to read stored staff token:', error?.message || error);
+        return '';
+    }
+};
+
+const getWorkflowAccessToken = async () => {
+    let accessToken = '';
+
+    try {
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) {
+            console.warn('Could not read Supabase session for admin workflow:', sessionError.message);
+        }
+
+        accessToken = sessionData?.session?.access_token?.trim?.() || '';
+    } catch (error) {
+        console.warn('Failed to load Supabase session for admin workflow:', error?.message || error);
+    }
+
+    if (accessToken) {
+        return accessToken;
+    }
+
+    try {
+        const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshError) {
+            console.warn('Could not refresh Supabase session for admin workflow:', refreshError.message);
+        }
+
+        accessToken = refreshed?.session?.access_token?.trim?.() || '';
+    } catch (error) {
+        console.warn('Failed to refresh Supabase session for admin workflow:', error?.message || error);
+    }
+
+    if (accessToken) {
+        return accessToken;
+    }
+
+    return getStoredStaffToken();
+};
+
 const getFunctionErrorMessage = async (error, fallbackMessage) => {
     if (!error) return fallbackMessage;
 
@@ -38,8 +84,11 @@ const getFunctionErrorMessage = async (error, fallbackMessage) => {
 };
 
 const invokeAdminWorkflow = async (action, payload = {}) => {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const accessToken = sessionData?.session?.access_token;
+    const accessToken = await getWorkflowAccessToken();
+
+    if (!accessToken) {
+        throw new Error('Your admin session expired. Please sign in again to continue.');
+    }
 
     const { data, error } = await supabase.functions.invoke(ADMIN_WORKFLOW_FUNCTION, {
         body: {
@@ -98,6 +147,60 @@ const parseJsonObject = (value) => {
         }
     }
     return typeof value === 'object' ? value : {};
+};
+
+const isEmptySingleResultError = (error) => {
+    const code = String(error?.code || '').trim().toUpperCase();
+    const message = String(error?.message || '').toLowerCase();
+    const details = String(error?.details || '').toLowerCase();
+
+    return code === 'PGRST116'
+        || message.includes('cannot coerce the result to a single json object')
+        || details.includes('contains 0 rows');
+};
+
+const getOrderById = async (id, columns = '*') => {
+    const { data, error } = await supabase
+        .from('orders')
+        .select(columns)
+        .eq('id', id)
+        .maybeSingle();
+
+    if (error) {
+        throw error;
+    }
+
+    return data || null;
+};
+
+const updateOrderRecordAndReload = async (id, updatePayload, verifier) => {
+    const { data, error } = await supabase
+        .from('orders')
+        .update(updatePayload)
+        .eq('id', id)
+        .select()
+        .maybeSingle();
+
+    if (error && !isEmptySingleResultError(error)) {
+        throw error;
+    }
+
+    if (data) {
+        return data;
+    }
+
+    const refreshedOrder = await getOrderById(id);
+    if (!refreshedOrder) {
+        throw new Error('Order not found after updating it.');
+    }
+
+    if (typeof verifier === 'function' && !verifier(refreshedOrder)) {
+        throw new Error(
+            'The order update was not confirmed in the database. Check your Supabase order permissions or deploy the latest manage-admin-workflows function.'
+        );
+    }
+
+    return refreshedOrder;
 };
 
 const buildStopAssignmentLookup = (stopAssignments = []) => {
@@ -244,11 +347,18 @@ const withStatusTimestamp = (existingValue, status) => ({
 });
 
 const updateOrderStatusDirect = async (id, status, options = {}) => {
-    const { data: current, error: fetchError } = await supabase
-        .from('orders')
-        .select('status_timestamps, cancellation_reason')
-        .eq('id', id)
-        .single();
+    let current = null;
+    let fetchError = null;
+
+    try {
+        current = await getOrderById(id, 'id, status_timestamps, cancellation_reason');
+    } catch (error) {
+        fetchError = error;
+    }
+
+    if (!current && !fetchError) {
+        fetchError = new Error('Order not found.');
+    }
 
     if (fetchError) {
         if (fetchError.code === '42703' && String(fetchError.message || '').includes('orders.cancellation_reason')) {
@@ -267,37 +377,34 @@ const updateOrderStatusDirect = async (id, status, options = {}) => {
         nextStatusTimestamps.cancel_reason = cancellationReason;
     }
 
-    const { data, error } = await supabase
-        .from('orders')
-        .update({
+    const data = await updateOrderRecordAndReload(
+        id,
+        {
             status,
             status_timestamps: nextStatusTimestamps,
             cancellation_reason: status === 'cancelled'
                 ? (cancellationReason || current?.cancellation_reason || null)
                 : current?.cancellation_reason ?? null,
-        })
-        .eq('id', id)
-        .select()
-        .single();
+        },
+        (order) => {
+            const normalizedReason = status === 'cancelled'
+                ? (cancellationReason || current?.cancellation_reason || null)
+                : current?.cancellation_reason ?? null;
 
-    if (error) {
-        throw error;
-    }
+            return order?.status === status
+                && order?.cancellation_reason === normalizedReason;
+        }
+    );
 
     return { success: true, order: data };
 };
 
 const updateOrderPaymentStatusDirect = async (id, status) => {
-    const { data, error } = await supabase
-        .from('orders')
-        .update({ payment_status: status })
-        .eq('id', id)
-        .select()
-        .single();
-
-    if (error) {
-        throw error;
-    }
+    const data = await updateOrderRecordAndReload(
+        id,
+        { payment_status: status },
+        (order) => order?.payment_status === status
+    );
 
     return { success: true, order: data };
 };
@@ -315,16 +422,16 @@ const assignOrderRiderDirect = async (orderId, riderId, thirdPartyName = null, t
             third_party_rider_info: thirdPartyInfo,
         };
 
-    const { data, error } = await supabase
-        .from('orders')
-        .update(updateData)
-        .eq('id', orderId)
-        .select()
-        .single();
-
-    if (error) {
-        throw error;
-    }
+    const data = await updateOrderRecordAndReload(
+        orderId,
+        updateData,
+        (order) => {
+            const nextAssignedRider = riderId || null;
+            return (order?.assigned_rider || null) === nextAssignedRider
+                && (order?.third_party_rider_name || null) === (thirdPartyName || null)
+                && (order?.third_party_rider_info || null) === (thirdPartyInfo || null);
+        }
+    );
 
     await maybeNotifyAssignedRider({
         entityType: 'order',

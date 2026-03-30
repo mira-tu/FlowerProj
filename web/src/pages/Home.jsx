@@ -270,9 +270,6 @@ const Home = ({ addToCart, products, categories, user }) => {
                                                 {product.stock_quantity} in stock
                                             </div>
                                         )}
-                                        {product.has_discount ? (
-                                            <div className="product-discount-badge">{formatProductDiscountLabel(product.discount_percentage)}</div>
-                                        ) : null}
                                         <button
                                             className={`wishlist-heart-btn ${isInWishlist(product.name) ? 'active' : ''}`}
                                             onClick={(e) => toggleWishlist(product, e)}
@@ -288,6 +285,7 @@ const Home = ({ addToCart, products, categories, user }) => {
                                             {product.has_discount ? (
                                                 <div className="product-price-meta">
                                                     <span className="product-original-price">{formatCurrency(product.original_price)}</span>
+                                                    <span className="product-inline-discount-badge">{formatProductDiscountLabel(product.discount_percentage)}</span>
                                                 </div>
                                             ) : null}
                                         </div>

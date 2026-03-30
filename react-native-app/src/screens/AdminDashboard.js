@@ -70,16 +70,28 @@ const AdminDashboard = () => {
           return;
         }
 
-        const user = JSON.parse(currentUserJson);
+        const restoredSession = await authAPI.restoreStaffSession();
+        if (!restoredSession?.data?.user) {
+          await AsyncStorage.multiRemove(['currentUser', 'token']);
+          navigation.navigate('Login');
+          return;
+        }
+
+        const { user, token } = restoredSession.data;
         if (user.role !== 'admin' && user.role !== 'employee') {
           Alert.alert('Access Denied', 'You do not have permission to access this page');
           navigation.navigate('Login');
           return;
         }
 
+        await AsyncStorage.multiSet([
+          ['token', token],
+          ['currentUser', JSON.stringify(user)],
+        ]);
         setCurrentUser(user);
       } catch (error) {
         console.error('Error checking user:', error);
+        await AsyncStorage.multiRemove(['currentUser', 'token']);
         navigation.navigate('Login');
       } finally {
         setLoading(false);
