@@ -20,6 +20,59 @@ const paymentMethods = [
 
 const pickupTimes = ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM'];
 
+const buildRoundRobinFlowerAllocations = (flowers = [], bundleSize = 0) => {
+    const safeFlowers = Array.isArray(flowers) ? flowers.filter((flower) => flower?.id) : [];
+    if (!safeFlowers.length || !bundleSize) {
+        return [];
+    }
+
+    const allocations = safeFlowers.map((flower) => ({
+        stock_product_id: flower.id,
+        quantity: 0,
+    }));
+
+    for (let index = 0; index < bundleSize; index += 1) {
+        allocations[index % allocations.length].quantity += 1;
+    }
+
+    return allocations.filter((allocation) => allocation.quantity > 0);
+};
+
+const buildCustomizedRequestStockAllocations = (items = []) => {
+    const totals = new Map();
+
+    const pushAllocation = (stockProductId, quantity) => {
+        const normalizedId = Number.parseInt(stockProductId, 10);
+        const normalizedQuantity = Number.parseInt(quantity, 10);
+        if (!Number.isFinite(normalizedId) || normalizedId <= 0 || !Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0) {
+            return;
+        }
+
+        totals.set(normalizedId, (totals.get(normalizedId) || 0) + normalizedQuantity);
+    };
+
+    (Array.isArray(items) ? items : []).forEach((item) => {
+        pushAllocation(item?.wrapper?.id, 1);
+        pushAllocation(item?.ribbon?.id, 1);
+
+        const flowerAllocations = Array.isArray(item?.flowerAllocations) && item.flowerAllocations.length > 0
+            ? item.flowerAllocations.map((allocation) => ({
+                stock_product_id: allocation?.id,
+                quantity: allocation?.quantity,
+            }))
+            : buildRoundRobinFlowerAllocations(item?.flowers, item?.bundleSize);
+
+        flowerAllocations.forEach((allocation) => {
+            pushAllocation(allocation?.stock_product_id, allocation?.quantity);
+        });
+    });
+
+    return Array.from(totals.entries()).map(([stock_product_id, quantity]) => ({
+        stock_product_id,
+        quantity,
+    }));
+};
+
 const CustomizedCheckout = ({ user }) => {
     const navigate = useNavigate();
     const [checkoutItems, setCheckoutItems] = useState([]);
@@ -265,6 +318,8 @@ const CustomizedCheckout = ({ user }) => {
             return item;
         }));
 
+        const stockAllocations = buildCustomizedRequestStockAllocations(uploadedItems);
+
         // 3. Prepare the request data
         const request_number = `CUS-${user.id.substring(0, 4)}-${Date.now()}`;
         const payment_status = selectedPayment === 'gcash' ? 'waiting_for_confirmation' : 'to_pay';
@@ -281,6 +336,7 @@ const CustomizedCheckout = ({ user }) => {
             receipt_url: uploadedReceiptUrl,
             delivery_method: deliveryMethod,
             pickup_time: deliveryMethod === 'pickup' ? `${selectedPickupDate} - ${selectedPickupTime}` : null,
+            payment_method: selectedPayment,
             payment_status: payment_status,
             data: {
                 items: uploadedItems,
@@ -294,6 +350,7 @@ const CustomizedCheckout = ({ user }) => {
                 subtotal: subtotal,
                 shipping_fee: shippingFee,
                 receipt_url: uploadedReceiptUrl,
+                stock_allocations: stockAllocations,
             },
         };
 
@@ -311,13 +368,33 @@ const CustomizedCheckout = ({ user }) => {
             return;
         }
 
+        if (stockAllocations.length > 0) {
+            const { error: allocationError } = await supabase.rpc('apply_request_stock_allocations', {
+                p_request_id: data.id,
+                p_allocations: stockAllocations,
+                p_mode: 'reserve',
+            });
+
+            if (allocationError) {
+                console.error('Error reserving customized request stock:', allocationError);
+                await supabase.from('requests').delete().eq('id', data.id);
+                setInfoModal({
+                    show: true,
+                    title: 'Stock Changed',
+                    message: 'Some wrapper, ribbon, or flower stock changed while you were checking out. Please review your Customizer Studio cart and try again.',
+                });
+                setIsProcessing(false);
+                return;
+            }
+        }
+
         // 5. Create notification
         const { error: notificationError } = await supabase
             .from('notifications')
             .insert([{
                 user_id: user.id,
                 type: 'request',
-                title: 'Custom Bouquet Order Placed!',
+                title: 'Customizer Studio Request Placed!',
                 message: `Your request #${request_number} has been placed. We will review it shortly.`,
                 link: `/customized-request-tracking/${request_number}`,
             }]);
@@ -357,7 +434,7 @@ const CustomizedCheckout = ({ user }) => {
             <div className="container">
                 <div className="checkout-header">
                     <i className="fas fa-lock fa-lg"></i>
-                    <h1>Custom Bouquet Checkout</h1>
+                        <h1>Customizer Studio Checkout</h1>
                 </div>
 
                 <div className="row">

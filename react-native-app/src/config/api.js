@@ -346,6 +346,41 @@ const withStatusTimestamp = (existingValue, status) => ({
     [status]: new Date().toISOString(),
 });
 
+const syncRequestStockAllocationState = async (requestId, requestData, mode = 'release') => {
+    const normalizedMode = String(mode || '').trim().toLowerCase();
+    if (!requestId || !['reserve', 'release'].includes(normalizedMode)) {
+        return false;
+    }
+
+    const parsedData = parseJsonObject(requestData);
+    const stockAllocations = Array.isArray(parsedData?.stock_allocations) ? parsedData.stock_allocations : [];
+    const allocationStatus = String(parsedData?.stock_allocation_status || '').trim().toLowerCase();
+
+    if (!stockAllocations.length) {
+        return false;
+    }
+
+    if (normalizedMode === 'reserve' && allocationStatus === 'reserved') {
+        return false;
+    }
+
+    if (normalizedMode === 'release' && allocationStatus === 'released') {
+        return false;
+    }
+
+    const { error } = await supabase.rpc('apply_request_stock_allocations', {
+        p_request_id: requestId,
+        p_allocations: stockAllocations,
+        p_mode: normalizedMode,
+    });
+
+    if (error) {
+        throw error;
+    }
+
+    return true;
+};
+
 const updateOrderStatusDirect = async (id, status, options = {}) => {
     let current = null;
     let fetchError = null;
@@ -671,14 +706,34 @@ const updateRequestStatusDirect = async (id, status, options = {}) => {
         throw error;
     }
 
-    if (options?.notification && data?.user_id) {
+    const shouldReleaseStock = status === 'cancelled' || status === 'declined';
+    let requestRecord = data;
+
+    if (shouldReleaseStock) {
+        const released = await syncRequestStockAllocationState(id, current?.data, 'release');
+        if (released) {
+            const { data: refreshedRequest, error: refreshError } = await supabase
+                .from('requests')
+                .select('*')
+                .eq('id', id)
+                .single();
+
+            if (refreshError) {
+                throw refreshError;
+            }
+
+            requestRecord = refreshedRequest;
+        }
+    }
+
+    if (options?.notification && requestRecord?.user_id) {
         const notificationConfig = options.notification;
         const { error: notificationError } = await supabase
             .from('notifications')
             .insert([{
-                user_id: data.user_id,
+                user_id: requestRecord.user_id,
                 title: notificationConfig.title || 'Request status updated',
-                message: notificationConfig.message || `Your request #${data.request_number || current?.request_number || id} is now ${status}.`,
+                message: notificationConfig.message || `Your request #${requestRecord.request_number || current?.request_number || id} is now ${status}.`,
                 type: notificationConfig.type || 'request_update',
                 link: notificationConfig.link || '/profile',
             }]);
@@ -688,7 +743,7 @@ const updateRequestStatusDirect = async (id, status, options = {}) => {
         }
     }
 
-    return { success: true, request: data };
+    return { success: true, request: requestRecord };
 };
 
 const updateRequestPaymentStatusDirect = async (requestId, requestType, status) => {
@@ -1433,10 +1488,7 @@ export const categoryAPI = {
 
 // Orders API
 export const orderAPI = {
-    getAll: async (params) => {
-        const orders = JSON.parse(await AsyncStorage.getItem('orders') || '[]');
-        return { data: orders };
-    }
+    getAll: async (params) => adminAPI.getAllOrders(params)
 };
 
 const STAFF_ROLES = new Set(['admin', 'employee']);
@@ -1589,17 +1641,28 @@ export const authAPI = {
             throw error;
         }
 
-        if (!sessionData.session?.user) {
+        let session = sessionData.session;
+
+        if (!session?.user) {
+            const { data: refreshedData, error: refreshError } = await supabase.auth.refreshSession();
+            if (refreshError) {
+                console.warn('Unable to refresh staff session:', refreshError.message);
+            }
+
+            session = refreshedData?.session || null;
+        }
+
+        if (!session?.user) {
             return { data: null };
         }
 
         return {
-            data: await buildStaffSessionPayload(sessionData.session),
+            data: await buildStaffSessionPayload(session),
         };
     },
 };
 
-// Admin API - AsyncStorage-based admin operations
+// Admin API - Supabase-backed admin operations
 export const adminAPI = {
     getAllOrders: async (params) => {
         const buildOrdersQuery = ({ includeNotes = true, includeCancellationReason = true } = {}) => {
@@ -1633,6 +1696,8 @@ export const adminAPI = {
                         product_id,
                         quantity,
                         price,
+                        name,
+                        image_url,
                         products (
                             name,
                             image_url
@@ -1670,7 +1735,7 @@ export const adminAPI = {
 
         if (error) {
             console.error('Supabase query error for orders:', error);
-            return { data: [] };
+            throw error;
         }
 
         const formattedOrders = orders.map(order => {
@@ -1683,8 +1748,8 @@ export const adminAPI = {
                 product_id: item.product_id,
                 quantity: item.quantity,
                 price: item.price,
-                name: item.products ? item.products.name : 'Unknown Product',
-                image_url: item.products ? item.products.image_url : null,
+                name: item.name || (item.products ? item.products.name : 'Unknown Product'),
+                image_url: item.image_url || (item.products ? item.products.image_url : null),
             }));
 
             // Construct full address description if shipping_address exists
@@ -2160,10 +2225,12 @@ export const adminAPI = {
                 final_price,
                 shipping_fee,
                 payment_status,
+                payment_method,
                 receipt_url,
                 amount_received,
                 additional_receipts,
                 assigned_rider,
+                status_timestamps,
                 users (
                     id,
                     name,
@@ -2182,7 +2249,7 @@ export const adminAPI = {
 
         if (error) {
             console.error('Supabase query error for requests:', error);
-            return { data: { requests: [] } };
+            throw error;
         }
 
         const formattedRequests = requests.map(req => {
@@ -2274,13 +2341,18 @@ export const adminAPI = {
     },
 
     acceptRequest: async (id) => {
-        const requests = JSON.parse(await AsyncStorage.getItem('requests') || '[]');
-        const index = requests.findIndex(r => r.id === id);
-        if (index !== -1) {
-            requests[index].status = 'accepted';
-            await AsyncStorage.setItem('requests', JSON.stringify(requests));
+        try {
+            const data = await invokeAdminWorkflow('update_request_status', {
+                id,
+                status: 'accepted',
+                options: {},
+            });
+            return { data };
+        } catch (error) {
+            if (!shouldFallbackToDirectWorkflow(error)) throw error;
+            console.warn('Falling back to direct request accept:', error.message);
+            return { data: await updateRequestStatusDirect(id, 'accepted') };
         }
-        return { data: { success: true } };
     },
 
     updateRequestStatus: async (id, status, options = {}) => {
@@ -2352,7 +2424,7 @@ export const adminAPI = {
 
         if (error) {
             console.error('Supabase query error for stock_products:', error);
-            return { data: [] };
+            throw error;
         }
         return { data: stock };
     },
@@ -2400,9 +2472,13 @@ export const adminAPI = {
             reorder_level: parseInt(formData.reorder_level, 10) || 10,
             is_available: formData.is_available, // Mapped from is_available in form
             image_url: imageUrl,
+            preview_image_url: formData.preview_image_url || imageUrl,
+            layer_image_url: formData.layer_image_url || formData.preview_image_url || imageUrl,
+            stem_image_url: formData.stem_image_url || formData.layer_image_url || formData.preview_image_url || imageUrl,
             wrapper_group_name: formData.wrapper_group_name || null,
             wrapper_color: formData.wrapper_color || null,
             ribbon_scope: formData.ribbon_scope || null,
+            customization_config: formData.customization_config || null,
         };
 
         const { data: newStock, error } = await supabase
@@ -2480,9 +2556,13 @@ export const adminAPI = {
             reorder_level: parseInt(formData.reorder_level, 10) || 10,
             is_available: formData.is_available, // Mapped from is_available in form
             image_url: imageUrl,
+            preview_image_url: formData.preview_image_url || imageUrl,
+            layer_image_url: formData.layer_image_url || formData.preview_image_url || imageUrl,
+            stem_image_url: formData.stem_image_url || formData.layer_image_url || formData.preview_image_url || imageUrl,
             wrapper_group_name: formData.wrapper_group_name || null,
             wrapper_color: formData.wrapper_color || null,
             ribbon_scope: formData.ribbon_scope || null,
+            customization_config: formData.customization_config || null,
             updated_at: new Date().toISOString(),
         };
 

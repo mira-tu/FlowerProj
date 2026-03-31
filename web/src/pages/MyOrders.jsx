@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabase';
 import InfoModal from '../components/InfoModal';
+import { insertStaffNotifications, insertUserNotification } from '../utils/notificationApi';
 import '../styles/Shop.css';
 
 const orderTabs = [
@@ -22,21 +23,21 @@ const getCustomizedPreviewItems = (order) => {
         return sourceItems.map((item, index) => ({
             key: item.id || item.listId || `${order?.id || 'customized'}-${index}`,
     name: item.name || (item.bundleSize ? `Customizer Studio (${item.bundleSize} stems)` : `Customizer Studio ${index + 1}`),
-            image: item.image_url || item.image || item.photo || order?.photo || order?.photo_url || null,
+            image: item.image_url || item.image || item.photo || order?.image_url || order?.photo || order?.photo_url || null,
             quantity: item.qty || item.quantity || 1,
             price: Number(item.price || 0),
             variant: item.bundleSize ? `${item.bundleSize} stems` : null,
         }));
     }
 
-    if (!(order?.flower || order?.bundleSize || order?.wrapper || order?.ribbon || order?.photo || order?.photo_url)) {
+    if (!(order?.flower || order?.bundleSize || order?.wrapper || order?.ribbon || order?.image_url || order?.photo || order?.photo_url)) {
         return [];
     }
 
     return [{
         key: `${order?.id || 'customized'}-legacy`,
     name: order?.bundleSize ? `Customizer Studio (${order.bundleSize} stems)` : 'Customizer Studio',
-        image: order?.photo || order?.photo_url || null,
+        image: order?.image_url || order?.photo || order?.photo_url || null,
         quantity: 1,
         price: 0,
         variant: order?.bundleSize ? `${order.bundleSize} stems` : null,
@@ -89,11 +90,6 @@ const MyOrders = () => {
     const [orderMessages, setOrderMessages] = useState({}); // Store message info for each order
     const [totalUnreadMessages, setTotalUnreadMessages] = useState(0);
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null });
-
-    const getNotificationStorageKey = async () => {
-        const { data: { session } } = await supabase.auth.getSession();
-        return session?.user?.id ? `notifications_${session.user.id}` : 'notifications';
-    };
 
     useEffect(() => {
         const checkUser = async () => {
@@ -161,7 +157,8 @@ const MyOrders = () => {
                 // Include request data for all request types
                 type: order.request_type || null,
                 data: order.request_data || null,
-                photo_url: order.request_photo_url || null,
+                image_url: order.request_image_url || order.request_photo_url || null,
+                photo_url: order.request_photo_url || order.request_image_url || null,
                 // Booking data
                 eventType: order.event_type || (order.request_data?.eventType || order.request_data?.event_type),
                 eventDate: order.event_date || order.request_data?.eventDate,
@@ -183,7 +180,7 @@ const MyOrders = () => {
                 message: order.request_data?.message,
                 email: order.request_data?.email,
                 phone: order.request_data?.phone,
-                photo: order.request_photo_url
+                photo: order.request_photo_url || order.request_image_url
             }));
             console.log('--- Transformed Orders (Status & Items) ---', transformedOrders.map(o => ({ id: o.id, status: o.status, items: o.items })));
 
@@ -197,11 +194,12 @@ const MyOrders = () => {
                     date: request.created_at,
                     status: request.status === 'accepted' ? 'processing' : request.status, // Map accepted to processing for display
                     type: request.type, // booking, customized, special_order
-                    payment_status: 'to_pay', // Assuming requests start with 'to_pay'
+                    payment_status: request.payment_status ?? requestData?.payment_status ?? null,
                     total: parseFloat(request.final_price || request.estimated_price || 0),
                     notes: request.notes,
                     data: requestData,
-                    photo_url: request.photo_url,
+                    image_url: request.image_url || request.photo_url || null,
+                    photo_url: request.photo_url || request.image_url || null,
                     isRequest: true,
                     // Extract specific fields for easier access
                     eventType: requestData?.eventType || requestData?.event_type,
@@ -502,8 +500,6 @@ const MyOrders = () => {
             }
 
             // Create cancellation notification
-            const notificationStorageKey = await getNotificationStorageKey();
-            const notifications = JSON.parse(localStorage.getItem(notificationStorageKey) || '[]');
             const orderTypeLabel = orderToCancel.isFromBooking ? 'Custom Order' :
                 orderToCancel.type
                     ? (orderToCancel.type === 'booking' ? 'Custom Order'
@@ -515,20 +511,18 @@ const MyOrders = () => {
                 ? `#${orderToCancel.order_number || orderToCancel.request_number || orderToCancel.id}`
                 : '';
 
-            const newNotification = {
-                id: `notif-${Date.now()}`,
+            const { data: { session } } = await supabase.auth.getSession();
+
+            await insertUserNotification({
+                userId: session?.user?.id,
                 type: 'cancellation',
                 title: `${orderTypeLabel} Cancelled`,
                 message: `Your ${orderTypeLabel.toLowerCase()} ${orderId} has been cancelled successfully.`,
                 icon: 'fa-times-circle',
-                timestamp: new Date().toISOString(),
-                read: false,
-                link: '/my-orders'
-            };
-            localStorage.setItem(notificationStorageKey, JSON.stringify([newNotification, ...notifications]));
+                link: '/my-orders',
+            });
 
             // Reload orders from Supabase
-            const { data: { session } } = await supabase.auth.getSession();
             loadOrders(session.user.id);
             closeCancelModal();
         } catch (error) {
@@ -673,25 +667,21 @@ const MyOrders = () => {
         window.dispatchEvent(new Event('messageUpdated'));
 
         // Create notification for admin
-        const notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
         const orderType = selectedOrderForChat.type
             ? (selectedOrderForChat.type === 'booking' ? 'Custom Order'
                 : selectedOrderForChat.type === 'special_order' ? 'Special Order'
                 : selectedOrderForChat.type === 'customized' ? 'Customizer Studio'
                         : 'Request')
             : 'Order';
-
-        const notification = {
-            id: `notif-${Date.now()}`,
+        insertStaffNotifications({
             type: 'message',
             title: 'New Message from Customer',
             message: `You have a new message about ${orderType.toLowerCase()} ${orderId}.`,
             icon: 'fa-comments',
-            timestamp: new Date().toISOString(),
-            read: false,
-            link: '/admin/dashboard'
-        };
-        localStorage.setItem('notifications', JSON.stringify([notification, ...notifications]));
+            link: '/admin/dashboard',
+        }).catch((notificationError) => {
+            console.error('Error notifying staff about a new customer message:', notificationError);
+        });
 
         setNewChatMessage('');
         // Reload messages immediately and force update
@@ -731,18 +721,15 @@ const MyOrders = () => {
         window.dispatchEvent(new Event('messageUpdated'));
 
         // Create notification for admin
-        const notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
-        const notification = {
-            id: `notif-${Date.now()}`,
+        insertStaffNotifications({
             type: 'payment',
             title: 'Receipt Uploaded',
             message: 'A customer has uploaded a payment receipt. Please review and confirm.',
             icon: 'fa-receipt',
-            timestamp: new Date().toISOString(),
-            read: false,
-            link: '/admin/dashboard'
-        };
-        localStorage.setItem('notifications', JSON.stringify([notification, ...notifications]));
+            link: '/admin/dashboard',
+        }).catch((notificationError) => {
+            console.error('Error notifying staff about an uploaded receipt:', notificationError);
+        });
 
         setReceiptFile(null);
         setReceiptPreview(null);

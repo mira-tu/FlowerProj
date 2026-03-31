@@ -60,6 +60,48 @@ const WRAPPER_COLOR_SWATCH_MAP = {
   Purple: '#8b5cf6',
 };
 const normalizeText = (value) => String(value || '').trim();
+const normalizeColorKey = (value) => String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+const getPalmHaloPreviewKey = (item = {}) => (
+  normalizeColorKey(
+    item?.colorName
+    || item?.wrapper_color
+    || item?.customization_config?.colorName
+    || item?.name
+  )
+);
+const decoratePalmHaloRibbonOptions = (stockOptions = [], generatedOptions = []) => {
+  if (!Array.isArray(stockOptions) || stockOptions.length === 0) {
+    return [];
+  }
+
+  if (!Array.isArray(generatedOptions) || generatedOptions.length === 0) {
+    return stockOptions;
+  }
+
+  const generatedByKey = new Map(
+    generatedOptions.map((option) => [getPalmHaloPreviewKey(option), option])
+  );
+
+  return stockOptions.map((item, index) => {
+    const matchedPreview = generatedByKey.get(getPalmHaloPreviewKey(item))
+      || generatedOptions[index % generatedOptions.length]
+      || null;
+
+    if (!matchedPreview) {
+      return item;
+    }
+
+    return {
+      ...item,
+      img: item.img || matchedPreview.img,
+      layerImg: item.layerImg || matchedPreview.layerImg || matchedPreview.img,
+      colorName: item.colorName || matchedPreview.colorName || null,
+      swatch: item.swatch || matchedPreview.swatch || null,
+      stockLabel: item.stockLabel || 'Included with Palm Halo Wrap',
+      previewStyle: item.previewStyle || matchedPreview.previewStyle || null,
+    };
+  });
+};
 
 const normalizeStockCategory = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
@@ -208,6 +250,7 @@ const buildWrapperGroups = (stockWrappers) => {
         name: groupName,
         img: item.img || placeholderImg,
         layerImg: item.layerImg || item.img || placeholderImg,
+        customization_config: item.customization_config || null,
         variants: [],
       });
     }
@@ -215,6 +258,7 @@ const buildWrapperGroups = (stockWrappers) => {
     const group = groups.get(groupId);
     if (!group.img && variant.img) group.img = variant.img;
     if (!group.layerImg && (variant.layerImg || variant.img)) group.layerImg = variant.layerImg || variant.img;
+    if (!group.customization_config && variant.customization_config) group.customization_config = variant.customization_config;
     group.variants.push(variant);
   });
 
@@ -393,7 +437,7 @@ const Customized = ({ addToCart }) => {
   const [flowers, setFlowers] = useState([]);
   const [wrappers, setWrappers] = useState([]);
   const [ribbons, setRibbons] = useState([]);
-  const [palmHaloFallbackRibbons, setPalmHaloFallbackRibbons] = useState([]);
+  const [palmHaloRibbonPreviewOptions, setPalmHaloRibbonPreviewOptions] = useState([]);
   const [loadingCustomizationData, setLoadingCustomizationData] = useState(true);
   const [loadingPalmHaloRibbons, setLoadingPalmHaloRibbons] = useState(true);
   const [stemLayouts, setStemLayouts] = useState([]);
@@ -410,12 +454,12 @@ const Customized = ({ addToCart }) => {
       try {
         const options = await buildPalmHaloRibbonOptions(palmHaloRibbonSource);
         if (isMounted) {
-          setPalmHaloFallbackRibbons(options);
+          setPalmHaloRibbonPreviewOptions(options);
         }
       } catch (error) {
         console.error('Error preparing Palm Halo ribbon options:', error);
         if (isMounted) {
-          setPalmHaloFallbackRibbons([]);
+          setPalmHaloRibbonPreviewOptions([]);
         }
       } finally {
         if (isMounted) {
@@ -432,6 +476,8 @@ const Customized = ({ addToCart }) => {
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
+
     const fetchCustomizationData = async () => {
       try {
         const response = await stockAPI.getAll();
@@ -446,6 +492,7 @@ const Customized = ({ addToCart }) => {
             img: item.img,
             layerImg: item.layerImg,
             stemImg: item.stemImg,
+            customization_config: item.customization_config || null,
             quantity: item.quantity || 0,
             is_available: item.is_available !== false,
           }));
@@ -458,6 +505,7 @@ const Customized = ({ addToCart }) => {
             price: item.price,
             img: item.img,
             layerImg: item.layerImg,
+            customization_config: item.customization_config || null,
             quantity: item.quantity || 0,
             is_available: item.is_available !== false,
             wrapper_group_name: item.wrapper_group_name || '',
@@ -472,6 +520,7 @@ const Customized = ({ addToCart }) => {
             price: item.price,
             img: item.img,
             layerImg: item.layerImg,
+            customization_config: item.customization_config || null,
             quantity: item.quantity || 0,
             is_available: item.is_available !== false,
             ribbon_scope: item.ribbon_scope || '',
@@ -481,20 +530,44 @@ const Customized = ({ addToCart }) => {
           buildWrapperGroups(processedWrappers)
         );
 
+        if (!isMounted) {
+          return;
+        }
+
         setFlowers(processedFlowers);
         setWrappers(preparedWrapperGroups);
         setRibbons(processedRibbons);
 
       } catch (error) {
         console.error('Error fetching customization data:', error.message || error);
-        setInfoModal({ show: true, title: 'Error', message: 'Failed to load customization options. Please try again.' });
+        if (isMounted) {
+          setInfoModal({ show: true, title: 'Error', message: 'Failed to load customization options. Please try again.' });
+        }
       } finally {
-        setLoadingCustomizationData(false);
+        if (isMounted) {
+          setLoadingCustomizationData(false);
+        }
       }
     };
 
     fetchCustomizationData();
-  }, []); // Run once on component mount
+
+    const channel = supabase
+      .channel('public:stock_products:customizer-studio')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'stock_products' },
+        () => {
+          fetchCustomizationData();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const ribbonMode = useMemo(() => getWrapperRibbonMode(selection.wrapper), [selection.wrapper]);
   const classicRibbonOptions = useMemo(() => (
@@ -503,17 +576,20 @@ const Customized = ({ addToCart }) => {
   const palmHaloStockRibbonOptions = useMemo(() => (
     ribbons.filter((item) => normalizeRibbonScope(item.ribbon_scope) === RIBBON_SCOPE.PALM_HALO_WRAP)
   ), [ribbons]);
+  const palmHaloRibbonOptions = useMemo(() => (
+    decoratePalmHaloRibbonOptions(palmHaloStockRibbonOptions, palmHaloRibbonPreviewOptions)
+  ), [palmHaloRibbonPreviewOptions, palmHaloStockRibbonOptions]);
   const availableRibbonOptions = useMemo(() => {
     if (ribbonMode === 'classic') {
       return classicRibbonOptions;
     }
 
     if (ribbonMode === 'palm-halo') {
-      return palmHaloStockRibbonOptions.length > 0 ? palmHaloStockRibbonOptions : palmHaloFallbackRibbons;
+      return palmHaloRibbonOptions;
     }
 
     return [];
-  }, [classicRibbonOptions, palmHaloFallbackRibbons, palmHaloStockRibbonOptions, ribbonMode]);
+  }, [classicRibbonOptions, palmHaloRibbonOptions, ribbonMode]);
   const visibleSteps = useMemo(() => (
     ribbonMode === 'none'
       ? BASE_STEPS.filter((step) => step.id !== 2)
@@ -572,6 +648,24 @@ const Customized = ({ addToCart }) => {
       size++;
     }
     return size;
+  };
+  const buildFlowerAllocations = (selectedFlowers, bundleSize) => {
+    if (!Array.isArray(selectedFlowers) || selectedFlowers.length === 0 || !bundleSize) {
+      return [];
+    }
+
+    const allocations = selectedFlowers.map((flower) => ({
+      id: flower.id,
+      name: flower.name,
+      price: flower.price,
+      quantity: 0,
+    }));
+
+    for (let index = 0; index < bundleSize; index += 1) {
+      allocations[index % allocations.length].quantity += 1;
+    }
+
+    return allocations.filter((allocation) => allocation.quantity > 0);
   };
 
   const handleBundleSelect = (size) => {
@@ -909,6 +1003,7 @@ const Customized = ({ addToCart }) => {
         name: 'Customizer Studio',
         image: photoBase64,
         flowers: selection.flowers.map(f => ({ id: f.id, name: f.name, price: f.price })),
+        flowerAllocations: buildFlowerAllocations(selection.flowers, selection.bundleSize),
         bundleSize: selection.bundleSize,
         wrapper: selection.wrapper ? {
           id: selection.wrapper.id,

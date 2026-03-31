@@ -2,6 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../config/supabase';
 import { Link, useNavigate } from 'react-router-dom';
 import ConfirmModal from '../components/ConfirmModal';
+import {
+    clearUserNotifications,
+    deleteNotificationRecord,
+    fetchUserNotifications,
+    markAllNotificationsRead,
+    markNotificationRead,
+    subscribeToUserNotifications,
+} from '../utils/notificationApi';
 import '../styles/Shop.css';
 
 const Notifications = () => {
@@ -12,41 +20,58 @@ const Notifications = () => {
     const [confirmModal, setConfirmModal] = useState({ show: false, title: '', message: '', onConfirm: null });
 
     useEffect(() => {
-        // Fetch current user first
-        const fetchUser = async () => {
-            const { data: { session } } = await supabase.auth.getSession();
-            const currentUser = session?.user ?? null;
-            setUser(currentUser);
+        let isMounted = true;
+        let unsubscribeNotifications = () => {};
 
-            if (currentUser) {
-                loadFromLocalStorage(currentUser);
-            } else {
-                setNotifications([]);
+        const loadNotifications = async (currentUser) => {
+            if (!currentUser?.id) {
+                if (isMounted) {
+                    setNotifications([]);
+                }
+                return;
+            }
+
+            try {
+                const nextNotifications = await fetchUserNotifications(currentUser.id);
+                if (isMounted) {
+                    setNotifications(nextNotifications);
+                }
+            } catch (error) {
+                console.error('Error loading notifications:', error);
             }
         };
 
-        const loadFromLocalStorage = (currentUser) => {
-            if (!currentUser) return;
-            const savedNotifications = JSON.parse(localStorage.getItem(`notifications_${currentUser.id}`) || '[]');
-            savedNotifications.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-            setNotifications(savedNotifications);
+        const syncSession = async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            const currentUser = session?.user ?? null;
+
+            if (!isMounted) {
+                return;
+            }
+
+            setUser(currentUser);
+            await loadNotifications(currentUser);
+
+            unsubscribeNotifications();
+            if (currentUser?.id) {
+                unsubscribeNotifications = subscribeToUserNotifications(currentUser.id, () => loadNotifications(currentUser));
+            }
         };
 
-        fetchUser();
+        syncSession();
 
-        // The global listener in App.jsx will update localStorage and dispatch a 'storage' event.
-        // This listener reacts to that event to update the view.
-        const handleStorageChange = () => {
-            if (user) loadFromLocalStorage(user);
-        };
+        const {
+            data: { subscription },
+        } = supabase.auth.onAuthStateChange(() => {
+            syncSession();
+        });
 
-        window.addEventListener('storage', handleStorageChange);
-
-        // Cleanup the event listener when the component unmounts
         return () => {
-            window.removeEventListener('storage', handleStorageChange);
+            isMounted = false;
+            unsubscribeNotifications();
+            subscription.unsubscribe();
         };
-    }, [user?.id]); // Re-run if user ID somehow changes
+    }, []);
 
     const filteredNotifications = notifications.filter(notification => {
         if (filter === 'unread') return !notification.read;
@@ -59,25 +84,15 @@ const Notifications = () => {
     const handleNotificationClick = async (notification) => {
         if (!user) return;
 
-        // Optimistically update the UI to feel responsive
-        const updatedNotifications = notifications.map(n =>
-            n.id === notification.id ? { ...n, read: true } : n
-        );
-        localStorage.setItem(`notifications_${user.id}`, JSON.stringify(updatedNotifications));
-        setNotifications(updatedNotifications);
-
-        // Update the database in the background
         try {
-            await supabase
-                .from('notifications')
-                .update({ is_read: true })
-                .eq('id', notification.id);
+            setNotifications(prevNotifications => prevNotifications.map((entry) => (
+                entry.id === notification.id ? { ...entry, read: true } : entry
+            )));
+            await markNotificationRead(notification.id);
         } catch (error) {
             console.error("Error marking notification as read in DB:", error);
-            // Optional: Here you could revert the optimistic UI update on failure
         }
 
-        // Navigate if there's a link
         if (notification.link) {
             navigate(notification.link);
         }
@@ -86,22 +101,11 @@ const Notifications = () => {
     const markAllAsRead = async () => {
         if (!user) return;
 
-        // Optimistic UI update
-        const updatedNotifications = notifications.map(n => ({ ...n, read: true }));
-        localStorage.setItem(`notifications_${user.id}`, JSON.stringify(updatedNotifications));
-        setNotifications(updatedNotifications);
-
-        // Update database
-        const unreadIds = notifications.filter(n => !n.read).map(n => n.id);
-        if (unreadIds.length > 0) {
-            try {
-                await supabase
-                    .from('notifications')
-                    .update({ is_read: true })
-                    .in('id', unreadIds);
-            } catch (error) {
-                console.error("Error marking all as read in DB:", error);
-            }
+        try {
+            setNotifications(prevNotifications => prevNotifications.map((entry) => ({ ...entry, read: true })));
+            await markAllNotificationsRead(user.id);
+        } catch (error) {
+            console.error("Error marking all as read in DB:", error);
         }
     };
 
@@ -113,22 +117,11 @@ const Notifications = () => {
             title: 'Clear Notifications',
             message: 'Are you sure you want to clear all notifications?',
             onConfirm: async () => {
-                const allIds = notifications.map(n => n.id);
-
-                // Optimistic UI update
-                localStorage.setItem(`notifications_${user.id}`, JSON.stringify([]));
-                setNotifications([]);
-
-                // Update database
-                if (allIds.length > 0) {
-                    try {
-                        await supabase
-                            .from('notifications')
-                            .delete()
-                            .in('id', allIds);
-                    } catch (error) {
-                        console.error("Error clearing all notifications from DB:", error);
-                    }
+                try {
+                    setNotifications([]);
+                    await clearUserNotifications(user.id);
+                } catch (error) {
+                    console.error("Error clearing all notifications from DB:", error);
                 }
             }
         });
@@ -137,17 +130,9 @@ const Notifications = () => {
     const deleteNotification = async (notificationId) => {
         if (!user) return;
 
-        // Optimistic UI update
-        const updatedNotifications = notifications.filter(n => n.id !== notificationId);
-        localStorage.setItem(`notifications_${user.id}`, JSON.stringify(updatedNotifications));
-        setNotifications(updatedNotifications);
-
-        // Update database
         try {
-            await supabase
-                .from('notifications')
-                .delete()
-                .eq('id', notificationId);
+            setNotifications(prevNotifications => prevNotifications.filter((entry) => entry.id !== notificationId));
+            await deleteNotificationRecord(notificationId);
         } catch (error) {
             console.error("Error deleting notification from DB:", error);
         }

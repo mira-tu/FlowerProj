@@ -263,45 +263,6 @@ function AppContent() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Global listener for real-time notifications
-  useEffect(() => {
-    if (user) {
-      const channel = supabase.channel(`public:notifications:user_id=eq.${user.id}`)
-        .on('postgres_changes', {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notifications',
-          filter: `user_id=eq.${user.id}`
-        }, (payload) => {
-
-          const newNotification = {
-            id: payload.new.id,
-            title: payload.new.title,
-            message: payload.new.message,
-            link: payload.new.link,
-            read: payload.new.is_read,
-            timestamp: payload.new.created_at,
-            type: payload.new.type || 'default',
-            icon: payload.new.icon || null,
-          };
-
-          const existingNotifications = JSON.parse(localStorage.getItem(`notifications_${user.id}`) || '[]');
-          const updatedNotifications = [newNotification, ...existingNotifications];
-          const uniqueNotifications = Array.from(new Map(updatedNotifications.map(item => [item.id, item])).values());
-          localStorage.setItem(`notifications_${user.id}`, JSON.stringify(uniqueNotifications));
-
-          // Dispatch storage event to trigger updates on the Notifications page
-          window.dispatchEvent(new Event('storage'));
-        })
-        .subscribe();
-
-      // Cleanup subscription on user change or logout
-      return () => {
-        supabase.removeChannel(channel);
-      };
-    }
-  }, [user]);
-
   const login = () => {
     // Old localStorage items for user will be cleared by logout or implicitly by new flow
     // User state will be updated by the onAuthStateChange listener
@@ -387,9 +348,8 @@ function AppContent() {
           return;
         }
 
-        // Scope custom/booking carts to user if possible, otherwise we just reset them on logout
-        const c1 = JSON.parse(localStorage.getItem(`customizedCart_${currentUserId}`) || localStorage.getItem('customizedCart') || '[]').length;
-        const c2 = JSON.parse(localStorage.getItem(`bookingCart_${currentUserId}`) || localStorage.getItem('bookingCart') || '[]').length;
+        const c1 = JSON.parse(localStorage.getItem(`customizedCart_${currentUserId}`) || '[]').length;
+        const c2 = JSON.parse(localStorage.getItem(`bookingCart_${currentUserId}`) || '[]').length;
         setCustomServiceCount(c1 + c2);
       } catch (e) {
         // ignore

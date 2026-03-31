@@ -23,6 +23,7 @@ import { formatTimestamp, getPaymentStatusDisplay, getStatusLabel } from '../adm
 import PaymentDetailsSection from '../components/PaymentDetailsSection';
 import { generateAndShareReceipt } from '../../../utils/receiptGenerator';
 import { groupDeliveryDestinations } from '../../../utils/deliveryDestinations';
+import { filterOrderForAssignedRider, shouldRestrictOrderToAssignedRider } from '../../../utils/riderAssignmentFilter';
 
 const getNormalizedPaymentMethod = (paymentMethod) => String(paymentMethod || '').trim().toLowerCase();
 
@@ -176,9 +177,23 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
     });
   }, [orders, riders]);
 
+  const riderScopedOrders = React.useMemo(() => {
+    if (currentUser?.role !== 'employee') {
+      return ordersWithRiderDetails;
+    }
+
+    return ordersWithRiderDetails
+      .map((order) => (
+        shouldRestrictOrderToAssignedRider(order)
+          ? filterOrderForAssignedRider(order, currentUser?.id)
+          : order
+      ))
+      .filter(Boolean);
+  }, [currentUser?.id, currentUser?.role, ordersWithRiderDetails]);
+
   // Filter wrapper
   const filteredOrders = React.useMemo(() => {
-    let result = ordersWithRiderDetails;
+    let result = riderScopedOrders;
     if (statusFilter !== 'All') {
       result = result.filter(order => {
         const status = order.status;
@@ -194,17 +209,17 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
       });
     }
     return result;
-  }, [ordersWithRiderDetails, statusFilter]);
+  }, [riderScopedOrders, statusFilter]);
 
   const focusedOrder = React.useMemo(() => {
     if (focusedEntityTarget?.entityType !== 'order' || !focusedEntityTarget?.entityId) {
       return null;
     }
 
-    return ordersWithRiderDetails.find(
+    return riderScopedOrders.find(
       (order) => String(order.id) === String(focusedEntityTarget.entityId)
     ) || null;
-  }, [focusedEntityTarget, ordersWithRiderDetails]);
+  }, [focusedEntityTarget, riderScopedOrders]);
 
   const displayedOrders = focusedOrder ? [focusedOrder] : filteredOrders;
 
@@ -263,6 +278,7 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
     } catch (error) {
       console.error('Error loading orders:', error);
       setOrders([]);
+      Alert.alert('Error', 'Failed to load orders');
     } finally {
       setLoading(false);
     }

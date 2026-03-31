@@ -105,6 +105,12 @@ const WRAPPER_FLOWER_ZONE_CONFIGS = Object.freeze({
 });
 const WRAPPER_CROP_PADDING = 16;
 
+const DEFAULT_PALM_HALO_RIBBON_PREVIEW_STYLE = Object.freeze({
+  top: '58%',
+  left: '50%',
+  width: '30%',
+  transform: 'translate(-50%, -50%)',
+});
 const PALM_HALO_VARIANTS = Object.freeze([
   {
     id: 'palm-halo-ribbon-pearl-white',
@@ -130,6 +136,30 @@ const BACKGROUND_TOLERANCE = 34;
 const EDGE_PADDING = 10;
 
 const normalizeText = (value) => String(value || '').trim();
+const parseCustomizationConfig = (value) => {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return {};
+  }
+};
+const getWrapperCustomizationConfig = (wrapper) => parseCustomizationConfig(
+  wrapper?.wrapper_behavior
+  || wrapper?.customizer_metadata
+  || wrapper?.customization_config
+  || wrapper?.customizationConfig
+  || null
+);
+const getItemCustomizationConfig = (item) => parseCustomizationConfig(
+  item?.wrapper_behavior
+  || item?.customizer_metadata
+  || item?.customization_config
+  || item?.customizationConfig
+  || null
+);
 
 export const normalizeRibbonScope = (value) => {
   const normalized = normalizeText(value)
@@ -167,6 +197,11 @@ export const getRibbonScopeLabel = (value) => {
 };
 
 export const getWrapperRibbonMode = (wrapper) => {
+  const customizationConfig = getWrapperCustomizationConfig(wrapper);
+  if (typeof customizationConfig.ribbonMode === 'string' && customizationConfig.ribbonMode.trim()) {
+    return customizationConfig.ribbonMode.trim();
+  }
+
   const groupName = normalizeText(
     wrapper?.groupName || wrapper?.wrapper_group_name || wrapper?.name
   );
@@ -179,6 +214,11 @@ export const getWrapperRibbonMode = (wrapper) => {
 };
 
 export const getWrapperPreviewStyle = (wrapper) => {
+  const customizationConfig = getWrapperCustomizationConfig(wrapper);
+  if (customizationConfig.previewStyle && typeof customizationConfig.previewStyle === 'object') {
+    return customizationConfig.previewStyle;
+  }
+
   const groupName = normalizeText(
     wrapper?.groupName || wrapper?.wrapper_group_name || wrapper?.name
   );
@@ -187,6 +227,11 @@ export const getWrapperPreviewStyle = (wrapper) => {
 };
 
 export const getWrapperRibbonPreviewConfig = (wrapper) => {
+  const customizationConfig = getWrapperCustomizationConfig(wrapper);
+  if (customizationConfig.ribbonPreviewConfig && typeof customizationConfig.ribbonPreviewConfig === 'object') {
+    return customizationConfig.ribbonPreviewConfig;
+  }
+
   const groupName = normalizeText(
     wrapper?.groupName || wrapper?.wrapper_group_name || wrapper?.name
   );
@@ -195,6 +240,11 @@ export const getWrapperRibbonPreviewConfig = (wrapper) => {
 };
 
 export const getWrapperFlowerZoneConfig = (wrapper) => {
+  const customizationConfig = getWrapperCustomizationConfig(wrapper);
+  if (customizationConfig.flowerZoneConfig && typeof customizationConfig.flowerZoneConfig === 'object') {
+    return customizationConfig.flowerZoneConfig;
+  }
+
   const groupName = normalizeText(
     wrapper?.groupName || wrapper?.wrapper_group_name || wrapper?.name
   );
@@ -280,7 +330,11 @@ export const applyNaturalWrapperPreviewCropping = async (wrapperGroups = []) => 
   const groups = Array.isArray(wrapperGroups) ? wrapperGroups : [];
 
   return Promise.all(groups.map(async (group) => {
-    if (!NATURAL_WRAPPER_NAMES.has(normalizeText(group?.name))) {
+    const customizationConfig = getWrapperCustomizationConfig(group);
+    const shouldCrop = customizationConfig.cropTransparentPreview === true
+      || NATURAL_WRAPPER_NAMES.has(normalizeText(group?.name));
+
+    if (!shouldCrop) {
       return group;
     }
 
@@ -556,6 +610,20 @@ const tintRibbonCanvas = (sourceCanvas, tintHex) => {
   return canvas.toDataURL('image/png');
 };
 
+const buildPalmHaloRibbonFallbackItem = (item, sourceUrl) => {
+  const customizationConfig = getItemCustomizationConfig(item);
+
+  return {
+    ...item,
+    img: sourceUrl || item?.img || item?.layerImg || null,
+    layerImg: sourceUrl || item?.layerImg || item?.img || null,
+    colorName: item?.colorName || customizationConfig.colorName || null,
+    swatch: item?.swatch || customizationConfig.swatch || null,
+    stockLabel: item?.stockLabel || customizationConfig.stockLabel || 'Included with Palm Halo Wrap',
+    previewStyle: item?.previewStyle || customizationConfig.previewStyle || DEFAULT_PALM_HALO_RIBBON_PREVIEW_STYLE,
+  };
+};
+
 export const buildPalmHaloRibbonOptions = (sourceUrl) => new Promise((resolve) => {
   if (typeof window === 'undefined' || typeof document === 'undefined' || !sourceUrl) {
     resolve([]);
@@ -563,6 +631,7 @@ export const buildPalmHaloRibbonOptions = (sourceUrl) => new Promise((resolve) =
   }
 
   const image = new Image();
+  image.crossOrigin = 'anonymous';
   image.onload = () => {
     try {
       const cutoutCanvas = removeWhiteBackground(image);
@@ -583,12 +652,7 @@ export const buildPalmHaloRibbonOptions = (sourceUrl) => new Promise((resolve) =
           ribbon_scope: RIBBON_SCOPE.PALM_HALO_WRAP,
           stockLabel: 'Included with Palm Halo Wrap',
           swatch: variant.swatch,
-          previewStyle: {
-            top: '58%',
-            left: '50%',
-            width: '30%',
-            transform: 'translate(-50%, -50%)',
-          },
+          previewStyle: DEFAULT_PALM_HALO_RIBBON_PREVIEW_STYLE,
         };
       });
 
@@ -607,16 +671,61 @@ export const buildPalmHaloRibbonOptions = (sourceUrl) => new Promise((resolve) =
           ribbon_scope: RIBBON_SCOPE.PALM_HALO_WRAP,
           stockLabel: 'Included with Palm Halo Wrap',
           swatch: variant.swatch,
-          previewStyle: {
-            top: '58%',
-            left: '50%',
-            width: '30%',
-            transform: 'translate(-50%, -50%)',
-          },
+          previewStyle: DEFAULT_PALM_HALO_RIBBON_PREVIEW_STYLE,
         }))
       );
     }
   };
   image.onerror = () => resolve([]);
   image.src = sourceUrl;
+});
+
+export const buildPalmHaloRibbonStockOptions = (stockOptions = [], sourceUrl) => new Promise((resolve) => {
+  const normalizedOptions = Array.isArray(stockOptions) ? stockOptions.filter(Boolean) : [];
+  if (!normalizedOptions.length) {
+    resolve([]);
+    return;
+  }
+
+  const primarySourceUrl = normalizedOptions.find((item) => item?.img || item?.layerImg)?.img
+    || normalizedOptions.find((item) => item?.layerImg || item?.img)?.layerImg
+    || sourceUrl;
+
+  if (typeof window === 'undefined' || typeof document === 'undefined' || !primarySourceUrl) {
+    resolve(normalizedOptions.map((item) => buildPalmHaloRibbonFallbackItem(item, primarySourceUrl || sourceUrl)));
+    return;
+  }
+
+  const image = new Image();
+  image.crossOrigin = 'anonymous';
+  image.onload = () => {
+    try {
+      const cutoutCanvas = removeWhiteBackground(image);
+      const options = normalizedOptions.map((item) => {
+        const customizationConfig = getItemCustomizationConfig(item);
+        const tintHex = typeof customizationConfig.tintHex === 'string' && customizationConfig.tintHex.trim()
+          ? customizationConfig.tintHex.trim()
+          : null;
+        const renderedUrl = tintHex
+          ? tintRibbonCanvas(cutoutCanvas, tintHex)
+          : cutoutCanvas.toDataURL('image/png');
+
+        return {
+          ...item,
+          img: renderedUrl,
+          layerImg: renderedUrl,
+          colorName: item?.colorName || customizationConfig.colorName || null,
+          swatch: item?.swatch || customizationConfig.swatch || null,
+          stockLabel: item?.stockLabel || customizationConfig.stockLabel || 'Included with Palm Halo Wrap',
+          previewStyle: item?.previewStyle || customizationConfig.previewStyle || DEFAULT_PALM_HALO_RIBBON_PREVIEW_STYLE,
+        };
+      });
+
+      resolve(options);
+    } catch (error) {
+      resolve(normalizedOptions.map((item) => buildPalmHaloRibbonFallbackItem(item, primarySourceUrl)));
+    }
+  };
+  image.onerror = () => resolve(normalizedOptions.map((item) => buildPalmHaloRibbonFallbackItem(item, sourceUrl)));
+  image.src = primarySourceUrl;
 });

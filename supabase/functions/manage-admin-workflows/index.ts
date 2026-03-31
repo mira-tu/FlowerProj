@@ -173,6 +173,43 @@ const withStatusTimestamp = (value: unknown, status: string) => {
   };
 };
 
+const syncRequestStockAllocationState = async (
+  adminClient: ReturnType<typeof createClient>,
+  requestId: unknown,
+  requestData: unknown,
+  mode: "reserve" | "release" = "release",
+) => {
+  const parsedData = parseMaybeJson(requestData) as Record<string, unknown>;
+  const stockAllocations = Array.isArray(parsedData?.stock_allocations)
+    ? parsedData.stock_allocations
+    : [];
+  const allocationStatus = String(parsedData?.stock_allocation_status ?? "").trim().toLowerCase();
+
+  if (!requestId || !stockAllocations.length) {
+    return false;
+  }
+
+  if (mode === "reserve" && allocationStatus === "reserved") {
+    return false;
+  }
+
+  if (mode === "release" && allocationStatus === "released") {
+    return false;
+  }
+
+  const { error } = await adminClient.rpc("apply_request_stock_allocations", {
+    p_request_id: requestId,
+    p_allocations: stockAllocations,
+    p_mode: mode,
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return true;
+};
+
 const insertNotificationSafely = async (
   adminClient: ReturnType<typeof createClient>,
   notification: Record<string, unknown>,
@@ -970,15 +1007,41 @@ serve(async (req) => {
           throw updateError;
         }
 
+        const shouldReleaseStock = status === "cancelled" || status === "declined";
+        let requestRecord = request;
+
+        if (shouldReleaseStock) {
+          const released = await syncRequestStockAllocationState(
+            adminClient,
+            id,
+            currentRequest?.data,
+            "release",
+          );
+
+          if (released) {
+            const { data: refreshedRequest, error: refreshError } = await adminClient
+              .from("requests")
+              .select("*")
+              .eq("id", id)
+              .single();
+
+            if (refreshError) {
+              throw refreshError;
+            }
+
+            requestRecord = refreshedRequest;
+          }
+        }
+
         const notificationConfig = options?.notification;
-        if (notificationConfig && request?.user_id) {
+        if (notificationConfig && requestRecord?.user_id) {
           const { error: notificationError } = await adminClient.from("notifications").insert([
             {
-              user_id: request.user_id,
+              user_id: requestRecord.user_id,
               title: notificationConfig.title || "Request status updated",
               message:
                 notificationConfig.message ||
-                `Your request #${request.request_number || currentRequest?.request_number || id} is now ${status}.`,
+                `Your request #${requestRecord.request_number || currentRequest?.request_number || id} is now ${status}.`,
               type: notificationConfig.type || "request_update",
               link: notificationConfig.link || "/profile",
             },
@@ -989,7 +1052,7 @@ serve(async (req) => {
           }
         }
 
-        return json(200, { success: true, request });
+        return json(200, { success: true, request: requestRecord });
       }
 
       case "update_request_payment_status": {

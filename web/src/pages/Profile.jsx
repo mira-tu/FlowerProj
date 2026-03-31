@@ -6,6 +6,7 @@ import { supabase } from '../config/supabase';
 import { formatPhoneNumber } from '../utils/format';
 import InfoModal from '../components/InfoModal';
 import qrCodeImage from '../assets/qr-code-1.jpg';
+import { insertUserNotification } from '../utils/notificationApi';
 
 const parseJsonObject = (value) => {
     if (!value) return {};
@@ -493,7 +494,7 @@ const Profile = ({ user, logout }) => {
                     date: request.created_at,
                     status: request.status === 'accepted' ? 'processing' : request.status, // Map accepted to processing for display
                     type: request.type, // booking, customized, special_order
-                    payment_status: 'to_pay', // Assuming requests start with 'to_pay'
+                    payment_status: request.payment_status ?? requestData?.payment_status ?? null,
                     total: parseFloat(request.final_price || request.estimated_price || 0),
                     notes: request.notes || requestData.notes,
                     data: requestData,
@@ -917,8 +918,7 @@ const Profile = ({ user, logout }) => {
                 }
             }
 
-            // Create cancellation notification (this still uses localStorage for now, as per original code)
-            const notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
+            // Create cancellation notification
             const orderTypeLabel = orderToCancel.type
                 ? (orderToCancel.type === 'booking' ? 'Custom Order'
                     : orderToCancel.type === 'special_order' ? 'Special Order'
@@ -926,18 +926,14 @@ const Profile = ({ user, logout }) => {
                             : 'Request')
                 : 'Order';
             const orderNumber = orderToCancel.order_number ? `#${orderToCancel.order_number}` : '';
-
-            const newNotification = {
-                id: `notif-${Date.now()}`,
+            await insertUserNotification({
+                userId: user.id,
                 type: 'cancellation',
                 title: `${orderTypeLabel} Cancelled`,
                 message: `Your ${orderTypeLabel.toLowerCase()} ${orderNumber} has been cancelled successfully.`,
                 icon: 'fa-times-circle',
-                timestamp: new Date().toISOString(),
-                read: false,
-                link: '/profile'
-            };
-            localStorage.setItem('notifications', JSON.stringify([newNotification, ...notifications]));
+                link: '/profile',
+            });
 
             // Reload orders from Supabase
             loadOrders(user.id);

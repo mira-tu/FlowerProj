@@ -1120,7 +1120,7 @@ const CustomOrder = ({ user }) => {
             setInfoModal({
                 show: true,
                 title: 'Login Required',
-                message: 'Please login first to submit a custom booking request.',
+                message: 'Please login first to add this custom order draft to your cart.',
                 linkTo: '/login',
                 linkText: 'Log In'
             });
@@ -1273,7 +1273,7 @@ const CustomOrder = ({ user }) => {
                     </div>
                     <h1 className="display-4 fw-bold font-playfair text-dark">Custom Order Request Form</h1>
                     <p className="lead text-muted mx-auto mb-0" style={{ maxWidth: '700px' }}>
-                        Start from a selected arrangement type or build your request from scratch. You can still adjust quantity, flowers, colors, and inspiration details before you submit.
+                    Start from a selected arrangement type or build your request from scratch. You can still adjust quantity, flowers, colors, and inspiration details before you add this draft to cart.
                     </p>
                 </div>
 
@@ -1793,7 +1793,7 @@ const CustomOrder = ({ user }) => {
                                             style={{ minWidth: '250px' }}
                                             disabled={!!dateError || !!timeError}
                                         >
-                                            Review Request <i className="fas fa-arrow-right ms-2"></i>
+                            Review Draft <i className="fas fa-arrow-right ms-2"></i>
                                         </button>
                                     </div>
                                 </form>
@@ -1808,8 +1808,8 @@ const CustomOrder = ({ user }) => {
                 <div className="modal-overlay" style={{ zIndex: 1060 }} onClick={(e) => { if (e.target === e.currentTarget) setShowConfirmModal(false); }}>
                     <div className="modal-content-custom bg-white p-4" style={{ maxWidth: '500px', maxHeight: '90vh', overflowY: 'auto' }}>
                         <div className="text-center mb-4">
-                            <h3 className="fw-bold font-playfair">Confirm Your Request</h3>
-                            <p className="text-muted">Please verify your details before submitting.</p>
+                                <h3 className="fw-bold font-playfair">Confirm Your Draft</h3>
+                                <p className="text-muted">Please verify your details before adding this request draft to cart.</p>
                         </div>
 
                         <div className="bg-light rounded p-3 mb-4 small">
@@ -1937,10 +1937,10 @@ const CustomOrder = ({ user }) => {
 
                         <div className="d-flex gap-3">
                             <button className="btn btn-light flex-grow-1 py-2 fw-semibold" onClick={() => setShowConfirmModal(false)} disabled={isSubmitting}>Edit Details</button>
-                            <button className="btn btn-pink flex-grow-1 py-2 fw-semibold shadow-sm" onClick={handleSubmit} disabled={isSubmitting}>
-                                {isSubmitting ? <span className="spinner-border spinner-border-sm me-2"></span> : null}
-                                Submit Request
-                            </button>
+                                <button className="btn btn-pink flex-grow-1 py-2 fw-semibold shadow-sm" onClick={handleSubmit} disabled={isSubmitting}>
+                                    {isSubmitting ? <span className="spinner-border spinner-border-sm me-2"></span> : null}
+                                    Add to Cart
+                                </button>
                         </div>
                     </div>
                 </div>

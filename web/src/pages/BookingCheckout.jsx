@@ -13,6 +13,9 @@ import {
     createDeliveryAssignments,
     syncDeliveryAssignments,
 } from '../utils/deliveryDestinations';
+import { uploadBookingRequestImages } from '../utils/requestImageUploads';
+import { insertUserNotification } from '../utils/notificationApi';
+import { resolveBookingRequestStockReservations } from '../utils/requestSubmission';
 
 const pickupTimes = ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM'];
 const DEFAULT_SHIPPING_FEE = 100;
@@ -111,7 +114,7 @@ const BookingCheckout = ({ user }) => {
 
     useEffect(() => {
         const cartKey = `bookingCart_${user?.id || 'guest'}`;
-        const savedInquiry = localStorage.getItem('bookingCart') || localStorage.getItem(cartKey);
+        const savedInquiry = localStorage.getItem(cartKey);
 
         if (!savedInquiry) {
             navigate('/');
@@ -255,45 +258,11 @@ const BookingCheckout = ({ user }) => {
                 })
                 : [];
 
-            const uploadedItems = await Promise.all(inquiryItems.map(async (item, index) => {
-                let uploadedImageUrl = item.image_url || null;
-
-                if (item.inspirationImageBase64?.startsWith?.('data:image')) {
-                    try {
-                        const response = await fetch(item.inspirationImageBase64);
-                        const blob = await response.blob();
-                        const fileExt = blob.type.split('/')[1] || 'png';
-                        const fileName = `booking-inspirations/${user.id}-${Date.now()}-${index}.${fileExt}`;
-
-                        const { error: uploadError } = await supabase.storage
-                            .from('request-images')
-                            .upload(fileName, blob, { contentType: blob.type || 'image/png' });
-
-                        if (uploadError) {
-                            console.error('Error uploading booking inspiration image:', uploadError);
-                        } else {
-                            const { data: urlData } = supabase.storage.from('request-images').getPublicUrl(fileName);
-                            uploadedImageUrl = urlData?.publicUrl || null;
-                        }
-                    } catch (imageError) {
-                        console.error('Error preparing booking inspiration image:', imageError);
-                    }
-                }
-
-                const {
-                    inspirationImageBase64: _inspirationImageBase64,
-                    otherArrangementImageBase64: _otherArrangementImageBase64,
-                    otherFlowersImageBase64: _otherFlowersImageBase64,
-                    deliveryAddress,
-                    ...cleanItem
-                } = item;
-
-                return {
-                    ...cleanItem,
-                    image_url: uploadedImageUrl,
-                    deliveryAddress: deliveryAddress || null,
-                };
-            }));
+            const uploadedItems = await uploadBookingRequestImages(inquiryItems, user.id);
+            const stockAllocations = await resolveBookingRequestStockReservations({
+                supabase,
+                items: uploadedItems,
+            });
 
             const requestNumber = `REQ-${user.id.substring(0, 4)}-${Date.now()}`;
             const primaryDestination = multiDeliveryDestinations[0] || null;
@@ -315,6 +284,8 @@ const BookingCheckout = ({ user }) => {
                 delivery_method: deliveryMethod,
                 pickup_time: pickupDateTime,
                 shipping_fee: shippingFee,
+                estimated_price: hasEstimatedInquiryTotal ? estimatedInquiryTotal : null,
+                payment_status: 'to_pay',
                 image_url: firstItem.image_url || null,
                 notes: commonNotes || null,
                 data: {
@@ -351,38 +322,48 @@ const BookingCheckout = ({ user }) => {
                     delivery_method: deliveryMethod,
                     pickup_time: pickupDateTime,
                     shipping_fee: shippingFee,
+                    stock_allocations: stockAllocations,
                 },
             };
 
-            const { error } = await supabase.from('requests').insert([newRequest]);
+            const { data: insertedRequest, error } = await supabase
+                .from('requests')
+                .insert([newRequest])
+                .select('id')
+                .single();
             if (error) throw error;
 
+            if (stockAllocations.length > 0 && insertedRequest?.id) {
+                const { error: allocationError } = await supabase.rpc('apply_request_stock_allocations', {
+                    p_request_id: insertedRequest.id,
+                    p_allocations: stockAllocations,
+                    p_mode: 'reserve',
+                });
+
+                if (allocationError) {
+                    console.error('Error reserving booking request stock:', allocationError);
+                    await supabase.from('requests').delete().eq('id', insertedRequest.id);
+                    showInfoModal(
+                        'Stock Changed',
+                        'Some preferred flower stock changed while you were checking out. Please review your custom order cart and try again.'
+                    );
+                    setIsProcessing(false);
+                    return;
+                }
+            }
+
             try {
-                await supabase
-                    .from('notifications')
-                    .insert([{
-                        user_id: user.id,
-                        type: 'request',
-                        title: 'Custom Order Submitted',
-                        message: `Your custom order request #${requestNumber} has been submitted and is waiting for review.`,
-                        link: `/request-tracking/${requestNumber}`,
-                    }]);
+                await insertUserNotification({
+                    userId: user.id,
+                    type: 'request',
+                    title: 'Custom Order Submitted',
+                    message: `Your custom order request #${requestNumber} has been submitted and is waiting for review.`,
+                    icon: 'fa-file-alt',
+                    link: `/request-tracking/${requestNumber}`,
+                });
             } catch (notificationError) {
                 console.error('Error creating booking notification:', notificationError);
             }
-
-            const notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
-            const newNotification = {
-                id: `notif-${Date.now()}`,
-                type: 'request',
-                title: 'Custom Order Submitted',
-                message: `Your request #${requestNumber} has been submitted and is pending review.`,
-                icon: 'fa-file-alt',
-                timestamp: new Date().toISOString(),
-                read: false,
-                link: `/request-tracking/${requestNumber}`
-            };
-            localStorage.setItem('notifications', JSON.stringify([newNotification, ...notifications]));
 
             localStorage.removeItem('bookingCart');
             localStorage.removeItem(`bookingCart_${user.id}`);

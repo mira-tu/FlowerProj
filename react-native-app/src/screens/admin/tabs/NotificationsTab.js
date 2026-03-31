@@ -14,6 +14,12 @@ import RiderAssignmentPreview from '../components/RiderAssignmentPreview';
 import styles from '../../AdminDashboard.styles';
 import { formatTimestamp, getPaymentStatusDisplay, getStatusColor, getStatusLabel } from '../adminHelpers';
 import { groupDeliveryDestinations, parseMultiDeliveryNotes } from '../../../utils/deliveryDestinations';
+import {
+  aggregateAssignedOrderItems,
+  buildAssignedShippingAddress,
+  filterRequestDataForAssignedRider,
+  getAssignedDestinationsForRider,
+} from '../../../utils/riderAssignmentFilter';
 
 const ORDER_DETAIL_SELECT = `
   id,
@@ -150,28 +156,31 @@ const compactRows = (rows) =>
 
 const formatRequestTypeLabel = (requestType) => {
   if (requestType === 'booking') return 'Custom Order';
-  if (requestType === 'customized') return 'Customized Bouquet';
+  if (requestType === 'customized') return 'Customizer Studio';
   if (requestType === 'special_order') return 'Special Order';
   return getStatusLabel(requestType);
 };
 
 const buildOrderPreview = (order, currentUserId = null) => {
-  const items = (order.order_items || []).map((item) => ({
-    label: `${item.quantity} x ${item.products?.name || 'Unknown Product'}`,
-    secondary: formatCurrency(item.price),
-    imageUri: toAbsoluteImageUrl(item.products?.image_url),
-  }));
   const parsedNotes = parseMultiDeliveryNotes(order.notes);
-  const assignedStops = currentUserId
-    ? groupDeliveryDestinations(
-        parsedNotes.destinations.filter(
-          (destination) => String(destination?.assigned_rider_id || '') === String(currentUserId)
-        )
-      )
+  const assignedDestinations = currentUserId
+    ? getAssignedDestinationsForRider(parsedNotes.destinations, currentUserId)
     : [];
+  const assignedStops = groupDeliveryDestinations(assignedDestinations);
+  const assignedOrderItems = assignedDestinations.length
+    ? aggregateAssignedOrderItems(order.order_items || [], assignedDestinations)
+    : (order.order_items || []);
+  const items = assignedOrderItems.map((item) => ({
+    label: `${item.quantity} x ${item.products?.name || item.name || 'Unknown Product'}`,
+    secondary: formatCurrency(item.price),
+    imageUri: toAbsoluteImageUrl(item.products?.image_url || item.image_url),
+  }));
 
   let shippingAddressDescription = null;
-  if (order.shipping_address) {
+  const assignedShippingAddress = buildAssignedShippingAddress(assignedDestinations);
+  if (assignedShippingAddress?.description) {
+    shippingAddressDescription = assignedShippingAddress.description;
+  } else if (order.shipping_address) {
     const { street, barangay, city, zip } = order.shipping_address;
     shippingAddressDescription = [street, barangay, city, zip].filter(Boolean).join(', ');
   }
@@ -240,8 +249,11 @@ const buildOrderPreview = (order, currentUserId = null) => {
   };
 };
 
-const buildRequestPreview = (request) => {
-  const requestData = parseMaybeJson(request.data);
+const buildRequestPreview = (request, currentUserId = null) => {
+  const parsedRequestData = parseMaybeJson(request.data);
+  const { requestData, assignedDestinations } = currentUserId
+    ? filterRequestDataForAssignedRider(parsedRequestData, currentUserId)
+    : { requestData: parsedRequestData, assignedDestinations: [] };
   const deliveryMethod = requestData.delivery_method || request.delivery_method;
   const requestTypeLabel = formatRequestTypeLabel(request.type);
   const paymentMethod = requestData.payment_method || 'gcash';
@@ -280,7 +292,7 @@ const buildRequestPreview = (request) => {
         ].filter(Boolean);
 
         return {
-          label: item?.bundleSize ? `${item.bundleSize} stems` : `Customized bouquet ${index + 1}`,
+          label: item?.bundleSize ? `${item.bundleSize} stems` : `Customizer Studio ${index + 1}`,
           secondary: summaryParts.join(' | '),
           imageUri: toAbsoluteImageUrl(item?.image_url),
         };
@@ -387,13 +399,31 @@ const buildRequestPreview = (request) => {
           {
             label: deliveryMethod === 'delivery' ? 'Address' : 'Pickup time',
             value: deliveryMethod === 'delivery'
-              ? pickFirstValue(requestData.deliveryAddress, requestData.delivery_address, requestData.venue)
+              ? (
+                assignedDestinations.length
+                  ? groupDeliveryDestinations(assignedDestinations)
+                      .map((stop) => stop.addressText)
+                      .filter(Boolean)
+                      .join(' | ')
+                  : pickFirstValue(requestData.deliveryAddress, requestData.delivery_address, requestData.venue)
+              )
               : pickFirstValue(requestData.pickup_time, request.pickup_time),
           },
         ]),
       },
+      ...(assignedDestinations.length
+        ? [{
+            title: 'Assigned delivery stops',
+            rows: groupDeliveryDestinations(assignedDestinations).map((stop, index) => ({
+              label: `Stop ${index + 1}`,
+              value: [stop.addressText, stop.items.map((item) => `${item.itemName} #${item.unitNumber}`).join(', ')]
+                .filter(Boolean)
+                .join(' | '),
+            })),
+          }]
+        : []),
     ],
-    itemsTitle: request.type === 'customized' ? 'Bouquet summary' : 'Request summary',
+    itemsTitle: request.type === 'customized' ? 'Assigned bouquet summary' : 'Assigned request summary',
     items: previewItems,
     totalsTitle: 'Payment',
     totals: compactRows([
@@ -528,7 +558,7 @@ const NotificationsTab = ({ currentUser, setActiveTab, setFocusedEntityTarget, r
 
         setPreviewByNotificationId((currentPreviews) => ({
           ...currentPreviews,
-          [notificationId]: buildRequestPreview(data),
+          [notificationId]: buildRequestPreview(data, currentUser?.id),
         }));
       }
     } catch (error) {

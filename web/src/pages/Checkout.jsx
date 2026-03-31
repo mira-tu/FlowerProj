@@ -6,6 +6,7 @@ import InfoModal from '../components/InfoModal';
 import CheckoutAddressSelection from '../components/CheckoutAddressSelection';
 import MultiAddressDeliverySection from '../components/MultiAddressDeliverySection';
 import qrCodeImage from '../assets/qr-code-1.jpg';
+import { insertUserNotification } from '../utils/notificationApi';
 import {
     buildAddressFeeMap,
     buildMultiDeliveryDestinations,
@@ -407,30 +408,18 @@ const Checkout = ({ setCart, user }) => {
             }
         }
 
-        const notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
-        const newNotification = {
-            id: `notif-${Date.now()}`,
-            type: 'order',
-            title: 'Order Placed Successfully!',
-            message: `Your order #${order_number} has been placed. ${selectedPayment === 'cod' ? 'Payment will be collected on delivery.' : 'Waiting for payment confirmation.'}`,
-            icon: 'fa-shopping-bag',
-            timestamp: new Date().toISOString(),
-            read: false,
-            link: `/order-tracking/${newOrderNumber}`
-        };
-        localStorage.setItem('notifications', JSON.stringify([newNotification, ...notifications]));
-
-        // Also insert notification into Supabase for persistence
-        const { error: notifError } = await supabase
-            .from('notifications')
-            .insert([{
-                user_id: user.id,
+        try {
+            await insertUserNotification({
+                userId: user.id,
                 type: 'order',
                 title: 'Order Placed Successfully!',
                 message: `Your order #${order_number} has been placed. ${selectedPayment === 'cod' ? 'Payment will be collected on delivery.' : 'Waiting for payment confirmation.'}`,
+                icon: 'fa-shopping-bag',
                 link: `/order-tracking/${newOrderNumber}`,
-            }]);
-        if (notifError) console.error('Error creating notification:', notifError);
+            });
+        } catch (notifError) {
+            console.error('Error creating notification:', notifError);
+        }
 
         const currentCart = JSON.parse(localStorage.getItem('cart') || '[]');
         const checkoutItemIds = checkoutItems.map(item => item.id);

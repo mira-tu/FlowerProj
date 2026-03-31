@@ -52,9 +52,9 @@ export const stockAPI = {
                 name: item.name,
                 category: item.category,
                 price: item.price,
-                img: item.image_url,
-                layerImg: item.image_url,
-                stemImg: item.image_url, // Flowers will use this, others can just ignore
+                img: item.preview_image_url || item.image_url,
+                layerImg: item.layer_image_url || item.preview_image_url || item.image_url,
+                stemImg: item.stem_image_url || item.layer_image_url || item.preview_image_url || item.image_url,
                 unit: item.unit,
                 quantity: item.quantity ?? 0, // <-- CRITICAL: stock limit enforcement
                 reorder_level: item.reorder_level,
@@ -62,6 +62,7 @@ export const stockAPI = {
                 wrapper_group_name: item.wrapper_group_name ?? null,
                 wrapper_color: item.wrapper_color ?? null,
                 ribbon_scope: item.ribbon_scope ?? null,
+                customization_config: item.wrapper_behavior ?? item.customizer_metadata ?? item.customization_config ?? null,
                 updated_at: item.updated_at ?? null,
             }));
 

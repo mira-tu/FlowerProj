@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import Toast from 'react-native-toast-message';
 import { adminAPI, BASE_URL } from '../../../config/api';
+import { supabase } from '../../../config/supabase';
 import styles from '../../AdminDashboard.styles';
 import ProductCard from '../components/ProductCard';
 
@@ -99,11 +100,7 @@ const StockTab = () => {
     image: null,
   });
 
-  useEffect(() => {
-    loadStock();
-  }, []);
-
-  const loadStock = async () => {
+  const loadStock = useCallback(async () => {
 
     setLoading(true);
 
@@ -117,6 +114,8 @@ const StockTab = () => {
 
       console.error('Error loading stock:', error);
 
+      setStockItems([]);
+
       Alert.alert('Error', 'Failed to load stock');
 
     } finally {
@@ -125,7 +124,30 @@ const StockTab = () => {
 
     }
 
-  };
+  }, []);
+
+  useEffect(() => {
+    loadStock();
+
+    const channel = supabase
+      .channel('admin-stock-products')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'stock_products',
+        },
+        () => {
+          loadStock();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadStock]);
 
 
 
@@ -454,7 +476,7 @@ const StockTab = () => {
 
             />
 
-            <Text style={[styles.stockTabText, activeStockTab === tab && styles.stockTabTextActive]}>
+            <Text style={[styles.stockTabText, activeStockTab === tab.key && styles.stockTabTextActive]}>
 
               {tab.label}
 

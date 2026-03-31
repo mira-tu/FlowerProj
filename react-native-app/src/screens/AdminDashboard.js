@@ -61,26 +61,33 @@ const AdminDashboard = () => {
   };
 
   useEffect(() => {
+    let isActive = true;
+
     const checkUserAndSubscribe = async () => {
       setLoading(true);
       try {
-        const currentUserJson = await AsyncStorage.getItem('currentUser');
-        if (!currentUserJson) {
-          navigation.navigate('Login');
+        const restoredSession = await authAPI.restoreStaffSession();
+
+        if (!isActive) {
           return;
         }
 
-        const restoredSession = await authAPI.restoreStaffSession();
         if (!restoredSession?.data?.user) {
           await AsyncStorage.multiRemove(['currentUser', 'token']);
-          navigation.navigate('Login');
+          navigation.reset({
+            index: 0,
+            routes: [{ name: 'Login' }],
+          });
           return;
         }
 
         const { user, token } = restoredSession.data;
         if (user.role !== 'admin' && user.role !== 'employee') {
           Alert.alert('Access Denied', 'You do not have permission to access this page');
-          navigation.navigate('Login');
+          navigation.reset({
+            index: 0,
+            routes: [{ name: 'Login' }],
+          });
           return;
         }
 
@@ -88,17 +95,30 @@ const AdminDashboard = () => {
           ['token', token],
           ['currentUser', JSON.stringify(user)],
         ]);
-        setCurrentUser(user);
+        if (isActive) {
+          setCurrentUser(user);
+        }
       } catch (error) {
         console.error('Error checking user:', error);
         await AsyncStorage.multiRemove(['currentUser', 'token']);
-        navigation.navigate('Login');
+        if (isActive) {
+          navigation.reset({
+            index: 0,
+            routes: [{ name: 'Login' }],
+          });
+        }
       } finally {
-        setLoading(false);
+        if (isActive) {
+          setLoading(false);
+        }
       }
     };
 
     checkUserAndSubscribe();
+
+    return () => {
+      isActive = false;
+    };
   }, [navigation]);
 
   useEffect(() => {

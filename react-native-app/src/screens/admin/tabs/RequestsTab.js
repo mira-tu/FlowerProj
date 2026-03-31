@@ -24,6 +24,7 @@ import { formatTimestamp, getPaymentStatusDisplay, getStatusColor, getStatusLabe
 import PaymentDetailsSection from '../components/PaymentDetailsSection';
 import { generateAndShareReceipt } from '../../../utils/receiptGenerator';
 import { groupDeliveryDestinations } from '../../../utils/deliveryDestinations';
+import { filterRequestForAssignedRider, shouldRestrictRequestToAssignedRider } from '../../../utils/riderAssignmentFilter';
 
 const DetailSection = ({ label, value }) => {
   if (!value) return null;
@@ -1257,6 +1258,20 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
     });
   }, [requests, riders]);
 
+  const riderScopedRequests = React.useMemo(() => {
+    if (currentUser?.role !== 'employee') {
+      return requestsWithRiderDetails;
+    }
+
+    return requestsWithRiderDetails
+      .map((request) => (
+        shouldRestrictRequestToAssignedRider(request, normalizeRequestData)
+          ? filterRequestForAssignedRider(request, currentUser?.id, normalizeRequestData)
+          : request
+      ))
+      .filter(Boolean);
+  }, [currentUser?.id, currentUser?.role, requestsWithRiderDetails]);
+
   const assignableStopGroups = React.useMemo(
     () => requestToAssignRider ? getGroupedDestinations(requestToAssignRider) : [],
     [requestToAssignRider, getGroupedDestinations]
@@ -1271,7 +1286,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
 
   // Filter wrapper
   const filteredRequests = React.useMemo(() => {
-    let result = requestsWithRiderDetails;
+    let result = riderScopedRequests;
     if (statusFilter !== 'All') {
       result = result.filter(req => {
         const status = req.status;
@@ -1287,17 +1302,17 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
       });
     }
     return result;
-  }, [requestsWithRiderDetails, statusFilter]);
+  }, [riderScopedRequests, statusFilter]);
 
   const focusedRequest = React.useMemo(() => {
     if (focusedEntityTarget?.entityType !== 'request' || !focusedEntityTarget?.entityId) {
       return null;
     }
 
-    return requestsWithRiderDetails.find(
+    return riderScopedRequests.find(
       (request) => String(request.id) === String(focusedEntityTarget.entityId)
     ) || null;
-  }, [focusedEntityTarget, requestsWithRiderDetails]);
+  }, [focusedEntityTarget, riderScopedRequests]);
 
   const displayedRequests = focusedRequest ? [focusedRequest] : filteredRequests;
 
@@ -1574,6 +1589,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
       setRequests(response.data.requests || []);
     } catch (error) {
       console.error('Error loading requests:', error);
+      setRequests([]);
       Alert.alert('Error', 'Failed to load requests');
     } finally {
       setLoading(false);

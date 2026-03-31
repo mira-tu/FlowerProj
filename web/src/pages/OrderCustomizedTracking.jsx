@@ -4,6 +4,7 @@ import { supabase } from '../config/supabase';
 import TrackingPaymentDetails from '../components/TrackingPaymentDetails';
 import DeliveryDestinationsSummary from '../components/DeliveryDestinationsSummary';
 import InfoModal from '../components/InfoModal';
+import { insertStaffNotifications } from '../utils/notificationApi';
 import { buildTimelineTimestampMap, formatTimelineTimestamp } from '../utils/timelineTimestamps';
 import {
     canRequestRefund,
@@ -533,17 +534,15 @@ const OrderCustomizedTracking = ({ user }) => {
             localStorage.setItem('messages', JSON.stringify([...allMessages, message]));
             window.dispatchEvent(new Event('messageUpdated'));
 
-            const notifications = JSON.parse(localStorage.getItem('notifications') || '[]');
-            localStorage.setItem('notifications', JSON.stringify([{
-                id: `notif-${Date.now()}`,
+            insertStaffNotifications({
                 type: 'message',
                 title: 'New Custom Order Feedback',
                 message: `A customer sent feedback for custom order #${request.request_number || request.id}.`,
                 icon: 'fa-comments',
-                timestamp: new Date().toISOString(),
-                read: false,
                 link: '/admin/dashboard',
-            }, ...notifications]));
+            }).catch((notificationError) => {
+                console.error('Error notifying staff about custom order feedback:', notificationError);
+            });
 
             setFeedbackMessage('');
             setInfoModal({

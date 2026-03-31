@@ -27,14 +27,6 @@ const LoginScreen = () => {
       setLoading(true);
 
       try {
-        const storedAuthEntries = await AsyncStorage.multiGet(['token', 'currentUser']);
-        const storedToken = storedAuthEntries.find(([key]) => key === 'token')?.[1];
-        const storedUser = storedAuthEntries.find(([key]) => key === 'currentUser')?.[1];
-
-        if (!storedToken || !storedUser) {
-          return;
-        }
-
         const response = await authAPI.restoreStaffSession();
 
         if (!isActive) {

@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { supabase } from '../config/supabase';
+import { fetchUserNotifications, subscribeToUserNotifications } from '../utils/notificationApi';
 import '../styles/Navbar.css';
 
 const Navbar = ({ cartCount, user, logout }) => {
-    const navigate = useNavigate();
-    const [notifications, setNotifications] = useState([]);
-    const [showNotifications, setShowNotifications] = useState(false);
     const [unreadCount, setUnreadCount] = useState(0);
     const [isMobile, setIsMobile] = useState(false);
     const [unreadMessageCount, setUnreadMessageCount] = useState(0);
@@ -44,86 +42,45 @@ const Navbar = ({ cartCount, user, logout }) => {
 
 
     useEffect(() => {
-        // Check if mobile on mount and resize
         const checkMobile = () => {
             setIsMobile(window.innerWidth <= 768);
         };
 
         checkMobile();
         window.addEventListener('resize', checkMobile);
+        let isMounted = true;
+        let unsubscribeNotifications = () => {};
 
-        // Load notifications from localStorage scoped to user
-        const loadNotifications = () => {
-            if (!user) {
-                setNotifications([]);
-                setUnreadCount(0);
+        const refreshNotifications = async () => {
+            if (!user?.id) {
+                if (isMounted) {
+                    setUnreadCount(0);
+                }
                 return;
             }
-            const savedNotifications = JSON.parse(localStorage.getItem(`notifications_${user.id}`) || '[]');
-            setNotifications(savedNotifications);
-            setUnreadCount(savedNotifications.filter(n => !n.read).length);
-        };
 
-        loadNotifications();
-
-        // Listen for storage changes (when new notifications are added from other tabs)
-        const handleStorageChange = () => {
-            loadNotifications();
-        };
-
-        window.addEventListener('storage', handleStorageChange);
-
-        // Also check periodically for changes (for same-tab updates)
-        const interval = setInterval(loadNotifications, 1000);
-
-        // Close dropdown when clicking outside
-        const handleClickOutside = (event) => {
-            if (showNotifications && !event.target.closest('.notification-wrapper')) {
-                setShowNotifications(false);
+            try {
+                const nextNotifications = await fetchUserNotifications(user.id, 50);
+                if (!isMounted) {
+                    return;
+                }
+                setUnreadCount(nextNotifications.filter((notification) => !notification.read).length);
+            } catch (error) {
+                console.error('Error loading navbar notifications:', error);
             }
         };
 
-        document.addEventListener('mousedown', handleClickOutside);
+        refreshNotifications();
+        if (user?.id) {
+            unsubscribeNotifications = subscribeToUserNotifications(user.id, refreshNotifications);
+        }
 
         return () => {
+            isMounted = false;
             window.removeEventListener('resize', checkMobile);
-            window.removeEventListener('storage', handleStorageChange);
-            clearInterval(interval);
-            document.removeEventListener('mousedown', handleClickOutside);
+            unsubscribeNotifications();
         };
-    }, [showNotifications]);
-
-    const handleNotificationClick = (notification) => {
-        if (!user) return;
-        // Mark as read
-        const updatedNotifications = notifications.map(n =>
-            n.id === notification.id ? { ...n, read: true } : n
-        );
-        localStorage.setItem(`notifications_${user.id}`, JSON.stringify(updatedNotifications));
-        setNotifications(updatedNotifications);
-        setUnreadCount(updatedNotifications.filter(n => !n.read).length);
-
-        // Navigate if there's a link
-        if (notification.link) {
-            navigate(notification.link);
-            setShowNotifications(false);
-        }
-    };
-
-    const markAllAsRead = () => {
-        if (!user) return;
-        const updatedNotifications = notifications.map(n => ({ ...n, read: true }));
-        localStorage.setItem(`notifications_${user.id}`, JSON.stringify(updatedNotifications));
-        setNotifications(updatedNotifications);
-        setUnreadCount(0);
-    };
-
-    const clearAllNotifications = () => {
-        if (!user) return;
-        localStorage.setItem(`notifications_${user.id}`, JSON.stringify([]));
-        setNotifications([]);
-        setUnreadCount(0);
-    };
+    }, [user?.id]);
 
     const [menuOpen, setMenuOpen] = useState(false);
 
