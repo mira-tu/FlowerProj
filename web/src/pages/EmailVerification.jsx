@@ -218,11 +218,6 @@ const EmailVerification = () => {
                                 {message}
                             </div>
 
-                            <div className="auth-verification-checklist">
-                                <div className="auth-verification-checklist-item">Use your registered email address when you log in.</div>
-                                <div className="auth-verification-checklist-item">If you forget your password later, the reset link will be sent to the same email.</div>
-                            </div>
-
                             <div className="d-flex flex-column gap-2">
                                 <Link to="/login" className="btn btn-auth">
                                     {currentStatus.cta}

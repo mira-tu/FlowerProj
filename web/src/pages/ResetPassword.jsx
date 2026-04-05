@@ -5,6 +5,8 @@ import {
     clearPasswordRecoveryInProgress,
     clearSensitiveAuthParamsFromUrl,
     getAuthErrorMessageFromLocation,
+    getLocationHashParams,
+    getLocationSearchParams,
     hasRecoveryLinkIndicators,
     isPasswordRecoveryInProgress,
     markPasswordRecoveryInProgress,
@@ -103,11 +105,67 @@ const ResetPassword = () => {
             setError('');
         };
 
+        const completeRecoveryReadyState = () => {
+            markPasswordRecoveryInProgress();
+            clearSensitiveAuthParamsFromUrl();
+            setPageStatus('ready', STATUS_COPY.ready.message);
+        };
+
+        const tryActivateRecoverySession = async () => {
+            const searchParams = getLocationSearchParams();
+            const hashParams = getLocationHashParams();
+            const accessToken = hashParams.get('access_token') || searchParams.get('access_token');
+            const refreshToken = hashParams.get('refresh_token') || searchParams.get('refresh_token');
+            const code = searchParams.get('code');
+
+            if (accessToken && refreshToken) {
+                const { data, error: setSessionError } = await supabase.auth.setSession({
+                    access_token: accessToken,
+                    refresh_token: refreshToken,
+                });
+
+                if (setSessionError) {
+                    throw setSessionError;
+                }
+
+                if (data.session?.user) {
+                    completeRecoveryReadyState();
+                    return true;
+                }
+            }
+
+            if (code) {
+                const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+
+                if (exchangeError) {
+                    throw exchangeError;
+                }
+
+                if (data.session?.user) {
+                    completeRecoveryReadyState();
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
         const resolveRecoverySession = async () => {
+            if (recoveryIndicatorsPresent) {
+                const recoveredFromUrl = await tryActivateRecoverySession();
+
+                if (recoveredFromUrl) {
+                    return true;
+                }
+            }
+
+            if (!isPasswordRecoveryInProgress()) {
+                return false;
+            }
+
             const { data: { session } } = await supabase.auth.getSession();
 
-            if (session?.user && (recoveryIndicatorsPresent || isPasswordRecoveryInProgress())) {
-                markPasswordRecoveryInProgress();
+            if (session?.user) {
                 clearSensitiveAuthParamsFromUrl();
                 setPageStatus('ready', STATUS_COPY.ready.message);
                 return true;
@@ -125,10 +183,8 @@ const ResetPassword = () => {
         }
 
         const { data: subscription } = supabase.auth.onAuthStateChange(async (event, session) => {
-            if (event === 'PASSWORD_RECOVERY' && session?.user) {
-                markPasswordRecoveryInProgress();
-                clearSensitiveAuthParamsFromUrl();
-                setPageStatus('ready', STATUS_COPY.ready.message);
+            if (session?.user && (event === 'PASSWORD_RECOVERY' || (recoveryIndicatorsPresent && event === 'SIGNED_IN') || isPasswordRecoveryInProgress())) {
+                completeRecoveryReadyState();
             }
 
             if (event === 'SIGNED_OUT') {
@@ -151,7 +207,7 @@ const ResetPassword = () => {
                         const fallbackStatus = recoveryIndicatorsPresent ? 'expired' : 'invalid';
                         setPageStatus(fallbackStatus, STATUS_COPY[fallbackStatus].message);
                     }
-                }, 1800);
+                }, 6000);
             })
             .catch((resetFlowError) => {
                 console.error('Reset password page error:', resetFlowError);
