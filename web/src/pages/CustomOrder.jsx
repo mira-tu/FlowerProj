@@ -6,6 +6,13 @@ import { formatPhoneNumber } from '../utils/format';
 import { getUserContactNumber, getUserFullName } from '../utils/customerProfile';
 import { BUSINESS_HOURS_LABEL, CUSTOM_ORDER_TIME_MAX, CUSTOM_ORDER_TIME_MIN, isWithinBusinessHours } from '../utils/businessHours';
 import { buildTentativeBreakdownFromSelections, formatTentativePriceRange } from '../utils/customOrderTentativePricing';
+import {
+    DEFAULT_CUSTOM_ORDER_CATALOG as SHARED_DEFAULT_CUSTOM_ORDER_CATALOG,
+    buildGroupedArrangementOptions as buildSharedGroupedArrangementOptions,
+    fetchCustomOrderCatalog as fetchSharedCustomOrderCatalog,
+    isCustomCatalogOption as isSharedCustomCatalogOption,
+    normalizeCustomOrderCatalog as normalizeSharedCustomOrderCatalog,
+} from '../utils/customOrderCatalog';
 import InfoModal from '../components/InfoModal';
 import '../styles/CustomOrder.css';
 import '../styles/Shop.css';
@@ -611,7 +618,7 @@ const CustomOrder = ({ user }) => {
 
     const navigate = useNavigate();
     const location = useLocation();
-    const [customOrderCatalog, setCustomOrderCatalog] = useState(() => normalizeCustomOrderCatalog(DEFAULT_CUSTOM_ORDER_CATALOG));
+    const [customOrderCatalog, setCustomOrderCatalog] = useState(() => normalizeSharedCustomOrderCatalog(SHARED_DEFAULT_CUSTOM_ORDER_CATALOG));
     const appliedArrangementPrefillRef = useRef('');
 
     const preselectedArrangementValue = useMemo(() => {
@@ -647,7 +654,7 @@ const CustomOrder = ({ user }) => {
         let isMounted = true;
 
         const loadCatalog = async () => {
-            const loadedCatalog = await fetchCustomOrderCatalog();
+            const loadedCatalog = await fetchSharedCustomOrderCatalog();
             if (isMounted) {
                 setCustomOrderCatalog(loadedCatalog);
             }
@@ -666,7 +673,7 @@ const CustomOrder = ({ user }) => {
     );
 
     const catalogArrangementOptions = useMemo(
-        () => buildGroupedArrangementOptions(customOrderCatalog.arrangements.filter((item) => item.isActive !== false)),
+        () => buildSharedGroupedArrangementOptions(customOrderCatalog.arrangements.filter((item) => item.isActive !== false)),
         [customOrderCatalog]
     );
 
@@ -841,7 +848,7 @@ const CustomOrder = ({ user }) => {
         [arrangementOptionLookup, formData.arrangementTypes]
     );
 
-    const hasOtherArrangement = selectedArrangementOptions.some(isCustomCatalogOption);
+    const hasOtherArrangement = selectedArrangementOptions.some(isSharedCustomCatalogOption);
 
     const otherFlowersPerArrangement = useMemo(() => {
         const parsedCount = Number.parseInt(formData.flowerQuantity, 10);
@@ -854,7 +861,7 @@ const CustomOrder = ({ user }) => {
         return selectedArrangementOptions.map((option) => {
             const parsedQty = Number.parseInt(formData.arrangementQuantities?.[option.value], 10);
             const quantity = Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1;
-            const isOther = isCustomCatalogOption(option);
+            const isOther = isSharedCustomCatalogOption(option);
             const label = isOther
                 ? (formData.otherArrangementType?.trim() || option.label)
                 : option.label;
@@ -930,7 +937,7 @@ const CustomOrder = ({ user }) => {
                 const selectedColor = formData.colorPreferenceByArrangement?.[detail.value] || '';
                 const otherColor = formData.otherColorPreferenceByArrangement?.[detail.value] || '';
                 if (!selectedColor) return null;
-                const colorLabel = isCustomCatalogOption(colorOptionLookup.get(selectedColor)) ? otherColor : selectedColor;
+                const colorLabel = isSharedCustomCatalogOption(colorOptionLookup.get(selectedColor)) ? otherColor : selectedColor;
                 return colorLabel ? `${detail.label}: ${colorLabel}` : null;
             })
             .filter(Boolean)
@@ -977,7 +984,7 @@ const CustomOrder = ({ user }) => {
                 inspirationImageByArrangement: nextInspirationImageByArrangement
             };
 
-            if (!selectedValues.some((value) => isCustomCatalogOption(arrangementOptionLookup.get(value)))) {
+            if (!selectedValues.some((value) => isSharedCustomCatalogOption(arrangementOptionLookup.get(value)))) {
                 nextState.otherArrangementType = '';
                 nextState.flowerQuantity = '';
             }
@@ -1216,8 +1223,8 @@ const CustomOrder = ({ user }) => {
                 otherFlowersText: arrangementOtherFlowersText || null,
                 other_flowers_text: arrangementOtherFlowersText || null,
                 flowers: arrangementFlowerLabels.join(', ') + (arrangementOtherFlowersText ? ` (${arrangementOtherFlowersText})` : ''),
-                colorPreference: isCustomCatalogOption(colorOptionLookup.get(selectedColor)) ? otherColor : selectedColor || null,
-                color_preference: isCustomCatalogOption(colorOptionLookup.get(selectedColor)) ? otherColor : selectedColor || null,
+                colorPreference: isSharedCustomCatalogOption(colorOptionLookup.get(selectedColor)) ? otherColor : selectedColor || null,
+                color_preference: isSharedCustomCatalogOption(colorOptionLookup.get(selectedColor)) ? otherColor : selectedColor || null,
                 rawColorPreference: selectedColor || null,
                 raw_color_preference: selectedColor || null,
                 otherColorPreference: otherColor || null,
@@ -1241,7 +1248,7 @@ const CustomOrder = ({ user }) => {
             eventTime: formData.eventTime,
             venue: formData.venue,
             arrangementType: arrangementSummary || selectedArrangementOptions.map((option) => option.label).join(', '),
-            arrangementTypes: selectedArrangementOptions.map((option) => isCustomCatalogOption(option) ? (formData.otherArrangementType?.trim() || option.label) : option.label),
+            arrangementTypes: selectedArrangementOptions.map((option) => isSharedCustomCatalogOption(option) ? (formData.otherArrangementType?.trim() || option.label) : option.label),
             arrangementTypeValues: selectedArrangementOptions.map((option) => option.value),
             arrangementQuantities: formData.arrangementQuantities,
             arrangementSelections,
@@ -1693,7 +1700,7 @@ const CustomOrder = ({ user }) => {
                                                                 <div className="text-danger small mt-1">Please select at least one preferred flower for this arrangement.</div>
                                                             )}
 
-                                                            {selectedArrangementFlowers.some((flower) => isCustomCatalogOption(flower)) && (
+                                                            {selectedArrangementFlowers.some((flower) => isSharedCustomCatalogOption(flower)) && (
                                                                 <input
                                                                     type="text"
                                                                     className="form-control bg-light border-0 py-3 mt-3"
@@ -1709,7 +1716,7 @@ const CustomOrder = ({ user }) => {
                                             </div>
 
                                             {arrangementDetails.some((detail) => (
-                                                (formData.preferredFlowersByArrangement?.[detail.value] || []).some((flower) => isCustomCatalogOption(flower))
+                                                (formData.preferredFlowersByArrangement?.[detail.value] || []).some((flower) => isSharedCustomCatalogOption(flower))
                                             )) && (
                                                 <div className="arrangement-other-panel mt-3">
                                                     <div className="mt-1">
@@ -1771,7 +1778,7 @@ const CustomOrder = ({ user }) => {
                                                             {hasColorError && (
                                                                 <div className="text-danger small mt-1">Please select a color theme for this arrangement.</div>
                                                             )}
-                                                            {isCustomCatalogOption(colorOptionLookup.get(selectedColor)) && (
+                                                            {isSharedCustomCatalogOption(colorOptionLookup.get(selectedColor)) && (
                                                                 <input
                                                                     type="text"
                                                                     className="form-control bg-light border-0 py-3 mt-2"
@@ -1990,7 +1997,7 @@ const CustomOrder = ({ user }) => {
                                     <div key={`summary-color-${detail.value}`} className="d-flex justify-content-between mb-2">
                                         <span className="text-muted">{detail.label} Color:</span>
                                         <span className="fw-semibold text-end" style={{ maxWidth: '60%' }}>
-                                            {isCustomCatalogOption(colorOptionLookup.get(selectedColor)) ? otherColor : selectedColor}
+                                            {isSharedCustomCatalogOption(colorOptionLookup.get(selectedColor)) ? otherColor : selectedColor}
                                         </span>
                                     </div>
                                 );
