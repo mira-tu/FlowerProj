@@ -166,13 +166,6 @@ const DeliveryFeesTab = () => {
                 )}
             </View>
 
-            <View style={styles.promoContainer}>
-                <View style={{ flex: 1 }}>
-                    <Text style={styles.promoTitle}>Free Shipping</Text>
-                    <Text style={styles.promoDesc}>Free shipping is now managed per catalogue product in the Product Catalogue tab.</Text>
-                </View>
-            </View>
-
             {loading ? (
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color="#ec4899" />
