@@ -1147,6 +1147,8 @@ const PRODUCT_SELECT_WITH_DISCOUNTS_LEGACY_SHIPPING = `
                 category_id,
                 image_url,
                 stock_quantity,
+                is_free_shipping,
+                free_shipping_min_order_amount,
                 is_active,
                 categories ( name )
             `;
@@ -1196,7 +1198,11 @@ const isMissingProductColumns = (error, columns = []) => {
     return columns.some((column) => message.includes(column.toLowerCase()));
 };
 
-const buildProductsQuery = ({ params, includeDiscountFields = true, includeFreeShippingField = true }) => {
+const buildProductsQuery = ({
+    params,
+    includeDiscountFields = true,
+    includeFreeShippingField = true,
+}) => {
     let selectColumns = PRODUCT_SELECT_LEGACY;
 
     if (includeDiscountFields && includeFreeShippingField) {
@@ -1227,7 +1233,12 @@ const formatProductsForAdmin = (products = []) => (
     }))
 );
 
-const buildProductPayload = ({ formData, imageUrl, includeDiscountFields = true, includeFreeShippingField = true }) => {
+const buildProductPayload = ({
+    formData,
+    imageUrl,
+    includeDiscountFields = true,
+    includeFreeShippingField = true,
+}) => {
     const originalPrice = Math.max(0, roundCurrencyValue(formData.price));
     const discountPercentage = clampDiscountPercentage(formData.discount_percentage);
     const discountedPrice = computeDiscountedPrice(originalPrice, discountPercentage);

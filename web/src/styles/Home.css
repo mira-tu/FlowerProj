@@ -274,6 +274,44 @@
     text-overflow: ellipsis;
 }
 
+.product-promo-card {
+    background: linear-gradient(135deg, #f0fdf4, #ecfeff);
+    border: 1px solid #bbf7d0;
+    border-radius: 14px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    text-align: center;
+}
+
+.product-promo-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #166534;
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border-radius: 999px;
+    padding: 5px 10px;
+    margin-bottom: 8px;
+}
+
+.product-promo-copy {
+    color: #14532d;
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 0;
+}
+
+.product-promo-reason {
+    color: #3f3f46;
+    font-size: 0.82rem;
+    margin-top: 6px;
+    line-height: 1.45;
+}
+
 .btn-add-cart {
     width: 100%;
     border: 2px solid var(--main-pink);

@@ -222,6 +222,7 @@ const CatalogueTab = () => {
       } else if (parseFloat(free_shipping_min_order_amount) <= 0) {
         errors.push('Free shipping promo minimum order amount must be greater than 0.');
       }
+
     }
 
     if (errors.length > 0) {
@@ -361,7 +362,6 @@ const CatalogueTab = () => {
     const freeShippingPromoAmount = roundCurrencyValue(item.free_shipping_min_order_amount || 0);
     const hasFreeShippingPromo = item.is_free_shipping === true && freeShippingPromoAmount > 0;
     const hasIncompleteFreeShippingPromo = item.is_free_shipping === true && freeShippingPromoAmount <= 0;
-
     return (
       <ProductCard
         imageUrl={imageUrl}
@@ -381,7 +381,7 @@ const CatalogueTab = () => {
       >
         {hasFreeShippingPromo ? (
           <Text style={[styles.unavailableBadge, { backgroundColor: '#ecfdf5', color: '#047857', marginTop: 10 }]}>
-            Free Shipping Promo from {formatCurrency(freeShippingPromoAmount)}
+            Free delivery from {formatCurrency(freeShippingPromoAmount)}
           </Text>
         ) : null}
         {hasIncompleteFreeShippingPromo ? (

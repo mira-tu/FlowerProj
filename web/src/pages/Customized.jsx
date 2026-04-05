@@ -18,6 +18,10 @@ import {
   RIBBON_SCOPE,
 } from '../utils/customizedRibbonOptions';
 import '../styles/Customized.css';
+import {
+  evaluateStandaloneFreeShippingPromo,
+  fetchCustomizedStudioPromoSettings,
+} from '../utils/freeShipping';
 
 const placeholderStemImg = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 const placeholderImg = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodGg9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiPjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodGg9IjEwMCIgZmlsbD0iI2UwZTBlMCIvPjx0ZXh0IHg9IjUwIiB5PSI1MCIgZm9udC1mYW1pbHk9ImFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjMzMzIiBhbmNob3ItcGVudD0ibWlkZGxlIiB0ZXh0LWFuY2hvcnM9Im1pZGRsZSI+Tm8gSW1hZ2U8L3RleHQ+PC9zdmc+'; // SVG "No Image" placeholder
@@ -444,6 +448,11 @@ const Customized = ({ addToCart }) => {
   const [draggingStemId, setDraggingStemId] = useState(null);
   const [wrapperColorModal, setWrapperColorModal] = useState({ open: false, groupId: null });
   const [wrapperLayerBox, setWrapperLayerBox] = useState(null);
+  const [customizedStudioPromoSettings, setCustomizedStudioPromoSettings] = useState({
+    enabled: false,
+    minimumOrderAmount: 0,
+    isConfigured: false,
+  });
 
   useEffect(() => {
     let isMounted = true;
@@ -472,6 +481,39 @@ const Customized = ({ addToCart }) => {
 
     return () => {
       isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadCustomizedStudioPromo = async () => {
+      try {
+        const promoSettings = await fetchCustomizedStudioPromoSettings(supabase);
+        if (isMounted) {
+          setCustomizedStudioPromoSettings(promoSettings);
+        }
+      } catch (error) {
+        console.error('Error loading Customizer Studio free shipping promo:', error);
+      }
+    };
+
+    loadCustomizedStudioPromo();
+
+    const channel = supabase
+      .channel('public:app_content:customized-studio-promo-page')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'app_content' },
+        () => {
+          loadCustomizedStudioPromo();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(channel);
     };
   }, []);
 
@@ -1266,6 +1308,7 @@ const Customized = ({ addToCart }) => {
   const activeWrapperColorGroup = wrapperColorModal.groupId
     ? wrappers.find((entry) => entry.id === wrapperColorModal.groupId) || null
     : null;
+  const customizedStudioPromo = evaluateStandaloneFreeShippingPromo(totalPrice, customizedStudioPromoSettings);
   const ribbonPanelTitle = ribbonMode === 'palm-halo' ? 'Palm Halo Ribbon' : 'Pick Ribbon';
   const ribbonPanelSubtitle = ribbonMode === 'palm-halo'
     ? 'Palm Halo uses its own bow colors.'
@@ -1316,6 +1359,23 @@ const Customized = ({ addToCart }) => {
         linkText={infoModal.linkText}
         linkState={infoModal.linkState}
       />
+
+      {customizedStudioPromo.isConfigured && (
+        <div className="customized-promo-banner">
+          <div className="customized-promo-banner-copy">
+            <p className="mb-1">
+              {customizedStudioPromo.qualifies
+                ? 'Your current bouquet already qualifies for free delivery'
+                : `Free delivery from ${formatPrice(customizedStudioPromo.minimumOrderAmount)}`}
+            </p>
+          </div>
+          {!customizedStudioPromo.qualifies && customizedStudioPromo.amountRemaining > 0 ? (
+            <strong>Need {formatPrice(customizedStudioPromo.amountRemaining)} more</strong>
+          ) : (
+            <strong>Promo Ready</strong>
+          )}
+        </div>
+      )}
 
       {wrapperColorModal.open && activeWrapperColorGroup && (
         <div className="wrapper-color-modal-backdrop" onClick={closeWrapperColorModal}>

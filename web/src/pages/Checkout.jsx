@@ -16,13 +16,14 @@ import {
     syncDeliveryAssignments,
 } from '../utils/deliveryDestinations';
 import { buildFreeShippingLookup, evaluateFreeShippingPromo } from '../utils/freeShipping';
+import { PICKUP_TIME_OPTIONS } from '../utils/businessHours';
 
 const paymentMethods = [
     { id: 'cod', name: 'Cash on Delivery', description: 'Pay when you receive', icon: 'fa-money-bill-wave' },
     { id: 'gcash', name: 'GCash', description: 'Pay via GCash e-wallet', icon: 'fa-wallet' },
 ];
 
-const pickupTimes = ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM'];
+const pickupTimes = PICKUP_TIME_OPTIONS;
 
 const isMissingOrdersNotesColumnError = (error) => (
     error?.code === 'PGRST204'
@@ -756,7 +757,7 @@ const Checkout = ({ setCart, user, products = [] }) => {
                                     Free shipping promo applied to this order.
                                 </div>
                             )}
-                            {deliveryMethod === 'delivery' && !freeShippingPromo.qualifies && freeShippingPromo.allProductsEligible && freeShippingPromo.amountRemaining > 0 && (
+                            {false && deliveryMethod === 'delivery' && !freeShippingPromo.qualifies && freeShippingPromo.allProductsEligible && freeShippingPromo.amountRemaining > 0 && (
                                 <div className="small mb-2" style={{ color: 'var(--shop-pink)' }}>
                                     <i className="fas fa-tag me-1"></i>
                                     Spend another â‚±{freeShippingPromo.amountRemaining.toLocaleString()} to unlock the free shipping promo.
@@ -766,6 +767,12 @@ const Checkout = ({ setCart, user, products = [] }) => {
                                 <div className="small mb-2 text-muted">
                                     <i className="fas fa-info-circle me-1"></i>
                                     Free shipping promo only works when every catalogue item in this order is promo-eligible.
+                                </div>
+                            )}
+                            {deliveryMethod === 'delivery' && !freeShippingPromo.qualifies && freeShippingPromo.allProductsEligible && freeShippingPromo.amountRemaining > 0 && (
+                                <div className="small mb-2" style={{ color: 'var(--shop-pink)' }}>
+                                    <i className="fas fa-tag me-1"></i>
+                                    {`Spend another \u20b1${freeShippingPromo.amountRemaining.toLocaleString()} to unlock the free shipping promo.`}
                                 </div>
                             )}
 

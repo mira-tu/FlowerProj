@@ -1276,3 +1276,42 @@
         padding-bottom: 70px;
     }
 }
+
+.customized-promo-banner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin: 1rem 1.5rem 0;
+    padding: 1rem 1.25rem;
+    border-radius: 18px;
+    border: 1px solid #bbf7d0;
+    background: linear-gradient(135deg, #f0fdf4 0%, #fff7ed 100%);
+    color: #14532d;
+}
+
+.customized-promo-banner-copy {
+    text-align: left;
+}
+
+.customized-promo-banner p,
+.customized-promo-banner strong {
+    margin: 0;
+}
+
+.customized-promo-banner strong {
+    color: #9a3412;
+    white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+    .customized-promo-banner {
+        flex-direction: column;
+        align-items: flex-start;
+        margin: 0.75rem 1rem 0;
+    }
+
+    .customized-promo-banner strong {
+        white-space: normal;
+    }
+}

@@ -7,6 +7,7 @@ import {
   Modal,
   RefreshControl,
   ScrollView,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -77,14 +78,24 @@ const getStockMetadataDescription = (item) => {
   if (isRibbonStockItem(item)) return `Applies to: ${getRibbonScopeLabel(item?.ribbon_scope)}`;
   return '';
 };
+const CUSTOMIZED_PROMO_KEYS = [
+  'customized_free_shipping_enabled',
+  'customized_free_shipping_min_order_amount',
+];
+const parseAppContentBoolean = (value) => ['true', '1', 'yes'].includes(String(value || '').trim().toLowerCase());
 
 const StockTab = () => {
   const [activeStockTab, setActiveStockTab] = useState('Ribbons');
   const [stockItems, setStockItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [savingPromo, setSavingPromo] = useState(false);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [stockToDelete, setStockToDelete] = useState(null);
+  const [customizedPromo, setCustomizedPromo] = useState({
+    enabled: false,
+    minimumOrderAmount: '',
+  });
 
   // Modal State
   const [modalVisible, setModalVisible] = useState(false);
@@ -126,8 +137,32 @@ const StockTab = () => {
 
   }, []);
 
+  const loadCustomizedStudioPromo = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('app_content')
+        .select('key, value')
+        .in('key', CUSTOMIZED_PROMO_KEYS);
+
+      if (error) {
+        throw error;
+      }
+
+      const getValue = (key) => data?.find((entry) => entry.key === key)?.value ?? '';
+
+      setCustomizedPromo({
+        enabled: parseAppContentBoolean(getValue('customized_free_shipping_enabled')),
+        minimumOrderAmount: String(getValue('customized_free_shipping_min_order_amount') || '').trim(),
+      });
+    } catch (error) {
+      console.error('Error loading customized free shipping promo:', error);
+      Toast.show({ type: 'error', text1: 'Failed to load customized promo.' });
+    }
+  }, []);
+
   useEffect(() => {
     loadStock();
+    loadCustomizedStudioPromo();
 
     const channel = supabase
       .channel('admin-stock-products')
@@ -142,12 +177,23 @@ const StockTab = () => {
           loadStock();
         }
       )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'app_content',
+        },
+        () => {
+          loadCustomizedStudioPromo();
+        }
+      )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [loadStock]);
+  }, [loadStock, loadCustomizedStudioPromo]);
 
 
 
@@ -156,9 +202,74 @@ const StockTab = () => {
     setRefreshing(true);
 
     await loadStock();
+    await loadCustomizedStudioPromo();
 
     setRefreshing(false);
 
+  };
+
+  const handleSaveCustomizedPromo = async () => {
+    const trimmedAmount = customizedPromo.minimumOrderAmount.trim();
+
+    if (customizedPromo.enabled) {
+      if (!trimmedAmount) {
+        Alert.alert('Error', 'Promo minimum order amount is required when the customizer promo is enabled.');
+        return;
+      }
+
+      if (!/^\d+(\.\d{1,2})?$/.test(trimmedAmount) || parseFloat(trimmedAmount) <= 0) {
+        Alert.alert('Error', 'Promo minimum order amount must be a valid number greater than 0.');
+        return;
+      }
+    }
+
+    setSavingPromo(true);
+    try {
+      const updates = [
+        { key: 'customized_free_shipping_enabled', value: customizedPromo.enabled ? 'true' : 'false' },
+        { key: 'customized_free_shipping_min_order_amount', value: customizedPromo.enabled ? trimmedAmount : '0' },
+      ];
+
+      const { data: existingKeysData, error: fetchError } = await supabase
+        .from('app_content')
+        .select('key')
+        .in('key', CUSTOMIZED_PROMO_KEYS);
+
+      if (fetchError) {
+        throw fetchError;
+      }
+
+      const existingKeys = new Set((existingKeysData || []).map((item) => item.key));
+
+      for (const item of updates) {
+        if (existingKeys.has(item.key)) {
+          const { error } = await supabase
+            .from('app_content')
+            .update({ value: item.value, updated_at: new Date().toISOString() })
+            .eq('key', item.key);
+
+          if (error) {
+            throw error;
+          }
+        } else {
+          const { error } = await supabase
+            .from('app_content')
+            .insert([{ key: item.key, value: item.value }]);
+
+          if (error) {
+            throw error;
+          }
+        }
+      }
+
+      Toast.show({ type: 'success', text1: 'Customizer promo saved' });
+      await loadCustomizedStudioPromo();
+    } catch (error) {
+      console.error('Error saving customized free shipping promo:', error);
+      Alert.alert('Error', error.message || 'Failed to save customized free shipping promo.');
+    } finally {
+      setSavingPromo(false);
+    }
   };
 
 
@@ -438,76 +549,96 @@ const StockTab = () => {
     );
   }
 
-  return (
-
-    <View style={styles.tabContent}>
-
+  const stockListHeader = (
+    <>
       <TouchableOpacity style={styles.addButton} onPress={() => { resetForm(); setModalVisible(true); }}>
-
         <Ionicons name="add" size={20} color="#fff" />
-
         <Text style={styles.addButtonText}>Add {activeStockTab.slice(0, -1)}</Text>
-
       </TouchableOpacity>
 
-      {/* Stock Category Tabs */}
+      <View style={[styles.catalogueDiscountPreview, { marginTop: 14, marginBottom: 14, backgroundColor: '#ecfdf5' }]}>
+        <Text style={[styles.catalogueDiscountPreviewLabel, { color: '#166534', textAlign: 'center' }]}>
+          Customizer Studio Free Delivery
+        </Text>
+        <Text style={[styles.catalogueDiscountHint, { color: '#166534', marginBottom: 12, textAlign: 'center' }]}>
+          This applies only to Customizer Studio bouquet checkouts on the web app.
+        </Text>
 
-      <View style={styles.stockTabs}>
-
-        {STOCK_CATEGORY_TABS.map((tab) => (
-
-          <TouchableOpacity
-
-            key={tab.key}
-
-            style={[styles.stockTab, activeStockTab === tab.key && styles.stockTabActive]}
-
-            onPress={() => setActiveStockTab(tab.key)}
-
-          >
-
-            <Ionicons
-
-              name={tab.icon}
-
-              size={20}
-
-              color={activeStockTab === tab.key ? '#ec4899' : '#666'}
-
-            />
-
-            <Text style={[styles.stockTabText, activeStockTab === tab.key && styles.stockTabTextActive]}>
-
-              {tab.label}
-
+        <View style={styles.toggleRow}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={styles.inputLabel}>Enable Promo</Text>
+            <Text style={styles.inputHelperText}>
+              Let customers unlock free delivery once their customized bouquet subtotal reaches the promo amount.
             </Text>
+          </View>
+          <Switch
+            value={customizedPromo.enabled}
+            onValueChange={(value) => setCustomizedPromo((previous) => ({ ...previous, enabled: value }))}
+            trackColor={{ false: '#d1d5db', true: '#bbf7d0' }}
+            thumbColor={customizedPromo.enabled ? '#16a34a' : '#9ca3af'}
+          />
+        </View>
 
-          </TouchableOpacity>
+        {customizedPromo.enabled ? (
+          <>
+            <Text style={styles.inputLabel}>Promo Minimum Order Amount *</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Enter minimum order amount"
+              keyboardType="numeric"
+              value={customizedPromo.minimumOrderAmount}
+              onChangeText={(text) => setCustomizedPromo((previous) => ({
+                ...previous,
+                minimumOrderAmount: text.replace(/[^0-9.]/g, ''),
+              }))}
+            />
+          </>
+        ) : null}
 
-        ))}
-
+        <TouchableOpacity
+          style={[styles.addButton, { alignSelf: 'center', marginTop: 8, paddingVertical: 12, paddingHorizontal: 18 }]}
+          onPress={handleSaveCustomizedPromo}
+          disabled={savingPromo}
+        >
+          <Text style={styles.addButtonText}>{savingPromo ? 'Saving...' : 'Save Studio Promo'}</Text>
+        </TouchableOpacity>
       </View>
 
+      <View style={styles.stockTabs}>
+        {STOCK_CATEGORY_TABS.map((tab) => (
+          <TouchableOpacity
+            key={tab.key}
+            style={[styles.stockTab, activeStockTab === tab.key && styles.stockTabActive]}
+            onPress={() => setActiveStockTab(tab.key)}
+          >
+            <Ionicons
+              name={tab.icon}
+              size={20}
+              color={activeStockTab === tab.key ? '#ec4899' : '#666'}
+            />
+            <Text style={[styles.stockTabText, activeStockTab === tab.key && styles.stockTabTextActive]}>
+              {tab.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </>
+  );
+
+  return (
+    <View style={styles.tabContent}>
       <FlatList
-
         data={filteredStock}
-
         renderItem={renderStockItem}
-
         keyExtractor={(item) => item.id.toString()}
-
         refreshControl={
-
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ec4899']} />
-
         }
-
+        ListHeaderComponent={stockListHeader}
+        contentContainerStyle={styles.listContent}
         ListEmptyComponent={
-
           <Text style={styles.emptyText}>No {activeStockTab.toLowerCase()} found</Text>
-
         }
-
       />
 
       {/* Delete Confirmation Modal */}

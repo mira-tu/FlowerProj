@@ -1,8 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import '../styles/Shop.css';
 import InfoModal from '../components/InfoModal';
 import { formatCustomOrderV4Currency, getSelectedEstimateFromItem, isCustomOrderV4Item } from '../utils/customOrderV4';
+import { supabase } from '../config/supabase';
+import {
+    evaluateStandaloneFreeShippingPromo,
+    fetchCustomizedStudioPromoSettings,
+} from '../utils/freeShipping';
 
 const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
     const navigate = useNavigate();
@@ -12,6 +17,44 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
     const [bookingItems, setBookingItems] = useState([]);
     const [filter, setFilter] = useState('all');
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
+    const [customizedStudioPromoSettings, setCustomizedStudioPromoSettings] = useState({
+        enabled: false,
+        minimumOrderAmount: 0,
+        isConfigured: false,
+    });
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadCustomizedStudioPromo = async () => {
+            try {
+                const promoSettings = await fetchCustomizedStudioPromoSettings(supabase);
+                if (isMounted) {
+                    setCustomizedStudioPromoSettings(promoSettings);
+                }
+            } catch (error) {
+                console.error('Error loading Customizer Studio free shipping promo:', error);
+            }
+        };
+
+        loadCustomizedStudioPromo();
+
+        const channel = supabase
+            .channel('public:app_content:customized-studio-promo-cart')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'app_content' },
+                () => {
+                    loadCustomizedStudioPromo();
+                },
+            )
+            .subscribe();
+
+        return () => {
+            isMounted = false;
+            supabase.removeChannel(channel);
+        };
+    }, []);
 
     // Load main products cart
     useEffect(() => {
@@ -232,6 +275,10 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
     // ===== TOTALS =====
     const productTotal = cartItems.filter(item => item.selected).reduce((acc, item) => acc + (item.price * item.qty), 0);
     const customizedTotal = customizedItems.filter(item => item.selected).reduce((acc, item) => acc + (item.price || 0), 0);
+    const customizedStudioFreeShippingPromo = useMemo(
+        () => evaluateStandaloneFreeShippingPromo(customizedTotal, customizedStudioPromoSettings),
+        [customizedTotal, customizedStudioPromoSettings]
+    );
     const selectedBookingItems = bookingItems.filter(item => item.selected);
     const bookingEstimatedTotal = selectedBookingItems.reduce((acc, item) => {
         const selectedEstimate = getSelectedEstimateFromItem(item);
@@ -295,6 +342,13 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                         <span className="text-muted">Delivery Fee</span>
                 <span className="fst-italic text-muted small mt-1">Calculated at checkout</span>
             </div>
+            {false && customizedStudioFreeShippingPromo.isConfigured ? (
+                <div className="shop-promo-note mb-2">
+                    {customizedStudioFreeShippingPromo.qualifies
+                        ? 'Free shipping promo ready for your selected custom bouquets.'
+                        : `Spend another â‚±${customizedStudioFreeShippingPromo.amountRemaining.toLocaleString()} to unlock the free shipping promo.`}
+                </div>
+            ) : null}
             <hr />
             <div className="d-flex justify-content-between mb-4 mt-3">
                 <span className="fw-bold fs-5">Estimated Total</span>

@@ -4,6 +4,7 @@ import Select from 'react-select';
 import { supabase } from '../config/supabase';
 import { formatPhoneNumber } from '../utils/format';
 import { getUserContactNumber, getUserFullName } from '../utils/customerProfile';
+import { BUSINESS_HOURS_LABEL, CUSTOM_ORDER_TIME_MAX, CUSTOM_ORDER_TIME_MIN, isWithinBusinessHours } from '../utils/businessHours';
 import InfoModal from '../components/InfoModal';
 import '../styles/CustomOrder.css';
 import '../styles/Shop.css';
@@ -1449,14 +1450,13 @@ const CustomOrder = ({ user }) => {
                                                 name="eventTime"
                                                 className={`form-control bg-light border-0 py-3 ${timeError ? 'is-invalid border-danger border-1' : ''}`}
                                                 value={formData.eventTime}
-                                                min="09:00"
-                                                max="16:00"
+                                                min={CUSTOM_ORDER_TIME_MIN}
+                                                max={CUSTOM_ORDER_TIME_MAX}
                                                 onChange={(e) => {
                                                     const timeStr = e.target.value;
                                                     if (timeStr) {
-                                                        const [hours, mins] = timeStr.split(':').map(Number);
-                                                        if (hours < 9 || hours > 16 || (hours === 16 && mins > 0)) {
-                                                            setTimeError("Our operating hours are from 9:00 AM to 4:00 PM.");
+                                                        if (!isWithinBusinessHours(timeStr)) {
+                                                            setTimeError(`Our operating hours are from ${BUSINESS_HOURS_LABEL}.`);
                                                         } else {
                                                             setTimeError('');
                                                         }
@@ -1469,7 +1469,7 @@ const CustomOrder = ({ user }) => {
                                             {timeError ? (
                                                 <div className="invalid-feedback d-block">{timeError}</div>
                                             ) : (
-                                                <div className="form-text small">Business hours: 9:00 AM - 4:00 PM.</div>
+                                                <div className="form-text small">Business hours: {BUSINESS_HOURS_LABEL}.</div>
                                             )}
                                         </div>
                                     </div>

@@ -16,8 +16,9 @@ import {
 import { uploadBookingRequestImages } from '../utils/requestImageUploads';
 import { insertUserNotification } from '../utils/notificationApi';
 import { resolveBookingRequestStockReservations } from '../utils/requestSubmission';
+import { PICKUP_TIME_OPTIONS } from '../utils/businessHours';
 
-const pickupTimes = ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM'];
+const pickupTimes = PICKUP_TIME_OPTIONS;
 const DEFAULT_SHIPPING_FEE = 100;
 
 const getBookingItemTitle = (item = {}) => (

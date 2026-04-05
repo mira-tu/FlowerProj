@@ -7,6 +7,7 @@ import specialImg from '../assets/pictures/aboutpage/Custom-Order.jpg';
 import ProductModal from '../components/ProductModal';
 import InfoModal from '../components/InfoModal';
 import { formatProductDiscountLabel } from '../utils/productPricing';
+import { getFreeShippingPromoDetails } from '../utils/freeShipping';
 
 // Import Occasion Images
 import allSouls1 from '../assets/pictures/occasions/ALLSOULSDAY1.png';
@@ -244,7 +245,10 @@ const Home = ({ addToCart, products, categories, user }) => {
                 <div className="container">
                     <h2 className="text-center mb-5 fw-bold" style={{ color: 'var(--text-dark)' }}>Featured Collections</h2>
                     <div className="row g-4" id="productList">
-                        {filteredProducts.map((product) => (
+                        {filteredProducts.map((product) => {
+                            const freeShippingPromo = getFreeShippingPromoDetails(product);
+
+                            return (
                             <div key={product.id} className="col-md-3 col-sm-6">
                                 <div
                                     className={`product-card ${product.is_active === false || product.stock_quantity === 0 ? 'product-card-unavailable' : ''}`}
@@ -289,6 +293,13 @@ const Home = ({ addToCart, products, categories, user }) => {
                                                 </div>
                                             ) : null}
                                         </div>
+                                        {freeShippingPromo.isConfigured ? (
+                                            <div className="product-promo-card">
+                                                <p className="product-promo-copy mb-0">
+                                                    Free delivery from {formatCurrency(freeShippingPromo.minimumOrderAmount)}
+                                                </p>
+                                            </div>
+                                        ) : null}
                                         {product.description && <p className="product-description">{product.description}</p>}
                                     </div>
                                     <div className="product-body pt-0">
@@ -302,7 +313,7 @@ const Home = ({ addToCart, products, categories, user }) => {
                                     </div>
                                 </div>
                             </div>
-                        ))}
+                        )})}
                     </div>
                 </div>
             </section>

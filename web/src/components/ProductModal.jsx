@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { formatProductDiscountLabel } from '../utils/productPricing';
+import { getFreeShippingPromoDetails } from '../utils/freeShipping';
 
 const ProductModal = ({ product, onClose, onAddToCart }) => {
   const [quantity, setQuantity] = useState(1);
@@ -21,6 +22,7 @@ const ProductModal = ({ product, onClose, onAddToCart }) => {
   };
 
   const formatCurrency = (value) => `\u20b1${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  const freeShippingPromo = getFreeShippingPromoDetails(product);
 
   return (
     <div className="product-modal-overlay" onClick={onClose}>
@@ -37,6 +39,11 @@ const ProductModal = ({ product, onClose, onAddToCart }) => {
             </div>
           ) : null}
         </div>
+        {freeShippingPromo.isConfigured ? (
+          <div className="product-modal-promo">
+            <p className="mb-0">Free delivery from {formatCurrency(freeShippingPromo.minimumOrderAmount)}</p>
+          </div>
+        ) : null}
         {product.description && <p className="text-muted">{product.description}</p>}
 
         <div className="d-flex align-items-center gap-2 mb-3 justify-content-center">

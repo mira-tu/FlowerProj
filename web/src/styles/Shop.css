@@ -543,6 +543,43 @@
     margin-top: 15px;
 }
 
+.shop-promo-note {
+    background: #fff7ed;
+    border: 1px solid #fdba74;
+    border-radius: 12px;
+    color: #9a3412;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+}
+
+.shop-promo-note-success {
+    background: #ecfdf5;
+    border-color: #86efac;
+    color: #166534;
+}
+
+.product-modal-promo,
+.product-detail-promo-note {
+    background: linear-gradient(135deg, #f0fdf4, #fdf2f8);
+    border: 1px solid #bbf7d0;
+    border-radius: 14px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    text-align: center;
+}
+
+.product-modal-promo p,
+.product-detail-promo-note span {
+    display: block;
+    line-height: 1.5;
+}
+
+.product-detail-promo-note > span:not(.product-detail-promo-copy) {
+    display: none;
+}
+
 .btn-place-order {
     width: 100%;
     padding: 16px;

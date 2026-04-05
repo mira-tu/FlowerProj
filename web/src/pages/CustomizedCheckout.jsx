@@ -13,12 +13,17 @@ import {
     createDeliveryAssignments,
     syncDeliveryAssignments,
 } from '../utils/deliveryDestinations';
+import {
+    evaluateStandaloneFreeShippingPromo,
+    fetchCustomizedStudioPromoSettings,
+} from '../utils/freeShipping';
+import { PICKUP_TIME_OPTIONS } from '../utils/businessHours';
 
 const paymentMethods = [
     { id: 'gcash', name: 'GCash', description: 'Pay via GCash e-wallet', icon: 'fa-wallet' },
 ];
 
-const pickupTimes = ['9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM'];
+const pickupTimes = PICKUP_TIME_OPTIONS;
 
 const buildRoundRobinFlowerAllocations = (flowers = [], bundleSize = 0) => {
     const safeFlowers = Array.isArray(flowers) ? flowers.filter((flower) => flower?.id) : [];
@@ -100,6 +105,11 @@ const CustomizedCheckout = ({ user }) => {
     const [barangayFees, setBarangayFees] = useState([]);
     const [multiAddressEnabled, setMultiAddressEnabled] = useState(false);
     const [deliveryAssignments, setDeliveryAssignments] = useState([]);
+    const [customizedStudioPromoSettings, setCustomizedStudioPromoSettings] = useState({
+        enabled: false,
+        minimumOrderAmount: 0,
+        isConfigured: false,
+    });
 
     useEffect(() => {
         const fetchBarangayFees = async () => {
@@ -117,6 +127,39 @@ const CustomizedCheckout = ({ user }) => {
         };
 
         fetchBarangayFees();
+    }, []);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadCustomizedStudioPromo = async () => {
+            try {
+                const promoSettings = await fetchCustomizedStudioPromoSettings(supabase);
+                if (isMounted) {
+                    setCustomizedStudioPromoSettings(promoSettings);
+                }
+            } catch (error) {
+                console.error('Error loading Customizer Studio free shipping promo:', error);
+            }
+        };
+
+        loadCustomizedStudioPromo();
+
+        const channel = supabase
+            .channel('public:app_content:customized-studio-promo-checkout')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'app_content' },
+                () => {
+                    loadCustomizedStudioPromo();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            isMounted = false;
+            supabase.removeChannel(channel);
+        };
     }, []);
 
     const showInfoModal = (title, message) => setInfoModal({ show: true, title, message });
@@ -182,11 +225,15 @@ const CustomizedCheckout = ({ user }) => {
     );
 
     const subtotal = checkoutItems.reduce((acc, item) => acc + (item.price * (item.qty || 1)), 0);
+    const customizedStudioFreeShippingPromo = useMemo(
+        () => evaluateStandaloneFreeShippingPromo(subtotal, customizedStudioPromoSettings),
+        [subtotal, customizedStudioPromoSettings]
+    );
     const shippingFee = deliveryMethod === 'pickup'
         ? 0
         : calculateDeliveryFee({
             deliveryMethod,
-            hasFreeShipping: false,
+            hasFreeShipping: customizedStudioFreeShippingPromo.qualifies,
             selectedAddressId,
             multiAddressEnabled,
             assignments: deliveryAssignments,
@@ -656,6 +703,21 @@ const CustomizedCheckout = ({ user }) => {
                                     <span>{deliveryMethod === 'pickup' ? 'Pickup' : 'Delivery Fee'}</span>
                                 <span>{shippingFee === 0 ? 'FREE' : `₱${shippingFee}`}</span>
                             </div>
+                            {deliveryMethod === 'delivery' && customizedStudioFreeShippingPromo.qualifies && (
+                                <div className="shop-promo-note shop-promo-note-success">
+                                    Free shipping promo applied to this custom bouquet order.
+                                </div>
+                            )}
+                            {false && deliveryMethod === 'delivery' && !customizedStudioFreeShippingPromo.qualifies && customizedStudioFreeShippingPromo.isConfigured && customizedStudioFreeShippingPromo.amountRemaining > 0 && (
+                                <div className="shop-promo-note">
+                                    Spend another â‚±{customizedStudioFreeShippingPromo.amountRemaining.toLocaleString()} to unlock free shipping for this custom bouquet order.
+                                </div>
+                            )}
+                            {deliveryMethod === 'delivery' && !customizedStudioFreeShippingPromo.qualifies && customizedStudioFreeShippingPromo.isConfigured && customizedStudioFreeShippingPromo.amountRemaining > 0 && (
+                                <div className="shop-promo-note">
+                                    {`Spend another \u20b1${customizedStudioFreeShippingPromo.amountRemaining.toLocaleString()} to unlock free shipping for this custom bouquet order.`}
+                                </div>
+                            )}
                             {deliveryMethod === 'delivery' && multiAddressEnabled && (
                                 <div className="small mb-2" style={{ color: 'var(--shop-pink)' }}>
                                     <i className="fas fa-route me-1"></i>

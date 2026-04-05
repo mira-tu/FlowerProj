@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import '../styles/Shop.css';
 import InfoModal from '../components/InfoModal';
 import { formatProductDiscountLabel, normalizeProductPricing } from '../utils/productPricing';
+import { getFreeShippingPromoDetails } from '../utils/freeShipping';
 
 import allSouls1 from '../assets/pictures/occasions/ALLSOULSDAY1.png';
 import allSouls2 from '../assets/pictures/occasions/ALLSOULSDAY2.png';
@@ -201,6 +202,7 @@ const ProductDetail = ({ addToCart, user }) => {
             <i key={i} className={`fas fa-star ${i < Math.floor(rating) ? '' : 'text-muted'}`}></i>
         ));
     };
+    const freeShippingPromo = getFreeShippingPromoDetails(product);
 
     return (
         <div className="product-detail-container">
@@ -256,6 +258,13 @@ const ProductDetail = ({ addToCart, user }) => {
                                         </>
                                     ) : null}
                                 </div>
+
+                                {freeShippingPromo.isConfigured ? (
+                                    <div className="product-detail-promo-note">
+                                        <span className="product-detail-promo-copy">{`Free delivery from \u20b1${freeShippingPromo.minimumOrderAmount.toLocaleString()}`}</span>
+                                        <span>Free delivery from â‚±{freeShippingPromo.minimumOrderAmount.toLocaleString()}.</span>
+                                    </div>
+                                ) : null}
 
                                 <div className="quantity-selector">
                                     <span className="option-label mb-0">Quantity</span>
