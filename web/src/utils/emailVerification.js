@@ -7,13 +7,52 @@ import {
 } from './customerProfile';
 
 export const EMAIL_VERIFICATION_PATH = '/email-verification';
+export const PASSWORD_RESET_PATH = '/reset-password';
 
 const VALID_USER_ROLES = new Set(['customer', 'admin', 'employee']);
-const FALLBACK_SITE_URL = 'https://flowerproj.vercel.app';
+const FALLBACK_SITE_URL = 'https://jocerrys-flowershop.up.railway.app';
+const PASSWORD_RECOVERY_STORAGE_KEY = 'auth.password-recovery.in-progress';
+const AUTH_QUERY_KEYS = new Set([
+    'code',
+    'error',
+    'error_description',
+    'redirect_to',
+    'token',
+    'token_hash',
+    'type',
+]);
+const AUTH_HASH_KEYS = new Set([
+    'access_token',
+    'error',
+    'error_description',
+    'expires_at',
+    'expires_in',
+    'provider_token',
+    'refresh_token',
+    'token_type',
+    'type',
+]);
 
 const normalizeBaseUrl = (value = '') => String(value || '').trim().replace(/\/+$/, '');
+const getBrowserLocation = () => (typeof window === 'undefined' ? null : window.location);
+
+const getCurrentWindowOrigin = () => {
+    const location = getBrowserLocation();
+
+    if (!location?.origin) {
+        return '';
+    }
+
+    return normalizeBaseUrl(location.origin);
+};
 
 const getSafeWindowOrigin = () => {
+    const currentWindowOrigin = getCurrentWindowOrigin();
+
+    if (currentWindowOrigin) {
+        return currentWindowOrigin;
+    }
+
     const configuredOrigin = normalizeBaseUrl(
         import.meta.env.VITE_SITE_URL
         || import.meta.env.VITE_PUBLIC_SITE_URL
@@ -55,8 +94,82 @@ const buildAuthBackedProfilePayload = (authUser, existingRole) => {
 
 export const getEmailVerificationRedirectOrigin = () => getSafeWindowOrigin();
 export const getEmailVerificationRedirectUrl = () => `${getSafeWindowOrigin()}${EMAIL_VERIFICATION_PATH}`;
+export const getPasswordResetRedirectUrl = () => `${getSafeWindowOrigin()}${PASSWORD_RESET_PATH}`;
 
-export const getPasswordResetRedirectUrl = () => `${getSafeWindowOrigin()}/reset-password`;
+export const getLocationSearchParams = () => new URLSearchParams(getBrowserLocation()?.search || '');
+export const getLocationHashParams = () => new URLSearchParams((getBrowserLocation()?.hash || '').replace(/^#/, ''));
+
+export const getAuthErrorMessageFromLocation = () => {
+    const searchParams = getLocationSearchParams();
+    const hashParams = getLocationHashParams();
+
+    return (
+        searchParams.get('error_description')
+        || searchParams.get('error')
+        || hashParams.get('error_description')
+        || hashParams.get('error')
+        || ''
+    );
+};
+
+export const clearSensitiveAuthParamsFromUrl = () => {
+    const location = getBrowserLocation();
+
+    if (!location) {
+        return;
+    }
+
+    const url = new URL(location.href);
+    const nextSearchParams = new URLSearchParams(url.search);
+    const nextHashParams = new URLSearchParams(url.hash.replace(/^#/, ''));
+
+    AUTH_QUERY_KEYS.forEach((key) => nextSearchParams.delete(key));
+    AUTH_HASH_KEYS.forEach((key) => nextHashParams.delete(key));
+
+    const nextSearch = nextSearchParams.toString();
+    const nextHash = nextHashParams.toString();
+    const nextRelativeUrl = `${url.pathname}${nextSearch ? `?${nextSearch}` : ''}${nextHash ? `#${nextHash}` : ''}`;
+
+    window.history.replaceState({}, document.title, nextRelativeUrl);
+};
+
+export const hasRecoveryLinkIndicators = () => {
+    const searchParams = getLocationSearchParams();
+    const hashParams = getLocationHashParams();
+    const actionType = String(searchParams.get('type') || hashParams.get('type') || '').trim().toLowerCase();
+
+    return Boolean(
+        actionType === 'recovery'
+        || searchParams.get('token_hash')
+        || searchParams.get('code')
+        || hashParams.get('access_token')
+        || hashParams.get('refresh_token')
+    );
+};
+
+export const markPasswordRecoveryInProgress = () => {
+    if (typeof window === 'undefined') {
+        return;
+    }
+
+    window.sessionStorage.setItem(PASSWORD_RECOVERY_STORAGE_KEY, 'true');
+};
+
+export const isPasswordRecoveryInProgress = () => {
+    if (typeof window === 'undefined') {
+        return false;
+    }
+
+    return window.sessionStorage.getItem(PASSWORD_RECOVERY_STORAGE_KEY) === 'true';
+};
+
+export const clearPasswordRecoveryInProgress = () => {
+    if (typeof window === 'undefined') {
+        return;
+    }
+
+    window.sessionStorage.removeItem(PASSWORD_RECOVERY_STORAGE_KEY);
+};
 
 export const fetchUserVerificationProfile = async (userId) => {
     if (!userId) {

@@ -31,6 +31,20 @@ const getFriendlyVerificationError = (error) => {
     return error.message || 'Unable to resend the verification email. Please try again.';
 };
 
+const getFriendlyResetRequestError = (error) => {
+    const message = String(error?.message || '').toLowerCase();
+
+    if (!message) {
+        return 'Unable to send a reset link right now. Please try again later.';
+    }
+
+    if (message.includes('rate limit') || message.includes('too many requests')) {
+        return 'Please wait a moment before requesting another reset email.';
+    }
+
+    return 'Unable to send a reset link right now. Please try again later.';
+};
+
 const Login = ({ onLogin }) => {
     const location = useLocation();
     const navigate = useNavigate();
@@ -53,11 +67,18 @@ const Login = ({ onLogin }) => {
     useEffect(() => {
         const params = new URLSearchParams(location.search);
         const verificationState = params.get('verification');
+        const resetState = params.get('reset');
         const emailFromQuery = params.get('email') || '';
 
         if (emailFromQuery) {
             setEmail(emailFromQuery);
             setVerificationEmail(emailFromQuery);
+        }
+
+        if (resetState === 'success') {
+            setVerificationMessage('Your password has been updated. You may now sign in.');
+            setVerificationError('');
+            setError('');
         }
 
         if (verificationState === 'pending') {
@@ -199,7 +220,8 @@ const Login = ({ onLogin }) => {
         setResetLoading(true);
 
         try {
-            const { error: resetPasswordError } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+            const normalizedResetEmail = String(resetEmail || '').trim().toLowerCase();
+            const { error: resetPasswordError } = await supabase.auth.resetPasswordForEmail(normalizedResetEmail, {
                 redirectTo: resetRedirectTo,
             });
 
@@ -210,7 +232,7 @@ const Login = ({ onLogin }) => {
             setResetMessage('If an account exists for that email, a password reset link has been sent.');
         } catch (resetPasswordException) {
             console.error('Password reset error:', resetPasswordException);
-            setResetError(resetPasswordException.message || 'Unable to send reset email. Please try again.');
+            setResetError(getFriendlyResetRequestError(resetPasswordException));
         } finally {
             setResetLoading(false);
         }

@@ -21,9 +21,7 @@ const VERIFICATION_TTL_HOURS = Number(Deno.env.get("EMAIL_VERIFICATION_TTL_HOURS
 const RESEND_COOLDOWN_SECONDS = Number(Deno.env.get("EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS") ?? "60");
 
 const DEFAULT_REDIRECT_ORIGINS = [
-  "https://flowerproj.vercel.app",
-  "http://localhost:5173",
-  "http://127.0.0.1:5173",
+  "https://jocerrys-flowershop.up.railway.app",
 ];
 
 const transporter = nodemailer.createTransport({

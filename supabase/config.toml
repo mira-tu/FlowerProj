@@ -1,17 +1,11 @@
 project_id = "luzcecstkebntjnfonwv"
 
 [auth]
-site_url = "https://flowerproj.vercel.app"
+site_url = "https://jocerrys-flowershop.up.railway.app"
 additional_redirect_urls = [
-  "https://flowerproj.vercel.app",
-  "http://localhost:5173/reset-password",
-  "http://127.0.0.1:5173/reset-password",
-  "https://flowerproj.vercel.app/reset-password",
-  "http://localhost:5173",
-  "http://127.0.0.1:5173",
-  "http://localhost:5173/email-verification",
-  "http://127.0.0.1:5173/email-verification",
-  "https://flowerproj.vercel.app/email-verification",
+  "https://jocerrys-flowershop.up.railway.app",
+  "https://jocerrys-flowershop.up.railway.app/reset-password",
+  "https://jocerrys-flowershop.up.railway.app/email-verification",
 ]
 
 [auth.email]
@@ -20,6 +14,10 @@ enable_confirmations = true
 [auth.email.template.confirmation]
 subject = "Verify your Jocerry's Flower Shop account"
 content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.recovery]
+subject = "Reset your Jocerry's Flower Shop password"
+content_path = "./supabase/templates/recovery.html"
 
 [functions.create-employee]
 verify_jwt = false

@@ -264,7 +264,7 @@ function AppContent() {
           syncAuthenticatedUserState(null);
         }
 
-        if (!['/login', '/signup', '/email-verification'].includes(window.location.pathname)) {
+        if (!['/login', '/signup', '/email-verification', '/reset-password'].includes(window.location.pathname)) {
           const emailQuery = sessionUser.email ? `&email=${encodeURIComponent(sessionUser.email)}` : '';
           window.location.href = `/login?verification=required${emailQuery}`;
         }

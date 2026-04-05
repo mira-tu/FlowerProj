@@ -44,7 +44,7 @@ serve(async (req) => {
           <p>Great news! Your order <strong>#${order_number}</strong> has been received and confirmed by our team.</p>
           <p>Our florists are now carefully preparing your arrangement. We'll let you know as soon as it's ready for delivery or pickup.</p>
           <br>
-          <p>You can track your order status anytime in your <a href="https://flowerproj.vercel.app/profile" style="color: #ec4899;">profile</a>.</p>
+          <p>You can track your order status anytime in your <a href="https://jocerrys-flowershop.up.railway.app/profile" style="color: #ec4899;">profile</a>.</p>
           <br>
           <p>Thank you for choosing Jocery's Flower Shop!</p>
         </div>

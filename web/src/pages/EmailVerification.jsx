@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../config/supabase';
-import { syncVerifiedUserProfile } from '../utils/emailVerification';
+import {
+    clearSensitiveAuthParamsFromUrl,
+    getAuthErrorMessageFromLocation,
+    syncVerifiedUserProfile,
+} from '../utils/emailVerification';
 import '../styles/Auth.css';
 
 const STATUS_COPY = {
@@ -97,11 +101,17 @@ const EmailVerification = () => {
             }
 
             isResolved = true;
+            clearSensitiveAuthParamsFromUrl();
 
             const syncResult = await syncVerifiedUserProfile(user);
-            const finalStatus = syncResult.wasAlreadyVerified ? 'already_verified' : 'verified';
-
             await supabase.auth.signOut();
+
+            if (syncResult.error) {
+                setPageStatus('error', STATUS_COPY.error.message);
+                return;
+            }
+
+            const finalStatus = syncResult.wasAlreadyVerified ? 'already_verified' : 'verified';
             setPageStatus(finalStatus, STATUS_COPY[finalStatus].message);
         };
 
@@ -117,16 +127,11 @@ const EmailVerification = () => {
             return false;
         };
 
-        const searchParams = new URLSearchParams(window.location.search);
-        const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-        const errorMessage =
-            searchParams.get('error_description') ||
-            searchParams.get('error') ||
-            hashParams.get('error_description') ||
-            hashParams.get('error');
+        const errorMessage = getAuthErrorMessageFromLocation();
 
         if (errorMessage) {
             const nextStatus = getStatusFromError(errorMessage);
+            clearSensitiveAuthParamsFromUrl();
             setPageStatus(nextStatus, normalizeMessage(errorMessage) || STATUS_COPY[nextStatus].message);
             return undefined;
         }
@@ -155,6 +160,7 @@ const EmailVerification = () => {
                     const resolvedAfterDelay = await resolveFromCurrentSession();
 
                     if (!resolvedAfterDelay && !isResolved && isMounted) {
+                        clearSensitiveAuthParamsFromUrl();
                         setPageStatus('invalid', STATUS_COPY.invalid.message);
                     }
                 }, 1500);
