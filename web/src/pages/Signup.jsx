@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabase';
 import SignupAddressModal from '../components/SignupAddressModal';
@@ -33,9 +33,44 @@ const Signup = () => {
     const [showAddressModal, setShowAddressModal] = useState(false);
     const [fieldErrors, setFieldErrors] = useState({});
     const [error, setError] = useState('');
-    const [success, setSuccess] = useState('');
+    const [notice, setNotice] = useState({ type: '', message: '' });
     const [loading, setLoading] = useState(false);
-    const maxBirthday = useMemo(() => new Date().toISOString().split('T')[0], []);
+    const maxBirthday = useMemo(() => {
+        const today = new Date();
+        const minimumBirthday = new Date(today.getFullYear() - 13, today.getMonth(), today.getDate());
+        const year = minimumBirthday.getFullYear();
+        const month = String(minimumBirthday.getMonth() + 1).padStart(2, '0');
+        const day = String(minimumBirthday.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }, []);
+    const signupGenderOptions = useMemo(
+        () => GENDER_OPTIONS.filter((option) => option.value !== 'Non-binary'),
+        [],
+    );
+    const noticeRef = useRef(null);
+
+    const scrollNoticeIntoView = () => {
+        window.setTimeout(() => {
+            noticeRef.current?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start',
+            });
+        }, 0);
+    };
+
+    useEffect(() => {
+        if (!notice.message) {
+            return undefined;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            setNotice({ type: '', message: '' });
+        }, 10000);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+        };
+    }, [notice.message]);
 
     const handleChange = (event) => {
         const { name, value } = event.target;
@@ -50,6 +85,7 @@ const Signup = () => {
             [name]: '',
         }));
         setError('');
+        setNotice({ type: '', message: '' });
     };
 
     const handleAddressSave = (nextAddress) => {
@@ -63,6 +99,7 @@ const Signup = () => {
             address: '',
         }));
         setError('');
+        setNotice({ type: '', message: '' });
     };
 
     const validateForm = () => {
@@ -90,7 +127,7 @@ const Signup = () => {
         }
 
         if (formData.birthday && formData.birthday > maxBirthday) {
-            nextErrors.birthday = 'Birthday cannot be in the future.';
+            nextErrors.birthday = 'You must be at least 13 years old to create an account.';
         }
 
         if (!hasCompleteAddress(address)) {
@@ -104,10 +141,11 @@ const Signup = () => {
     const handleSignup = async (event) => {
         event.preventDefault();
         setError('');
-        setSuccess('');
+        setNotice({ type: '', message: '' });
 
         if (!validateForm()) {
             setError('Please complete the required fields before creating your account.');
+            scrollNoticeIntoView();
             return;
         }
 
@@ -161,10 +199,11 @@ const Signup = () => {
                 data.user.identities.length === 0;
 
             if (isExistingUserResponse) {
-                setSuccess('This email may already have an account. Try logging in, or resend the verification email from the login page.');
-                setTimeout(() => {
-                    navigate(`/login?verification=pending&email=${encodeURIComponent(profilePayload.email)}`);
-                }, 3500);
+                setNotice({
+                    type: 'danger',
+                    message: 'An account with this email address already exists. Please use a different email address or log in instead.',
+                });
+                scrollNoticeIntoView();
                 return;
             }
 
@@ -178,7 +217,11 @@ const Signup = () => {
                 throw new Error('Email confirmation is turned off in Supabase. Enable Confirm email before using signup.');
             }
 
-            setSuccess('Account created. Please check your email and open the verification link before logging in.');
+            setNotice({
+                type: 'success',
+                message: 'Account created. Please check your email and open the verification link before logging in.',
+            });
+            scrollNoticeIntoView();
             setTimeout(() => {
                 navigate(`/login?verification=pending&email=${encodeURIComponent(profilePayload.email)}`);
             }, 3500);
@@ -194,6 +237,7 @@ const Signup = () => {
             }
 
             setError(signupException.message || 'Registration failed. Please try again.');
+            scrollNoticeIntoView();
         } finally {
             setLoading(false);
         }
@@ -214,14 +258,15 @@ const Signup = () => {
                     <p className="auth-subtitle">Enter your details once so future orders and forms are ready to go.</p>
 
                     <form onSubmit={handleSignup}>
+                        <div ref={noticeRef}></div>
                         {error && (
                             <div className="alert alert-danger" role="alert">
                                 {error}
                             </div>
                         )}
-                        {success && (
-                            <div className="alert alert-success" role="alert">
-                                {success}
+                        {notice.message && (
+                            <div className={`alert alert-${notice.type === 'danger' ? 'danger' : 'success'}`} role="alert">
+                                {notice.message}
                             </div>
                         )}
 
@@ -344,7 +389,7 @@ const Signup = () => {
                                 disabled={loading}
                             >
                                 <option value="">Select Gender</option>
-                                {GENDER_OPTIONS.map((option) => (
+                                {signupGenderOptions.map((option) => (
                                     <option key={option.value} value={option.value}>
                                         {option.label}
                                     </option>
