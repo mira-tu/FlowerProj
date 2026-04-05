@@ -753,7 +753,14 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.eoItemName}>{orderItem.name}</Text>
-                  <Text style={styles.eoItemQuantity}>Quantity: {orderItem.quantity}</Text>
+                  <Text style={styles.eoItemQuantity}>
+                    Quantity: {orderItem.remaining_quantity ?? orderItem.quantity}
+                  </Text>
+                  {Number(orderItem.cancelled_quantity || 0) > 0 && (
+                    <Text style={[styles.eoItemQuantity, { color: '#DC2626' }]}>
+                      Cancelled: {orderItem.cancelled_quantity}
+                    </Text>
+                  )}
                   <Text style={styles.eoItemPrice}>₱{orderItem.price.toFixed(2)}</Text>
                 </View>
               </View>

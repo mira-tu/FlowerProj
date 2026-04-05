@@ -1773,8 +1773,11 @@ export const adminAPI = {
                         phone
                     ),
                     order_items (
+                        id,
                         product_id,
                         quantity,
+                        cancelled_quantity,
+                        cancellation_history,
                         price,
                         name,
                         image_url,
@@ -1824,13 +1827,25 @@ export const adminAPI = {
             const customerEmail = order.users ? order.users.email : 'N/A';
             const customerPhone = order.users ? order.users.phone : 'N/A';
 
-            const items = order.order_items.map(item => ({
-                product_id: item.product_id,
-                quantity: item.quantity,
-                price: item.price,
-                name: item.name || (item.products ? item.products.name : 'Unknown Product'),
-                image_url: item.image_url || (item.products ? item.products.image_url : null),
-            }));
+            const items = order.order_items.map(item => {
+                const originalQuantity = Number(item.quantity || 0);
+                const cancelledQuantity = Number(item.cancelled_quantity || 0);
+                const remainingQuantity = Math.max(0, originalQuantity - cancelledQuantity);
+
+                return {
+                    id: item.id,
+                    product_id: item.product_id,
+                    quantity: remainingQuantity,
+                    original_quantity: originalQuantity,
+                    cancelled_quantity: cancelledQuantity,
+                    remaining_quantity: remainingQuantity,
+                    cancellation_history: Array.isArray(item.cancellation_history) ? item.cancellation_history : [],
+                    price: item.price,
+                    name: item.name || (item.products ? item.products.name : 'Unknown Product'),
+                    image_url: item.image_url || (item.products ? item.products.image_url : null),
+                    is_fully_cancelled: remainingQuantity === 0,
+                };
+            });
 
             // Construct full address description if shipping_address exists
             let shippingAddressDescription = null;
@@ -2352,6 +2367,34 @@ export const adminAPI = {
             }
             if (requestData?.venue && typeof requestData.venue === 'string') {
                 requestData.venue = requestData.venue.replace(/, Zamboanga [Dd]el Sur/gi, '');
+            }
+
+            if (Array.isArray(requestData?.items)) {
+                requestData = {
+                    ...requestData,
+                    items: requestData.items.map((item) => {
+                        const originalQuantity = Number(
+                            item?.original_quantity
+                            ?? item?.quantity
+                            ?? item?.qty
+                            ?? item?.arrangementQuantity
+                            ?? item?.arrangement_quantity
+                            ?? 1
+                        ) || 1;
+                        const cancelledQuantity = Math.min(
+                            originalQuantity,
+                            Number(item?.cancelled_quantity || item?.cancelledQuantity || 0) || 0,
+                        );
+                        const remainingQuantity = Math.max(0, originalQuantity - cancelledQuantity);
+
+                        return {
+                            ...item,
+                            original_quantity: originalQuantity,
+                            cancelled_quantity: cancelledQuantity,
+                            remaining_quantity: remainingQuantity,
+                        };
+                    }),
+                };
             }
 
             // Always prefer the top-level DB column for payment fields (they are updated by admin actions).

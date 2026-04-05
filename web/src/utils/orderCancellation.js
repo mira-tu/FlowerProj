@@ -61,7 +61,6 @@ export const getItemUnitPrice = (item = {}) => {
         item.line_total,
         item.lineTotal,
         item.total,
-        item.price,
         selectedEstimate?.estimatedPrice,
         item.estimatedPrice,
     ];
@@ -70,6 +69,19 @@ export const getItemUnitPrice = (item = {}) => {
         const parsed = roundCurrency(candidate);
         if (parsed > 0) {
             return roundCurrency(parsed / Math.max(originalQuantity, 1));
+        }
+    }
+
+    const unitPriceCandidates = [
+        item.unit_price,
+        item.unitPrice,
+        item.price,
+    ];
+
+    for (const candidate of unitPriceCandidates) {
+        const parsed = roundCurrency(candidate);
+        if (parsed > 0) {
+            return parsed;
         }
     }
 

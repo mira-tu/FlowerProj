@@ -15,6 +15,11 @@ import {
 import InfoModal from '../components/InfoModal';
 import qrCodeImage from '../assets/qr-code-1.jpg';
 import { insertUserNotification } from '../utils/notificationApi';
+import {
+    applyRequestItemCancellation,
+    normalizeCancellationItem,
+    summarizeCancellationItems,
+} from '../utils/orderCancellation';
 
 const parseJsonObject = (value) => {
     if (!value) return {};
@@ -41,6 +46,14 @@ const buildStatusTimestamps = (existingValue, status, reason = '') => {
 
     return next;
 };
+
+const roundCurrency = (value) => Math.round((Number.parseFloat(String(value ?? 0)) || 0) * 100) / 100;
+
+const getRequestIdFromOrder = (order) => (
+    order?.request_id
+    || (order?.isRequest && typeof order?.id === 'string' ? order.id.replace(/^request-/, '') : null)
+    || null
+);
 
 const summarizeCustomOrderQuoteBreakdown = (breakdown = {}, fallbackShipping = 0) => {
     const rawLineItems = Array.isArray(breakdown?.line_items) ? breakdown.line_items : [];
@@ -270,6 +283,8 @@ const Profile = ({ user, logout }) => {
 
     const [showCancelModal, setShowCancelModal] = useState(false);
     const [orderToCancel, setOrderToCancel] = useState(null);
+    const [cancelTargetItemKey, setCancelTargetItemKey] = useState('');
+    const [cancelQuantity, setCancelQuantity] = useState(1);
     const [cancelReason, setCancelReason] = useState('');
     const [cancelReasonError, setCancelReasonError] = useState('');
     const [showWaitingModal, setShowWaitingModal] = useState(false);
@@ -434,74 +449,110 @@ const Profile = ({ user, logout }) => {
             }
 
             // Transform API orders to match the expected format
-            const transformedOrders = (apiOrders || []).map(order => ({
-                id: order.id,
-                order_number: order.order_number,
-                date: order.created_at,
-                status: order.status, // pending, accepted, processing, etc.
-                cancellationReason: order.cancellation_reason || order.status_timestamps?.cancellation_reason || order.status_timestamps?.cancel_reason || null,
-                payment_status: order.payment_status,
-                payment_method: order.payment_method,
-                delivery_method: order.delivery_method,
-                total: parseFloat(order.total || 0),
-                subtotal: parseFloat(order.subtotal || 0),
-                delivery_fee: parseFloat(order.delivery_fee || 0),
-                notes: order.notes,
-                items: order.order_items || [], // Use order.order_items for the items
-                address_id: order.address_id,
-                address: order.addresses, // Use order.addresses for the address
-                request_id: order.request_id, // Link to booking request if exists
-                isFromRequest: !!order.request_id, // Flag to identify orders from requests (booking, inquiry, etc.)
-                // Include request data for all request types
-                type: order.request_type || null,
-                data: order.request_data || null,
-                image_url: order.request_image_url || null,
-                // Booking data
-                eventType: order.event_type || (order.request_data?.eventType || order.request_data?.event_type),
-                eventDate: order.event_date || order.request_data?.eventDate,
-                venue: order.request_data?.venue,
-                details: order.request_data?.details,
-                fullName: order.request_data?.fullName,
-                otherEventType: order.request_data?.otherEventType,
-                // Special order data
-                recipientName: order.request_data?.recipientName,
-                occasion: order.request_data?.occasion,
-                preferences: order.request_data?.preferences,
-                // Customized data
-                flower: order.request_data?.flower,
-                bundleSize: order.bundleSize,
-                wrapper: order.wrapper,
-                ribbon: order.ribbon,
-                // Inquiry data
-                subject: order.request_data?.subject,
-                message: order.request_data?.message,
-                email: order.request_data?.email,
-                phone: order.request_data?.phone,
-                photo: order.request_image_url
-            }));
+            const transformedOrders = (apiOrders || []).map((order) => {
+                const requestData = parseJsonObject(order.request_data);
+                const orderItemSummary = summarizeCancellationItems(order.order_items || []);
+                const requestItemSummary = summarizeCancellationItems(requestData?.items || []);
+                const preferredSummary = orderItemSummary.hasItems ? orderItemSummary : requestItemSummary;
+                const shippingFee = parseFloat(order.shipping_fee || order.delivery_fee || 0);
+                const computedSubtotal = preferredSummary.hasItems
+                    ? preferredSummary.remainingSubtotal
+                    : parseFloat(order.subtotal || 0);
+                const computedTotal = preferredSummary.hasItems
+                    ? (preferredSummary.allCancelled ? 0 : roundCurrency(computedSubtotal + shippingFee))
+                    : parseFloat(order.total || 0);
+                const displayItems = preferredSummary.items.map((item) => ({
+                    ...item,
+                    price: item.unitPrice,
+                    qty: item.remainingQuantity,
+                    quantity: item.remainingQuantity,
+                }));
+
+                return {
+                    id: order.id,
+                    order_number: order.order_number,
+                    date: order.created_at,
+                    status: preferredSummary.allCancelled ? 'cancelled' : order.status,
+                    cancellationReason: order.cancellation_reason || order.status_timestamps?.cancellation_reason || order.status_timestamps?.cancel_reason || null,
+                    payment_status: order.payment_status,
+                    payment_method: order.payment_method,
+                    delivery_method: order.delivery_method,
+                    total: computedTotal,
+                    subtotal: computedSubtotal,
+                    shipping_fee: shippingFee,
+                    delivery_fee: shippingFee,
+                    notes: order.notes,
+                    items: displayItems,
+                    activeItems: preferredSummary.activeItems,
+                    hasPartialCancellation: preferredSummary.hasCancellations,
+                    address_id: order.address_id,
+                    address: order.addresses,
+                    request_id: order.request_id,
+                    isFromRequest: !!order.request_id,
+                    type: order.request_type || null,
+                    data: requestData || null,
+                    image_url: order.request_image_url || null,
+                    eventType: order.event_type || (requestData?.eventType || requestData?.event_type),
+                    eventDate: order.event_date || requestData?.eventDate,
+                    venue: requestData?.venue,
+                    details: requestData?.details,
+                    fullName: requestData?.fullName,
+                    otherEventType: requestData?.otherEventType,
+                    recipientName: requestData?.recipientName,
+                    occasion: requestData?.occasion,
+                    preferences: requestData?.preferences,
+                    flower: requestData?.flower,
+                    bundleSize: order.bundleSize,
+                    wrapper: order.wrapper,
+                    ribbon: order.ribbon,
+                    subject: requestData?.subject,
+                    message: requestData?.message,
+                    email: requestData?.email,
+                    phone: requestData?.phone,
+                    photo: order.request_image_url
+                };
+            });
 
             // Transform API requests to match the expected format
             const transformedRequests = (apiRequests || []).map(request => {
-                const requestData = typeof request.data === 'string' ? JSON.parse(request.data) : (request.data || {});
+                const requestData = parseJsonObject(request.data);
                 const address = addressesData.find(addr => addr.id === requestData?.address_id) || null;
+                const requestItemSummary = summarizeCancellationItems(requestData?.items || []);
+                const displayItems = requestItemSummary.items.map((item) => ({
+                    ...item,
+                    price: item.unitPrice,
+                    qty: item.remainingQuantity,
+                    quantity: item.remainingQuantity,
+                }));
+                const shippingFee = parseFloat(request.shipping_fee || requestData?.quote_breakdown?.shipping_fee || 0);
+                const fallbackTotal = parseFloat(request.final_price || request.estimated_price || 0);
+                const computedTotal = requestItemSummary.hasItems
+                    ? (requestItemSummary.allCancelled ? 0 : roundCurrency(requestItemSummary.remainingSubtotal + shippingFee))
+                    : fallbackTotal;
 
                 return {
                     id: `request-${request.id}`, // Prefix to avoid conflicts
                     request_id: request.id,
                     request_number: request.request_number,
                     date: request.created_at,
-                    status: request.status === 'accepted' ? 'processing' : request.status, // Map accepted to processing for display
+                    status: requestItemSummary.allCancelled
+                        ? 'cancelled'
+                        : (request.status === 'accepted' ? 'processing' : request.status),
                     type: request.type, // booking, customized, special_order
                     payment_status: request.payment_status ?? requestData?.payment_status ?? null,
-                    total: parseFloat(request.final_price || request.estimated_price || 0),
+                    total: computedTotal,
+                    subtotal: requestItemSummary.hasItems ? requestItemSummary.remainingSubtotal : fallbackTotal,
                     notes: request.notes || requestData.notes,
                     data: requestData,
                     quoteBreakdown: requestData?.quote_breakdown || null,
                     cancellationReason: request.cancellation_reason || requestData?.cancellation_reason || requestData?.decline_feedback || requestData?.declineFeedback || null,
                     declineFeedback: requestData?.decline_feedback || requestData?.declineFeedback || null,
-                    shipping_fee: parseFloat(request.shipping_fee || requestData?.quote_breakdown?.shipping_fee || 0),
+                    shipping_fee: shippingFee,
                     image_url: request.image_url,
                     isRequest: true,
+                    items: displayItems,
+                    activeItems: requestItemSummary.activeItems,
+                    hasPartialCancellation: requestItemSummary.hasCancellations,
                     address: address, // Attach the fetched address
                     // Extract specific fields for easier access
                     eventType: requestData?.eventType || requestData?.event_type || requestData?.occasion,
@@ -803,15 +854,234 @@ const Profile = ({ user, logout }) => {
     const closeCancelModal = () => {
         setShowCancelModal(false);
         setOrderToCancel(null);
+        setCancelTargetItemKey('');
+        setCancelQuantity(1);
         setCancelReason('');
         setCancelReasonError('');
     };
 
     const handleCancelClick = (order) => {
+        const cancellableItems = (order?.items || []).filter((item) => item.remainingQuantity > 0);
+
         setOrderToCancel(order);
+        setCancelTargetItemKey(cancellableItems[0]?.cancellationKey || '');
+        setCancelQuantity(1);
         setCancelReason('');
         setCancelReasonError('');
         setShowCancelModal(true);
+    };
+
+    const getCancellableItems = (order) => (order?.items || []).filter((item) => item.remainingQuantity > 0);
+
+    const updateRegularOrderCancellation = async (order, itemKey, quantityToCancel, reason) => {
+        const { data: currentOrder, error: orderFetchError } = await supabase
+            .from('orders')
+            .select('id, status, status_timestamps, cancellation_reason, subtotal, shipping_fee, total')
+            .eq('id', order.id)
+            .single();
+
+        if (orderFetchError) {
+            throw orderFetchError;
+        }
+
+        const { data: currentItems, error: itemsFetchError } = await supabase
+            .from('order_items')
+            .select('*')
+            .eq('order_id', order.id)
+            .order('id', { ascending: true });
+
+        if (itemsFetchError) {
+            throw itemsFetchError;
+        }
+
+        const normalizedItems = (currentItems || []).map((item, index) => normalizeCancellationItem(item, index));
+        const selectedItem = normalizedItems.find((item) => String(item.id) === String(itemKey) || item.cancellationKey === String(itemKey));
+
+        if (!selectedItem || selectedItem.remainingQuantity < quantityToCancel) {
+            throw new Error('That quantity is no longer available to cancel.');
+        }
+
+        const nextCancelledQuantity = selectedItem.cancelledQuantity + quantityToCancel;
+        const nextHistory = Array.isArray(selectedItem.cancellation_history)
+            ? selectedItem.cancellation_history
+            : [];
+
+        const { error: updateItemError } = await supabase
+            .from('order_items')
+            .update({
+                cancelled_quantity: nextCancelledQuantity,
+                cancellation_history: [
+                    ...nextHistory,
+                    {
+                        quantity: quantityToCancel,
+                        reason,
+                        cancelled_at: new Date().toISOString(),
+                    },
+                ],
+            })
+            .eq('id', selectedItem.id);
+
+        if (updateItemError) {
+            throw updateItemError;
+        }
+
+        if (selectedItem.product_id) {
+            const { data: product, error: productFetchError } = await supabase
+                .from('products')
+                .select('stock_quantity')
+                .eq('id', selectedItem.product_id)
+                .single();
+
+            if (!productFetchError && product) {
+                await supabase
+                    .from('products')
+                    .update({ stock_quantity: Number(product.stock_quantity || 0) + quantityToCancel })
+                    .eq('id', selectedItem.product_id);
+            }
+        }
+
+        const nextItems = normalizedItems.map((item) => (
+            item.id === selectedItem.id
+                ? normalizeCancellationItem({
+                    ...item,
+                    cancelled_quantity: nextCancelledQuantity,
+                })
+                : item
+        ));
+        const summary = summarizeCancellationItems(nextItems);
+        const nextSubtotal = summary.remainingSubtotal;
+        const nextShippingFee = summary.allCancelled ? 0 : Number(currentOrder.shipping_fee || 0);
+        const nextStatus = summary.allCancelled ? 'cancelled' : currentOrder.status;
+
+        const { error: updateOrderError } = await supabase
+            .from('orders')
+            .update({
+                subtotal: nextSubtotal,
+                shipping_fee: nextShippingFee,
+                total: summary.allCancelled ? 0 : roundCurrency(nextSubtotal + nextShippingFee),
+                status: nextStatus,
+                cancellation_reason: summary.allCancelled
+                    ? (reason || currentOrder.cancellation_reason || null)
+                    : currentOrder.cancellation_reason || null,
+                status_timestamps: summary.allCancelled
+                    ? buildStatusTimestamps(currentOrder.status_timestamps, 'cancelled', reason)
+                    : currentOrder.status_timestamps,
+            })
+            .eq('id', order.id);
+
+        if (updateOrderError) {
+            throw updateOrderError;
+        }
+    };
+
+    const updateRequestCancellation = async (order, itemKey, quantityToCancel, reason) => {
+        const requestId = getRequestIdFromOrder(order);
+        if (!requestId) {
+            throw new Error('This request could not be found.');
+        }
+
+        const { data: currentRequest, error: requestFetchError } = await supabase
+            .from('requests')
+            .select('*')
+            .eq('id', requestId)
+            .single();
+
+        if (requestFetchError) {
+            throw requestFetchError;
+        }
+
+        const requestData = parseJsonObject(currentRequest?.data);
+        const requestItems = Array.isArray(requestData?.items) ? requestData.items : [];
+        const normalizedItems = requestItems.map((item, index) => normalizeCancellationItem(item, index));
+        const selectedItem = normalizedItems.find((item) => item.cancellationKey === String(itemKey));
+
+        if (!selectedItem || selectedItem.remainingQuantity < quantityToCancel) {
+            throw new Error('That quantity is no longer available to cancel.');
+        }
+
+        const updatedItems = requestItems.map((item, index) => {
+            const normalizedItem = normalizedItems[index];
+            return normalizedItem?.cancellationKey === String(itemKey)
+                ? applyRequestItemCancellation(item, quantityToCancel, reason)
+                : item;
+        });
+
+        const summary = summarizeCancellationItems(updatedItems);
+        const nextShippingFee = summary.allCancelled ? 0 : Number(currentRequest.shipping_fee || requestData?.shipping_fee || 0);
+        const nextSubtotal = summary.remainingSubtotal;
+        const nextTotal = summary.allCancelled ? 0 : roundCurrency(nextSubtotal + nextShippingFee);
+        const nextStatus = summary.allCancelled ? 'cancelled' : currentRequest.status;
+        const nextData = {
+            ...(requestData && typeof requestData === 'object' ? requestData : {}),
+            items: updatedItems,
+            item_count: summary.activeItems.length,
+            subtotal: nextSubtotal,
+            shipping_fee: nextShippingFee,
+            estimated_total: nextSubtotal,
+            cancellation_reason: summary.allCancelled ? reason : requestData?.cancellation_reason,
+            last_cancellation: {
+                item_key: String(itemKey),
+                quantity: quantityToCancel,
+                reason,
+                cancelled_at: new Date().toISOString(),
+            },
+        };
+
+        const updatePayload = {
+            data: nextData,
+            shipping_fee: nextShippingFee,
+            status: nextStatus,
+            status_timestamps: summary.allCancelled
+                ? buildStatusTimestamps(currentRequest?.status_timestamps, 'cancelled', reason)
+                : currentRequest?.status_timestamps,
+            cancellation_reason: summary.allCancelled
+                ? (reason || currentRequest?.cancellation_reason || null)
+                : currentRequest?.cancellation_reason || null,
+        };
+
+        if (currentRequest.final_price != null) {
+            updatePayload.final_price = nextTotal;
+        }
+
+        if (currentRequest.estimated_price != null || currentRequest.final_price == null) {
+            updatePayload.estimated_price = nextSubtotal;
+        }
+
+        const { error: updateRequestError } = await supabase
+            .from('requests')
+            .update(updatePayload)
+            .eq('id', requestId);
+
+        if (updateRequestError) {
+            throw updateRequestError;
+        }
+
+        if (!order.isRequest && order.id) {
+            const { data: linkedOrder, error: linkedOrderFetchError } = await supabase
+                .from('orders')
+                .select('status_timestamps, cancellation_reason, shipping_fee')
+                .eq('id', order.id)
+                .single();
+
+            if (!linkedOrderFetchError && linkedOrder) {
+                await supabase
+                    .from('orders')
+                    .update({
+                        request_data: nextData,
+                        subtotal: nextSubtotal,
+                        shipping_fee: nextShippingFee,
+                        total: nextTotal,
+                        status: nextStatus,
+                        cancellation_reason: summary.allCancelled
+                            ? (reason || linkedOrder.cancellation_reason || null)
+                            : linkedOrder.cancellation_reason || null,
+                        status_timestamps: summary.allCancelled
+                            ? buildStatusTimestamps(linkedOrder.status_timestamps, 'cancelled', reason)
+                            : linkedOrder.status_timestamps,
+                    })
+                    .eq('id', order.id);
+            }
+        }
     };
 
     const handleConfirmCancel = async () => {
@@ -824,96 +1094,24 @@ const Profile = ({ user, logout }) => {
         }
 
         try {
-            if (orderToCancel.type) { // It's a request (booking, special_order, customized)
-                const requestId = orderToCancel.request_id || (orderToCancel.isRequest ? orderToCancel.id?.replace?.(/^request-/, '') : null) || orderToCancel.id;
-                const { data: currentRequest, error: requestFetchError } = await supabase
-                    .from('requests')
-                    .select('data, status_timestamps')
-                    .eq('id', requestId)
-                    .single();
+            const selectedItem = getCancellableItems(orderToCancel).find(
+                (item) => item.cancellationKey === String(cancelTargetItemKey),
+            );
 
-                if (requestFetchError) {
-                    console.error('Error loading request before cancellation:', requestFetchError);
-                    setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel request: ' + requestFetchError.message });
-                    return;
-                }
+            if (!selectedItem) {
+                setCancelReasonError('Please select the item you want to cancel.');
+                return;
+            }
 
-                const requestData = parseJsonObject(currentRequest?.data);
-                const { error: requestUpdateError } = await supabase
-                    .from('requests')
-                    .update({
-                        status: 'cancelled',
-                        cancellation_reason: trimmedCancelReason,
-                        status_timestamps: buildStatusTimestamps(currentRequest?.status_timestamps, 'cancelled', trimmedCancelReason),
-                        data: {
-                            ...requestData,
-                            cancellation_reason: trimmedCancelReason,
-                            cancelled_at: new Date().toISOString(),
-                        },
-                    })
-                    .eq('id', requestId);
+            const quantityToCancel = Math.min(
+                selectedItem.remainingQuantity,
+                Math.max(1, Number.parseInt(String(cancelQuantity || 1), 10) || 1),
+            );
 
-                if (requestUpdateError) {
-                    console.error('Error cancelling request:', requestUpdateError);
-                    setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel request: ' + requestUpdateError.message });
-                    return;
-                }
-
-                if (!orderToCancel.isRequest && orderToCancel.id) {
-                    const { data: currentOrder, error: orderFetchError } = await supabase
-                        .from('orders')
-                        .select('status_timestamps')
-                        .eq('id', orderToCancel.id)
-                        .single();
-
-                    if (orderFetchError) {
-                        console.error('Error loading linked order before cancellation:', orderFetchError);
-                        setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel linked order: ' + orderFetchError.message });
-                        return;
-                    }
-
-                    const { error: orderUpdateError } = await supabase
-                        .from('orders')
-                        .update({
-                            status: 'cancelled',
-                            cancellation_reason: trimmedCancelReason,
-                            status_timestamps: buildStatusTimestamps(currentOrder?.status_timestamps, 'cancelled', trimmedCancelReason),
-                        })
-                        .eq('id', orderToCancel.id);
-
-                    if (orderUpdateError) {
-                        console.error('Error cancelling linked order:', orderUpdateError);
-                        setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel linked order: ' + orderUpdateError.message });
-                        return;
-                    }
-                }
-            } else { // It's a regular order
-                const { data: currentOrder, error: orderFetchError } = await supabase
-                    .from('orders')
-                    .select('status_timestamps')
-                    .eq('id', orderToCancel.id)
-                    .single();
-
-                if (orderFetchError) {
-                    console.error('Error loading order before cancellation:', orderFetchError);
-                    setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel order: ' + orderFetchError.message });
-                    return;
-                }
-
-                const { error: orderUpdateError } = await supabase
-                    .from('orders')
-                    .update({
-                        status: 'cancelled',
-                        cancellation_reason: trimmedCancelReason,
-                        status_timestamps: buildStatusTimestamps(currentOrder?.status_timestamps, 'cancelled', trimmedCancelReason),
-                    })
-                    .eq('id', orderToCancel.id);
-
-                if (orderUpdateError) {
-                    console.error('Error cancelling order:', orderUpdateError);
-                    setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel order: ' + orderUpdateError.message });
-                    return;
-                }
+            if (orderToCancel.type) {
+                await updateRequestCancellation(orderToCancel, cancelTargetItemKey, quantityToCancel, trimmedCancelReason);
+            } else {
+                await updateRegularOrderCancellation(orderToCancel, cancelTargetItemKey, quantityToCancel, trimmedCancelReason);
             }
 
             // Create cancellation notification
@@ -927,8 +1125,8 @@ const Profile = ({ user, logout }) => {
             await insertUserNotification({
                 userId: user.id,
                 type: 'cancellation',
-                title: `${orderTypeLabel} Cancelled`,
-                message: `Your ${orderTypeLabel.toLowerCase()} ${orderNumber} has been cancelled successfully.`,
+                title: `${orderTypeLabel} Updated`,
+                message: `${quantityToCancel} item${quantityToCancel > 1 ? 's were' : ' was'} cancelled from your ${orderTypeLabel.toLowerCase()} ${orderNumber}.`,
                 icon: 'fa-times-circle',
                 link: '/profile',
             });
@@ -938,7 +1136,7 @@ const Profile = ({ user, logout }) => {
             closeCancelModal();
         } catch (error) {
             console.error('Error during cancellation:', error);
-            setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel. Please try again.' });
+            setInfoModal({ show: true, title: 'Error', message: error.message || 'Failed to cancel. Please try again.' });
         }
     };
 
@@ -1104,7 +1302,14 @@ const Profile = ({ user, logout }) => {
                                                     {item.variant && (
                                                         <div className="order-item-variant">{item.variant}</div>
                                                     )}
-                                                    <div className="order-item-qty">x{item.quantity || item.qty || 1}</div>
+                                                    <div className="order-item-qty">
+                                                        {item.remainingQuantity > 0 ? `x${item.remainingQuantity}` : 'Cancelled'}
+                                                    </div>
+                                                    {item.cancelledQuantity > 0 && (
+                                                        <div className="order-item-variant text-danger">
+                                                            Cancelled: x{item.cancelledQuantity}
+                                                        </div>
+                                                    )}
                                                 </div>
                                                 {!order.type && (
                                                     <div className="order-item-price">
@@ -1302,7 +1507,9 @@ const Profile = ({ user, logout }) => {
                                         <div className="d-flex gap-2">
                                             <button className="btn-order-action" style={{ backgroundColor: 'var(--shop-pink)', color: 'white', border: 'none' }} onClick={() => handleAcceptQuote(order)}>Accept</button>
                                             <button className="btn-order-action" style={{ backgroundColor: 'transparent', color: 'var(--shop-pink)', border: '1px solid var(--shop-pink)' }} onClick={() => handleRequestAdjustment(order)}>Adjust</button>
-                                            <button className="btn-order-action" style={{ backgroundColor: '#dc3545', color: 'white', border: '1px solid #dc3545' }} onClick={() => handleCancelClick(order)}>Cancel</button>
+                                            {getCancellableItems(order).length > 0 && (
+                                                <button className="btn-order-action" style={{ backgroundColor: '#dc3545', color: 'white', border: '1px solid #dc3545' }} onClick={() => handleCancelClick(order)}>Cancel</button>
+                                            )}
                                         </div>
                                     ) : (
                                         <>
@@ -1338,7 +1545,7 @@ const Profile = ({ user, logout }) => {
                                             )}
 
                                             {/* CANCEL BUTTON */}
-                                            {['pending', 'processing'].includes(order.status) && (
+                                            {['pending', 'processing'].includes(order.status) && getCancellableItems(order).length > 0 && (
                                                 <button
                                                     className="btn-order-action danger"
                                                     onClick={() => handleCancelClick(order)}
@@ -1749,6 +1956,11 @@ const Profile = ({ user, logout }) => {
         }),
     };
 
+    const cancellableItems = getCancellableItems(orderToCancel);
+    const selectedCancelItem = cancellableItems.find((item) => item.cancellationKey === String(cancelTargetItemKey))
+        || cancellableItems[0]
+        || null;
+
     return (
         <div className="profile-container">
             <div className="container">
@@ -1924,10 +2136,68 @@ const Profile = ({ user, logout }) => {
                         <div style={{ fontSize: '3rem', color: '#dc3545', marginBottom: '1rem' }}>
                             <i className="fas fa-exclamation-triangle"></i>
                         </div>
-                        <h3 style={{ marginBottom: '1rem', color: '#333' }}>Cancel {orderToCancel?.type ? 'Request' : 'Order'}?</h3>
+                        <h3 style={{ marginBottom: '1rem', color: '#333' }}>Cancel item from this {orderToCancel?.type ? 'request' : 'order'}?</h3>
                         <p style={{ marginBottom: '1.5rem', color: '#4b5563' }}>
-                            Are you sure you want to cancel this {orderToCancel?.type ? 'request' : 'order'}? This action cannot be undone.
+                            Choose the item and quantity you want to cancel. We will keep the rest of your order active.
                         </p>
+                        <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
+                            <label htmlFor="cancelItemProfile" style={{ display: 'block', fontWeight: '600', color: '#333', marginBottom: '0.5rem' }}>
+                                Item to cancel
+                            </label>
+                            <select
+                                id="cancelItemProfile"
+                                value={selectedCancelItem?.cancellationKey || ''}
+                                onChange={(e) => {
+                                    const nextItem = cancellableItems.find((item) => item.cancellationKey === e.target.value);
+                                    setCancelTargetItemKey(e.target.value);
+                                    setCancelQuantity(1);
+                                    if (!nextItem && cancelReasonError) setCancelReasonError('');
+                                }}
+                                style={{
+                                    width: '100%',
+                                    borderRadius: '0.75rem',
+                                    border: '1px solid #d1d5db',
+                                    padding: '0.75rem 0.9rem',
+                                    color: '#111827',
+                                    backgroundColor: 'white',
+                                }}
+                            >
+                                {cancellableItems.map((item) => (
+                                    <option key={item.cancellationKey} value={item.cancellationKey}>
+                                        {item.name} ({item.remainingQuantity} left)
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                        {selectedCancelItem && (
+                            <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
+                                <label htmlFor="cancelQuantityProfile" style={{ display: 'block', fontWeight: '600', color: '#333', marginBottom: '0.5rem' }}>
+                                    Quantity to cancel
+                                </label>
+                                <select
+                                    id="cancelQuantityProfile"
+                                    value={String(cancelQuantity)}
+                                    onChange={(e) => setCancelQuantity(Number.parseInt(e.target.value, 10) || 1)}
+                                    style={{
+                                        width: '100%',
+                                        borderRadius: '0.75rem',
+                                        border: '1px solid #d1d5db',
+                                        padding: '0.75rem 0.9rem',
+                                        color: '#111827',
+                                        backgroundColor: 'white',
+                                    }}
+                                >
+                                    {Array.from({ length: selectedCancelItem.remainingQuantity }, (_, index) => index + 1).map((quantity) => (
+                                        <option key={quantity} value={quantity}>
+                                            {quantity}
+                                        </option>
+                                    ))}
+                                </select>
+                                <div style={{ marginTop: '0.5rem', color: '#6b7280', fontSize: '0.9rem' }}>
+                                    Remaining after this cancellation: {Math.max(0, selectedCancelItem.remainingQuantity - cancelQuantity)}
+                                </div>
+                            </div>
+                        )}
                         <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
                             <label htmlFor="cancelReasonProfile" style={{ display: 'block', fontWeight: '600', color: '#333', marginBottom: '0.5rem' }}>
                                 Reason for cancellation
@@ -1984,7 +2254,7 @@ const Profile = ({ user, logout }) => {
                                     fontWeight: '600'
                                 }}
                             >
-                                Yes, Cancel
+                                Cancel Selected Quantity
                             </button>
                         </div>
                     </div>

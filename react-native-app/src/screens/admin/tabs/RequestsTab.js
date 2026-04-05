@@ -1419,6 +1419,8 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
             arrangementSelections.length ? arrangementSelections.reduce((sum, selection) => sum + toPositiveInt(selection?.quantity, 1), 0) : null,
             item.arrangement_quantity
           );
+          const remainingQuantity = toPositiveInt(item.remaining_quantity ?? item.remainingQuantity, 0);
+          const cancelledQuantity = toPositiveInt(item.cancelled_quantity ?? item.cancelledQuantity, 0);
           const colorTheme = getBookingColorText(item);
           const preferredFlowers = getBookingFlowerText(item);
           const customOrderVersion = item.custom_order_version || requestData.custom_order_version;
@@ -1485,7 +1487,8 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
               <DetailSection label="Event Time:" value={getBookingEventTimeText(item, getBookingEventTimeText(requestData))} />
               <DetailSection label="Venue:" value={getBookingVenueText(item, sharedAddressText)} />
               <DetailSection label="Arrangement:" value={arrangementType} />
-              <DetailSection label="Quantity:" value={arrangementQuantity ? String(arrangementQuantity) : null} />
+              <DetailSection label="Quantity:" value={remainingQuantity ? String(remainingQuantity) : (arrangementQuantity ? String(arrangementQuantity) : null)} />
+              <DetailSection label="Cancelled Quantity:" value={cancelledQuantity ? String(cancelledQuantity) : null} />
               <DetailSection label="Preferred Flowers:" value={preferredFlowers} />
               <DetailSection label="Original Target Price:" value={showBudgetAwareDetails ? `PHP ${parseCurrencyNumber(item.originalEstimatedPrice).toFixed(2)}` : null} />
               <DetailSection label="Customer Budget:" value={showBudgetAwareDetails ? `PHP ${parseCurrencyNumber(item.customerBudget).toFixed(2)}` : null} />
@@ -1547,10 +1550,16 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
           value={customizedItems.length ? String(customizedItems.length) : null}
         />
 
-        {customizedItems.map((item) => (
+        {customizedItems.map((item) => {
+          const remainingQuantity = toPositiveInt(item.remaining_quantity ?? item.remainingQuantity ?? item.quantity, 0);
+          const cancelledQuantity = toPositiveInt(item.cancelled_quantity ?? item.cancelledQuantity, 0);
+
+          return (
           <View key={item.key} style={styles.customizedRequestDetailCard}>
             <Text style={styles.customizedRequestItemMeta}>{item.label}</Text>
             <Text style={styles.customizedRequestDetailTitle}>{item.title}</Text>
+            <DetailSection label="Quantity:" value={remainingQuantity ? String(remainingQuantity) : null} />
+            <DetailSection label="Cancelled Quantity:" value={cancelledQuantity ? String(cancelledQuantity) : null} />
             <DetailSection label="Bundle Size:" value={item.bundleSizeText} />
             <DetailSection label="Flowers:" value={item.flowersText} />
             <DetailSection label="Wrapper:" value={item.wrapperName} />
@@ -1569,7 +1578,8 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
               </View>
             ) : null}
           </View>
-        ))}
+        );
+        })}
 
         {request.final_price && (
           <DetailSection
