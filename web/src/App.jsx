@@ -87,8 +87,19 @@ function ScrollToTop() {
 
 function AppContent() {
   const location = useLocation();
-  const isAuthRoute = ['/login', '/signup', '/reset-password', '/email-verification'].includes(location.pathname);
-  const isCustomOrderCatalogRoute = location.pathname === '/custom-order';
+  const normalizeAppPath = (pathname = '/') => {
+    const normalizedLeadingSlash = `/${String(pathname || '').replace(/^\/+/, '')}`;
+
+    if (normalizedLeadingSlash.length > 1) {
+      return normalizedLeadingSlash.replace(/\/+$/, '');
+    }
+
+    return normalizedLeadingSlash;
+  };
+
+  const normalizedPathname = normalizeAppPath(location.pathname);
+  const isAuthRoute = ['/login', '/signup', '/reset-password', '/email-verification'].includes(normalizedPathname);
+  const isCustomOrderCatalogRoute = normalizedPathname === '/custom-order';
   const showNavbar = !isAuthRoute;
   const [user, setUser] = useState(null);
   const [products, setProducts] = useState([]);
@@ -129,6 +140,10 @@ function AppContent() {
   const [hasSpinnerDelayPassed, setHasSpinnerDelayPassed] = useState(false);
   const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
   const isLoggedIn = !!user;
+
+  if (normalizedPathname !== location.pathname) {
+    return <Navigate to={`${normalizedPathname}${location.search}${location.hash}`} replace />;
+  }
 
   const applyProductCatalog = (productsData = []) => {
     const productsWithCategories = (productsData || []).map(product => normalizeProductPricing({
@@ -244,7 +259,8 @@ function AppContent() {
     let isMounted = true;
 
     const handleSessionUser = async (sessionUser) => {
-      const authCallbackRoute = ['/email-verification', '/reset-password'].includes(window.location.pathname);
+      const currentPathname = normalizeAppPath(window.location.pathname);
+      const authCallbackRoute = ['/email-verification', '/reset-password'].includes(currentPathname);
 
       if (authCallbackRoute) {
         if (isMounted) {
@@ -273,7 +289,7 @@ function AppContent() {
           syncAuthenticatedUserState(null);
         }
 
-        if (!['/login', '/signup', '/email-verification', '/reset-password'].includes(window.location.pathname)) {
+        if (!['/login', '/signup', '/email-verification', '/reset-password'].includes(currentPathname)) {
           const emailQuery = sessionUser.email ? `&email=${encodeURIComponent(sessionUser.email)}` : '';
           window.location.href = `/login?verification=required${emailQuery}`;
         }
