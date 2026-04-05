@@ -106,22 +106,18 @@ const EmailVerification = () => {
 
             isResolved = true;
             window.clearTimeout(timeoutId);
+            clearSensitiveAuthParamsFromUrl();
+            setPageStatus(fallbackStatus, STATUS_COPY[fallbackStatus]?.message || STATUS_COPY.verified.message);
 
             try {
                 const syncResult = await syncVerifiedUserProfile(user);
                 await supabase.auth.signOut();
-                clearSensitiveAuthParamsFromUrl();
 
                 if (syncResult.error) {
-                    setPageStatus('error', STATUS_COPY.error.message);
-                    return;
+                    console.warn('Non-blocking: verified user profile sync failed:', syncResult.error);
                 }
-
-                setPageStatus(fallbackStatus, STATUS_COPY[fallbackStatus]?.message || STATUS_COPY.verified.message);
             } catch (verificationError) {
                 console.error('Email verification finish error:', verificationError);
-                clearSensitiveAuthParamsFromUrl();
-                setPageStatus('error', STATUS_COPY.error.message);
             }
         };
 
