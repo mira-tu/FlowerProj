@@ -6,6 +6,7 @@ import DeliveryDestinationsSummary from '../components/DeliveryDestinationsSumma
 import InfoModal from '../components/InfoModal';
 import { buildTimelineTimestampMap, formatTimelineTimestamp } from '../utils/timelineTimestamps';
 import { formatCustomOrderV4Currency, getSelectedEstimateFromItem, isCustomOrderV4Item } from '../utils/customOrderV4';
+import { summarizeCancellationItems } from '../utils/orderCancellation';
 import '../styles/Shop.css';
 
 // Timeline steps for Delivery Requests
@@ -38,7 +39,9 @@ const getBookingItems = (requestData = {}) => {
         ? requestData.items
         : [requestData];
 
-    return items.filter((item) => item && typeof item === 'object' && Object.keys(item).length);
+    return summarizeCancellationItems(
+        items.filter((item) => item && typeof item === 'object' && Object.keys(item).length),
+    ).items;
 };
 
 const normalizeFreeTextList = (value) => {
@@ -337,7 +340,10 @@ const OrderBookingTracking = () => {
                 };
             }
 
-            const primaryBookingItem = getBookingItems(normalizedRequestData)[0] || null;
+            const bookingItems = getBookingItems(normalizedRequestData);
+            const bookingSummary = summarizeCancellationItems(bookingItems);
+            const primaryBookingItem = bookingItems[0] || null;
+            const nextShippingFee = bookingSummary.allCancelled ? 0 : Number(foundRequest.shipping_fee || normalizedRequestData?.shipping_fee || 0);
 
             const transformedRequest = {
                 ...foundRequest,
@@ -347,9 +353,16 @@ const OrderBookingTracking = () => {
                 pickupTime: foundRequest.pickup_time,         // Changed from foundRequest.data?.pickup_time
                 address: finalAddress, // Attach the fetched address
                 type: foundRequest.type,
-                requestData: normalizedRequestData,
+                requestData: {
+                    ...(normalizedRequestData && typeof normalizedRequestData === 'object' ? normalizedRequestData : {}),
+                    items: bookingItems,
+                },
                 imageUrl: foundRequest.image_url || primaryBookingItem?.image_url || null,
-                finalPrice: foundRequest.final_price,
+                finalPrice: bookingSummary.hasItems
+                    ? (bookingSummary.allCancelled ? 0 : bookingSummary.remainingSubtotal + nextShippingFee)
+                    : foundRequest.final_price,
+                shipping_fee: nextShippingFee,
+                status: bookingSummary.allCancelled ? 'cancelled' : foundRequest.status,
             };
             setRequest(transformedRequest);
 
@@ -975,7 +988,17 @@ const OrderBookingTracking = () => {
                                                         {request.delivery_method !== 'pickup' && (item.eventTime || item.event_time) && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Event Time</span><span className="fw-bold text-dark">{formatBookingEventTime(item.eventTime || item.event_time)}</span></div>}
                                                         {request.delivery_method !== 'pickup' && (item.venue || item.deliveryAddress || item.delivery_address) && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Venue</span><span className="fw-bold text-dark">{item.venue || item.deliveryAddress || item.delivery_address}</span></div>}
                                                         {arrangement && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Arrangement</span><span className="fw-bold text-dark">{arrangement}</span></div>}
-                                                        {totalArrangementQuantity && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Quantity</span><span className="fw-bold text-dark">{totalArrangementQuantity}</span></div>}
+                                                        {totalArrangementQuantity && (
+                                                            <div className="d-flex flex-column mb-2">
+                                                                <span className="text-muted small fw-medium">Quantity</span>
+                                                                <span className="fw-bold text-dark">
+                                                                    {item.remainingQuantity > 0 ? totalArrangementQuantity : 'Cancelled'}
+                                                                </span>
+                                                                {item.cancelledQuantity > 0 && (
+                                                                    <span className="text-danger small">Cancelled: {item.cancelledQuantity}</span>
+                                                                )}
+                                                            </div>
+                                                        )}
                                                         {flowers && <div className="d-flex flex-column mb-2"><span className="text-muted small fw-medium">Preferred Flowers</span><span className="fw-bold text-dark">{flowers}</span></div>}
                                                         {isCustomOrderV4Item(item) && (
                                                             <>

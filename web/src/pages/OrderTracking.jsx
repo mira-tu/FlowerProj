@@ -14,6 +14,7 @@ import {
     maskGcashNumber,
     submitRefundGcashDetails,
 } from '../utils/refundWorkflows';
+import { summarizeCancellationItems } from '../utils/orderCancellation';
 import '../styles/Shop.css';
 
 // Timeline steps for Delivery Orders
@@ -113,15 +114,27 @@ const OrderTracking = ({ user }) => {
                 };
             }
 
+            const itemSummary = summarizeCancellationItems(foundOrder.order_items || []);
+            const displayItems = itemSummary.items.map((item) => ({
+                ...item,
+                quantity: item.remainingQuantity,
+                qty: item.remainingQuantity,
+                price: item.unitPrice,
+            }));
             const transformedOrder = {
                 ...foundOrder,
                 rider: riderDetails,
                 date: foundOrder.created_at,
-                items: foundOrder.order_items || [],
+                items: displayItems,
                 address: foundOrder.addresses,
                 deliveryMethod: foundOrder.delivery_method,
                 pickupTime: foundOrder.pickup_time,
                 multiDeliveryDestinations: parseOrderDeliveryDestinations(foundOrder),
+                subtotal: itemSummary.hasItems ? itemSummary.remainingSubtotal : foundOrder.subtotal,
+                shipping_fee: itemSummary.allCancelled ? 0 : foundOrder.shipping_fee,
+                total: itemSummary.hasItems
+                    ? (itemSummary.allCancelled ? 0 : (itemSummary.remainingSubtotal + Number(foundOrder.shipping_fee || 0)))
+                    : foundOrder.total,
             };
             setOrder(transformedOrder);
 
@@ -858,7 +871,12 @@ const OrderTracking = ({ user }) => {
                                     />
                                     <div className="flex-grow-1">
                                         <div className="fw-bold">{item.name}</div>
-                                        <div className="text-muted small">Qty: {item.quantity || item.qty || 1}</div>
+                                        <div className="text-muted small">
+                                            {item.remainingQuantity > 0 ? `Qty: ${item.quantity || item.qty || 1}` : 'Cancelled'}
+                                        </div>
+                                        {item.cancelledQuantity > 0 && (
+                                            <div className="text-danger small">Cancelled: {item.cancelledQuantity}</div>
+                                        )}
                                     </div>
                                     <div className="fw-bold" style={{ color: 'var(--shop-pink)' }}>
                                         ₱{((item.price || 0) * (item.quantity || item.qty || 1)).toLocaleString()}

@@ -14,6 +14,7 @@ import {
     maskGcashNumber,
     submitRefundGcashDetails,
 } from '../utils/refundWorkflows';
+import { summarizeCancellationItems } from '../utils/orderCancellation';
 import '../styles/Shop.css';
 
 // Timeline steps for Delivery Requests
@@ -41,12 +42,13 @@ const getCustomizedTrackingItems = (request) => {
         : [];
 
     if (sourceItems.length) {
-        return sourceItems.map((item, index) => ({
+        return summarizeCancellationItems(sourceItems).items.map((item, index) => ({
+            ...item,
             key: item.id || item.listId || `${request?.id || 'customized'}-${index}`,
             name: item.name || (item.bundleSize ? `Customizer Studio (${item.bundleSize} stems)` : `Customizer Studio ${index + 1}`),
             image: item.image_url || item.image || request?.imageUrl || null,
-            quantity: Number(item.qty || item.quantity || 1) || 1,
-            price: Number(item.price || 0),
+            quantity: item.remainingQuantity,
+            price: item.unitPrice,
         }));
     }
 
@@ -182,7 +184,15 @@ const OrderCustomizedTracking = ({ user }) => {
                 type: foundRequest.type,
                 requestData: foundRequest.data,
                 imageUrl: foundRequest.data?.items?.[0]?.image_url || foundRequest.image_url,
-                finalPrice: foundRequest.final_price,
+                finalPrice: (() => {
+                    const summary = summarizeCancellationItems(foundRequest.data?.items || []);
+                    if (!summary.hasItems) {
+                        return foundRequest.final_price;
+                    }
+
+                    const shippingFee = summary.allCancelled ? 0 : Number(foundRequest.shipping_fee || foundRequest.data?.shipping_fee || 0);
+                    return summary.allCancelled ? 0 : summary.remainingSubtotal + shippingFee;
+                })(),
                 trackingStatus,
             };
             setRequest(transformedRequest);
@@ -985,7 +995,12 @@ const OrderCustomizedTracking = ({ user }) => {
                                     />
                                     <div className="flex-grow-1">
                                         <div className="fw-bold">{item.name}</div>
-                                        <div className="text-muted small">Qty: {item.quantity}</div>
+                                                    <div className="text-muted small">
+                                                        {item.remainingQuantity > 0 ? `Qty: ${item.quantity}` : 'Cancelled'}
+                                                    </div>
+                                                    {item.cancelledQuantity > 0 && (
+                                                        <div className="text-danger small">Cancelled: {item.cancelledQuantity}</div>
+                                                    )}
                                     </div>
                                     {item.price > 0 && (
                                         <div className="fw-bold" style={{ color: 'var(--shop-pink)' }}>
