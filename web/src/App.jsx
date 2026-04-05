@@ -405,7 +405,7 @@ function AppContent() {
 
   const cartCount = user ? (cart.reduce((acc, item) => acc + (item.qty || 0), 0) + customServiceCount) : 0;
 
-  if (!hasSpinnerDelayPassed || isInitializing) {
+  if (!isAuthRoute && (!hasSpinnerDelayPassed || isInitializing)) {
     return (
       <div className="d-flex flex-column justify-content-center align-items-center" style={{ minHeight: '100vh' }}>
         <div className="spinner-border text-danger" role="status" aria-hidden="true"></div>

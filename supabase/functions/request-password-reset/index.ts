@@ -118,11 +118,19 @@ serve(async (req) => {
       throw userProfileError;
     }
 
-    if (!userProfile?.id || !userProfile.email_verified) {
+    if (!userProfile?.id) {
       return json(200, {
         sent: true,
         status: "queued",
         message: genericSuccessMessage,
+      });
+    }
+
+    if (!userProfile.email_verified) {
+      return json(403, {
+        sent: false,
+        status: "verification_required",
+        message: "Please verify your email before requesting a password reset link.",
       });
     }
 

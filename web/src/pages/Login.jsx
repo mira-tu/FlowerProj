@@ -38,6 +38,10 @@ const getFriendlyResetRequestError = (error) => {
         return 'Unable to send a reset link right now. Please try again later.';
     }
 
+    if (message.includes('verify your email')) {
+        return 'Please verify your email before requesting a password reset link.';
+    }
+
     if (message.includes('rate limit') || message.includes('too many requests')) {
         return 'Please wait a moment before requesting another reset email.';
     }
@@ -122,6 +126,20 @@ const Login = ({ onLogin }) => {
             window.clearTimeout(timeoutId);
         };
     }, [resetMessage]);
+
+    useEffect(() => {
+        if (!resetError) {
+            return undefined;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            setResetError('');
+        }, 10000);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+        };
+    }, [resetError]);
 
     const handleResendVerification = async () => {
         const targetEmail = (verificationEmail || email).trim().toLowerCase();
