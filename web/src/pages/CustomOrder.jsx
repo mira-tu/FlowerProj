@@ -888,7 +888,7 @@ const CustomOrder = ({ user }) => {
                 formattedEstimatedRange: formatTentativePriceRange(estimatedPriceMin, estimatedPriceMax, estimatedPriceNote),
                 formattedTentativeSubtotal: estimatedPriceMin > 0 || estimatedPriceMax > 0
                     ? formatTentativePriceRange(estimatedPriceMin * quantity, estimatedPriceMax * quantity)
-                    : 'For discussion',
+                    : 'To be quoted',
             };
         });
     }, [formData.arrangementQuantities, formData.otherArrangementType, otherFlowersPerArrangement, selectedArrangementOptions]);
@@ -1237,7 +1237,7 @@ const CustomOrder = ({ user }) => {
         // 1. Prepare Cart Item
         const newCartItem = {
             id: Date.now(),
-            serviceType: "Custom Order v2",
+            serviceType: "Custom Order",
             name: arrangementSummary || selectedArrangementOptions.map((option) => option.label).join(', ') || 'Custom Order',
             customerName: formData.customerName,
             email: formData.email,
@@ -1948,7 +1948,7 @@ const CustomOrder = ({ user }) => {
                                 <div className="d-flex justify-content-between mt-3">
                                     <span className="text-muted">Tentative Subtotal:</span>
                                     <span className="fw-semibold text-end">
-                                        {tentativeBreakdown.hasCompleteEstimate ? tentativeBreakdown.formattedSubtotalRange : 'For discussion'}
+                                        {tentativeBreakdown.hasCompleteEstimate ? tentativeBreakdown.formattedSubtotalRange : 'To be quoted'}
                                     </span>
                                 </div>
                                 <div className="text-muted small mt-2">

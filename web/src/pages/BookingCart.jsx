@@ -2,20 +2,43 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import '../styles/Shop.css';
 import { buildTentativePricingSummary, getTentativeBreakdownFromItem } from '../utils/customOrderTentativePricing';
+import { fetchCustomOrderCatalog } from '../utils/customOrderCatalog';
 
 const BookingCart = ({ user }) => {
     const navigate = useNavigate();
     const [inquiryItems, setInquiryItems] = useState([]);
+    const [catalogArrangements, setCatalogArrangements] = useState([]);
+
+    const normalizeInquiryItem = (item = {}) => ({
+        ...item,
+        serviceType: String(item?.serviceType || 'Custom Order').replace(/\s*v\d+$/i, '').trim() || 'Custom Order',
+    });
 
     useEffect(() => {
         const cartKey = `bookingCart_${user?.id || 'guest'}`;
         const savedInquiry = localStorage.getItem(cartKey) || localStorage.getItem('bookingCart');
         if (savedInquiry) {
-            setInquiryItems(JSON.parse(savedInquiry));
+            setInquiryItems(JSON.parse(savedInquiry).map(normalizeInquiryItem));
         } else {
             navigate('/');
         }
     }, [navigate, user]);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadCatalog = async () => {
+            const catalog = await fetchCustomOrderCatalog();
+            if (isMounted) {
+                setCatalogArrangements(Array.isArray(catalog?.arrangements) ? catalog.arrangements : []);
+            }
+        };
+
+        loadCatalog();
+        return () => {
+            isMounted = false;
+        };
+    }, []);
 
     const getOriginPage = () => '/custom-order';
 
@@ -40,7 +63,7 @@ const BookingCart = ({ user }) => {
         navigate('/booking-checkout');
     };
 
-    const itemTentativeBreakdowns = inquiryItems.map((item) => getTentativeBreakdownFromItem(item));
+    const itemTentativeBreakdowns = inquiryItems.map((item) => getTentativeBreakdownFromItem(item, catalogArrangements));
     const tentativePricingSummary = buildTentativePricingSummary({
         tentativeBreakdowns: itemTentativeBreakdowns,
     });
@@ -99,9 +122,9 @@ const BookingCart = ({ user }) => {
                                         <span className="fw-bold">
                                             {tentativeBreakdown?.hasCompleteEstimate
                                                 ? (tentativeBreakdown.lineItems.length === 1
-                                                    ? tentativeBreakdown.lineItems[0]?.formattedUnitRange || 'For discussion'
+                                                    ? tentativeBreakdown.lineItems[0]?.formattedUnitRange || 'To be quoted'
                                                     : 'Varies')
-                                                : 'For Discussion'}
+                                                : 'To be quoted'}
                                         </span>
                                     </div>
                                     <div className="col-md-2 text-center mb-2 mb-md-0">
@@ -112,7 +135,7 @@ const BookingCart = ({ user }) => {
                                         <span className="d-md-none text-muted small me-2">Total:</span>
                                         {tentativeBreakdown?.hasCompleteEstimate
                                             ? tentativeBreakdown.formattedSubtotalRange
-                                            : 'For Discussion'}
+                                            : 'To be quoted'}
                                     </div>
                                     <div className="col-md-1 text-center">
                                         <button
@@ -142,7 +165,7 @@ const BookingCart = ({ user }) => {
                             <div className="d-flex justify-content-between mb-4">
                                 <span className="fw-bold fs-5">Tentative Total</span>
                                 <span className="fw-bold fs-5" style={{ color: '#d63384' }}>
-                                    {tentativePricingSummary.hasCompleteEstimate ? tentativePricingSummary.formattedSubtotalRange : 'For Discussion'}
+                                    {tentativePricingSummary.hasCompleteEstimate ? tentativePricingSummary.formattedSubtotalRange : 'To be quoted'}
                                 </span>
                             </div>
                             <div className="small text-muted mb-3">

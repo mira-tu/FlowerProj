@@ -18,6 +18,7 @@ import { insertUserNotification } from '../utils/notificationApi';
 import { resolveBookingRequestStockReservations } from '../utils/requestSubmission';
 import { PICKUP_TIME_OPTIONS } from '../utils/businessHours';
 import { buildTentativePricingSummary, getTentativeBreakdownFromItem } from '../utils/customOrderTentativePricing';
+import { fetchCustomOrderCatalog } from '../utils/customOrderCatalog';
 
 const pickupTimes = PICKUP_TIME_OPTIONS;
 const DEFAULT_SHIPPING_FEE = 100;
@@ -36,6 +37,7 @@ const normalizeInquiryItems = (items = []) => (
         id: item?.id || `booking-${index + 1}`,
         qty: 1,
         name: getBookingItemTitle(item),
+        serviceType: String(item?.serviceType || 'Custom Order').replace(/\s*v\d+$/i, '').trim() || 'Custom Order',
     }))
 );
 
@@ -109,6 +111,7 @@ const BookingCheckout = ({ user }) => {
     const [barangayFees, setBarangayFees] = useState([]);
     const [multiAddressEnabled, setMultiAddressEnabled] = useState(false);
     const [deliveryAssignments, setDeliveryAssignments] = useState([]);
+    const [catalogArrangements, setCatalogArrangements] = useState([]);
 
     const showInfoModal = (title, message, linkTo = '', linkText = '') => {
         setInfoModal({ show: true, title, message, linkTo, linkText });
@@ -138,6 +141,22 @@ const BookingCheckout = ({ user }) => {
             navigate('/');
         }
     }, [navigate, user]);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadCatalog = async () => {
+            const catalog = await fetchCustomOrderCatalog();
+            if (isMounted) {
+                setCatalogArrangements(Array.isArray(catalog?.arrangements) ? catalog.arrangements : []);
+            }
+        };
+
+        loadCatalog();
+        return () => {
+            isMounted = false;
+        };
+    }, []);
 
     useEffect(() => {
         const fetchBarangayFees = async () => {
@@ -222,8 +241,8 @@ const BookingCheckout = ({ user }) => {
         inquiryItems.some((item) => !!(getSelectedEstimateFromItem(item)?.estimatedPrice || item.estimatedPrice))
     ), [inquiryItems]);
     const tentativeInquiryBreakdowns = useMemo(
-        () => inquiryItems.map((item) => getTentativeBreakdownFromItem(item)),
-        [inquiryItems]
+        () => inquiryItems.map((item) => getTentativeBreakdownFromItem(item, catalogArrangements)),
+        [catalogArrangements, inquiryItems]
     );
     const combinedPricingSummary = useMemo(
         () => buildTentativePricingSummary({
@@ -572,7 +591,7 @@ const BookingCheckout = ({ user }) => {
                                                     <div className="d-flex justify-content-between pt-2 mt-2 border-top">
                                                         <span className="text-muted">Tentative Subtotal</span>
                                                         <span className="fw-semibold">
-                                                            {tentativeBreakdown.hasCompleteEstimate ? tentativeBreakdown.formattedSubtotalRange : 'For discussion'}
+                                                            {tentativeBreakdown.hasCompleteEstimate ? tentativeBreakdown.formattedSubtotalRange : 'To be quoted'}
                                                         </span>
                                                     </div>
                                                 </div>
@@ -611,7 +630,7 @@ const BookingCheckout = ({ user }) => {
                             {tentativeInquiryBreakdowns.some((breakdown) => breakdown.hasAnyEstimate) && (
                                 <div className="summary-row">
                                     <span>Tentative subtotal</span>
-                                    <span>{combinedPricingSummary.hasCompleteEstimate ? combinedPricingSummary.formattedSubtotalRange : 'For discussion'}</span>
+                                    <span>{combinedPricingSummary.hasCompleteEstimate ? combinedPricingSummary.formattedSubtotalRange : 'To be quoted'}</span>
                                 </div>
                             )}
                             <div className="summary-row">
@@ -626,7 +645,7 @@ const BookingCheckout = ({ user }) => {
                                         ? combinedPricingSummaryWithShipping.formattedTotalRange
                                         : hasEstimatedInquiryTotal
                                             ? `Guide: ${formatCustomOrderV4Currency(estimatedInquiryTotal)}`
-                                            : 'For Discussion'}
+                                            : 'To be quoted'}
                                 </span>
                             </div>
                             {(hasEstimatedInquiryTotal || tentativeInquiryBreakdowns.some((breakdown) => breakdown.hasAnyEstimate)) && (

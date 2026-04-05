@@ -33,7 +33,37 @@ export const formatTentativePriceRange = (min, max, note = '') => {
     return trimmedNote ? `${rangeText} ${trimmedNote}` : rangeText;
 };
 
-const normalizeTentativeLineItem = (selection = {}, index = 0) => {
+const normalizeLookupKey = (value) => String(value || '').trim().toLowerCase();
+
+const findMatchingArrangementEstimate = (selection = {}, arrangementCatalog = []) => {
+    const lookupKeys = [
+        selection?.arrangement_label,
+        selection?.arrangementLabel,
+        selection?.label,
+        selection?.arrangement_type,
+        selection?.arrangementType,
+        selection?.value,
+    ]
+        .map(normalizeLookupKey)
+        .filter(Boolean);
+
+    if (!lookupKeys.length || !Array.isArray(arrangementCatalog) || !arrangementCatalog.length) {
+        return null;
+    }
+
+    return arrangementCatalog.find((arrangement) => {
+        const arrangementKeys = [
+            arrangement?.label,
+            arrangement?.value,
+        ]
+            .map(normalizeLookupKey)
+            .filter(Boolean);
+
+        return arrangementKeys.some((key) => lookupKeys.includes(key));
+    }) || null;
+};
+
+const normalizeTentativeLineItem = (selection = {}, index = 0, arrangementCatalog = []) => {
     const label = String(
         selection?.arrangement_label
         || selection?.arrangementLabel
@@ -48,10 +78,22 @@ const normalizeTentativeLineItem = (selection = {}, index = 0) => {
     }
 
     const quantity = toPositiveInt(selection?.quantity || selection?.arrangement_quantity, 1);
-    const unitMin = toNonNegativeNumber(selection?.estimated_price_min ?? selection?.estimatedPriceMin, 0);
-    const unitMaxCandidate = toNonNegativeNumber(selection?.estimated_price_max ?? selection?.estimatedPriceMax, unitMin);
+    const matchedArrangement = findMatchingArrangementEstimate(selection, arrangementCatalog);
+    const unitMin = toNonNegativeNumber(
+        selection?.estimated_price_min ?? selection?.estimatedPriceMin ?? matchedArrangement?.estimatedPriceMin,
+        0
+    );
+    const unitMaxCandidate = toNonNegativeNumber(
+        selection?.estimated_price_max ?? selection?.estimatedPriceMax ?? matchedArrangement?.estimatedPriceMax,
+        unitMin
+    );
     const unitMax = unitMaxCandidate < unitMin ? unitMin : unitMaxCandidate;
-    const note = String(selection?.estimated_price_note ?? selection?.estimatedPriceNote ?? '').trim();
+    const note = String(
+        selection?.estimated_price_note
+        ?? selection?.estimatedPriceNote
+        ?? matchedArrangement?.estimatedPriceNote
+        ?? ''
+    ).trim();
     const hasEstimate = unitMin > 0 || unitMax > 0;
     const lineMin = hasEstimate
         ? toNonNegativeNumber(selection?.tentative_subtotal_min ?? selection?.tentativeSubtotalMin, unitMin * quantity)
@@ -70,14 +112,14 @@ const normalizeTentativeLineItem = (selection = {}, index = 0) => {
         lineMin,
         lineMax,
         hasEstimate,
-        formattedUnitRange: hasEstimate ? formatTentativePriceRange(unitMin, unitMax, note) : 'For discussion',
-        formattedLineRange: hasEstimate ? formatTentativePriceRange(lineMin, lineMax) : 'For discussion',
+        formattedUnitRange: hasEstimate ? formatTentativePriceRange(unitMin, unitMax, note) : 'To be quoted',
+        formattedLineRange: hasEstimate ? formatTentativePriceRange(lineMin, lineMax) : 'To be quoted',
     };
 };
 
-export const buildTentativeBreakdownFromSelections = (arrangementSelections = []) => {
+export const buildTentativeBreakdownFromSelections = (arrangementSelections = [], arrangementCatalog = []) => {
     const lineItems = (Array.isArray(arrangementSelections) ? arrangementSelections : [])
-        .map(normalizeTentativeLineItem)
+        .map((selection, index) => normalizeTentativeLineItem(selection, index, arrangementCatalog))
         .filter(Boolean);
 
     const estimatedLineItems = lineItems.filter((item) => item.hasEstimate);
@@ -96,7 +138,7 @@ export const buildTentativeBreakdownFromSelections = (arrangementSelections = []
     };
 };
 
-export const getTentativeBreakdownFromItem = (item = {}) => {
+export const getTentativeBreakdownFromItem = (item = {}, arrangementCatalog = []) => {
     const storedBreakdown = item?.tentativeBreakdown || item?.tentative_breakdown;
     const storedLineItems = Array.isArray(storedBreakdown?.lineItems)
         ? storedBreakdown.lineItems
@@ -105,7 +147,7 @@ export const getTentativeBreakdownFromItem = (item = {}) => {
             : null;
 
     if (storedLineItems?.length) {
-        return buildTentativeBreakdownFromSelections(storedLineItems);
+        return buildTentativeBreakdownFromSelections(storedLineItems, arrangementCatalog);
     }
 
     return buildTentativeBreakdownFromSelections(
@@ -114,6 +156,7 @@ export const getTentativeBreakdownFromItem = (item = {}) => {
             : Array.isArray(item?.arrangement_selections)
                 ? item.arrangement_selections
                 : [],
+        arrangementCatalog,
     );
 };
 
