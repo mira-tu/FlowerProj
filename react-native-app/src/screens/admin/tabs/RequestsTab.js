@@ -1579,7 +1579,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                     {tentativeBreakdown.lineItems.map((lineItem) => (
                       <View key={lineItem.key} style={{ marginBottom: 10 }}>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
-                          <Text style={[styles.detailValue, { flex: 1 }]}>{lineItem.label} x{lineItem.quantity}</Text>
+                          <Text style={[styles.detailValue, { flex: 1 }]}>{`${lineItem.label} x${lineItem.quantity}`}</Text>
                           <Text style={[styles.detailValue, { textAlign: 'right' }]}>{lineItem.formattedLineRange}</Text>
                         </View>
                         <Text style={[styles.detailLabel, { marginTop: 2, textTransform: 'none', letterSpacing: 0 }]}>Each: {lineItem.formattedUnitRange}</Text>

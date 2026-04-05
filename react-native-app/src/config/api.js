@@ -2320,7 +2320,7 @@ export const adminAPI = {
     },
 
     getAllRequests: async (params) => {
-        const buildRequestsQuery = (includeCancellationReason = true) => supabase
+        const buildRequestsQuery = (options = {}) => supabase
             .from('requests')
             .select(`
                 id,
@@ -2328,22 +2328,22 @@ export const adminAPI = {
                 type,
                 status,
                 contact_number,
-                image_url,
-                notes,
-                ${includeCancellationReason ? 'cancellation_reason,' : ''}
+                ${options.includeImageUrl !== false ? 'image_url,' : ''}
+                ${options.includeNotes !== false ? 'notes,' : ''}
+                ${options.includeCancellationReason !== false ? 'cancellation_reason,' : ''}
                 data,
                 created_at,
-                delivery_method,
-                pickup_time,
-                final_price,
-                shipping_fee,
-                payment_status,
-                payment_method,
-                receipt_url,
-                amount_received,
-                additional_receipts,
-                assigned_rider,
-                status_timestamps,
+                ${options.includeDeliveryMethod !== false ? 'delivery_method,' : ''}
+                ${options.includePickupTime !== false ? 'pickup_time,' : ''}
+                ${options.includeFinalPrice !== false ? 'final_price,' : ''}
+                ${options.includeShippingFee !== false ? 'shipping_fee,' : ''}
+                ${options.includePaymentStatus !== false ? 'payment_status,' : ''}
+                ${options.includePaymentMethod !== false ? 'payment_method,' : ''}
+                ${options.includeReceiptUrl !== false ? 'receipt_url,' : ''}
+                ${options.includeAmountReceived !== false ? 'amount_received,' : ''}
+                ${options.includeAdditionalReceipts !== false ? 'additional_receipts,' : ''}
+                ${options.includeAssignedRider !== false ? 'assigned_rider,' : ''}
+                ${options.includeStatusTimestamps !== false ? 'status_timestamps,' : ''}
                 users (
                     id,
                     name,
@@ -2353,11 +2353,68 @@ export const adminAPI = {
             `)
             .order('created_at', { ascending: false });
 
-        let { data: requests, error } = await buildRequestsQuery(true);
+        let queryOptions = {
+            includeImageUrl: true,
+            includeNotes: true,
+            includeCancellationReason: true,
+            includeDeliveryMethod: true,
+            includePickupTime: true,
+            includeFinalPrice: true,
+            includeShippingFee: true,
+            includePaymentStatus: true,
+            includePaymentMethod: true,
+            includeReceiptUrl: true,
+            includeAmountReceived: true,
+            includeAdditionalReceipts: true,
+            includeAssignedRider: true,
+            includeStatusTimestamps: true,
+        };
 
-        if (error?.code === '42703' && String(error?.message || '').includes('requests.cancellation_reason')) {
-            console.warn('Requests table is missing the cancellation_reason column; retrying admin request fetch without it.');
-            ({ data: requests, error } = await buildRequestsQuery(false));
+        let { data: requests, error } = await buildRequestsQuery(queryOptions);
+
+        const requestColumnFallbacks = [
+            ['requests.image_url', 'includeImageUrl', 'image_url'],
+            ['requests.notes', 'includeNotes', 'notes'],
+            ['requests.cancellation_reason', 'includeCancellationReason', 'cancellation_reason'],
+            ['requests.delivery_method', 'includeDeliveryMethod', 'delivery_method'],
+            ['requests.pickup_time', 'includePickupTime', 'pickup_time'],
+            ['requests.final_price', 'includeFinalPrice', 'final_price'],
+            ['requests.shipping_fee', 'includeShippingFee', 'shipping_fee'],
+            ['requests.payment_status', 'includePaymentStatus', 'payment_status'],
+            ['requests.payment_method', 'includePaymentMethod', 'payment_method'],
+            ['requests.receipt_url', 'includeReceiptUrl', 'receipt_url'],
+            ['requests.amount_received', 'includeAmountReceived', 'amount_received'],
+            ['requests.additional_receipts', 'includeAdditionalReceipts', 'additional_receipts'],
+            ['requests.assigned_rider', 'includeAssignedRider', 'assigned_rider'],
+            ['requests.status_timestamps', 'includeStatusTimestamps', 'status_timestamps'],
+        ];
+
+        let shouldRetry = true;
+        while (error && shouldRetry) {
+            shouldRetry = false;
+
+            const errorCode = String(error?.code || '');
+            const errorMessage = String(error?.message || '');
+            const missingColumnMessage = errorCode === '42703' || errorCode === 'PGRST204' || errorMessage.includes('schema cache')
+                ? errorMessage
+                : '';
+
+            if (!missingColumnMessage) {
+                break;
+            }
+
+            for (const [needle, optionKey, columnLabel] of requestColumnFallbacks) {
+                const matchesMissingColumn = missingColumnMessage.includes(needle)
+                    || missingColumnMessage.includes(`'${columnLabel}' column of 'requests'`);
+
+                if (queryOptions[optionKey] !== false && matchesMissingColumn) {
+                    console.warn(`Requests table is missing the ${columnLabel} column; retrying admin request fetch without it.`);
+                    queryOptions = { ...queryOptions, [optionKey]: false };
+                    ({ data: requests, error } = await buildRequestsQuery(queryOptions));
+                    shouldRetry = true;
+                    break;
+                }
+            }
         }
 
         if (error) {
