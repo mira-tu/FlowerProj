@@ -111,6 +111,20 @@ const Login = ({ onLogin }) => {
         };
     }, [verificationMessage]);
 
+    useEffect(() => {
+        if (!resetMessage) {
+            return undefined;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            setResetMessage('');
+        }, 10000);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+        };
+    }, [resetMessage]);
+
     const handleResendVerification = async () => {
         const targetEmail = (verificationEmail || email).trim().toLowerCase();
 

@@ -10,19 +10,19 @@ import '../styles/Auth.css';
 
 const STATUS_COPY = {
     verified: {
-        eyebrow: 'Account Confirmed',
-        title: 'Your email has been verified',
+        eyebrow: 'Verification Complete',
+        title: 'Your email has been confirmed',
         tone: 'success',
-        message: 'Your account is now active. You may proceed to the login page and sign in using the email address and password you created.',
-        note: 'You can now place orders, manage your profile, and continue using the shop normally.',
-        cta: 'Proceed to Login',
+        message: 'Your email address has been successfully confirmed. You may now log in to your account.',
+        note: 'Return to the login page and sign in using the email address and password you registered with.',
+        cta: 'Go to Login',
     },
     already_verified: {
-        eyebrow: 'Already Confirmed',
-        title: 'This email is already verified',
+        eyebrow: 'Already Verified',
+        title: 'Your email is already confirmed',
         tone: 'success',
-        message: 'Your account was already confirmed earlier. You may proceed to the login page anytime.',
-        note: 'Use the same email and password you registered with to access your account.',
+        message: 'This email address has already been confirmed. You may now log in to your account.',
+        note: 'Return to the login page and sign in using the email address and password you registered with.',
         cta: 'Go to Login',
     },
     expired: {
@@ -111,8 +111,7 @@ const EmailVerification = () => {
                 return;
             }
 
-            const finalStatus = syncResult.wasAlreadyVerified ? 'already_verified' : 'verified';
-            setPageStatus(finalStatus, STATUS_COPY[finalStatus].message);
+            setPageStatus('verified', STATUS_COPY.verified.message);
         };
 
         const resolveFromCurrentSession = async () => {
@@ -132,7 +131,7 @@ const EmailVerification = () => {
         if (errorMessage) {
             const nextStatus = getStatusFromError(errorMessage);
             clearSensitiveAuthParamsFromUrl();
-            setPageStatus(nextStatus, normalizeMessage(errorMessage) || STATUS_COPY[nextStatus].message);
+            setPageStatus(nextStatus, STATUS_COPY[nextStatus]?.message || STATUS_COPY.error.message);
             return undefined;
         }
 
