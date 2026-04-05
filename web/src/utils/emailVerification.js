@@ -29,6 +29,7 @@ const AUTH_HASH_KEYS = new Set([
     'expires_in',
     'provider_token',
     'refresh_token',
+    'token_hash',
     'token_type',
     'type',
 ]);
@@ -375,6 +376,48 @@ export const resendEmailVerification = async (email) => {
             status: 'sent',
             message: 'We sent another verification email. Check your inbox and spam folder.',
         },
+        error,
+    };
+};
+
+export const requestPasswordReset = async (email) => {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+
+    if (!normalizedEmail) {
+        return {
+            data: null,
+            error: new Error('Email is required to request a password reset link.'),
+        };
+    }
+
+    const { data, error } = await supabase.functions.invoke('request-password-reset', {
+        body: {
+            email: normalizedEmail,
+            redirectTo: getPasswordResetRedirectUrl(),
+        },
+    });
+
+    if (!error) {
+        return { data, error: null };
+    }
+
+    if (error?.context && typeof error.context.json === 'function') {
+        try {
+            const errorPayload = await error.context.json();
+            const nextError = new Error(errorPayload?.message || error.message || 'Unable to send a reset link right now.');
+            nextError.status = error.context.status;
+
+            return {
+                data: null,
+                error: nextError,
+            };
+        } catch {
+            // Fall through to the original error below.
+        }
+    }
+
+    return {
+        data: null,
         error,
     };
 };

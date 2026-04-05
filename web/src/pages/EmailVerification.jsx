@@ -4,9 +4,13 @@ import { supabase } from '../config/supabase';
 import {
     clearSensitiveAuthParamsFromUrl,
     getAuthErrorMessageFromLocation,
+    getLocationHashParams,
+    getLocationSearchParams,
     syncVerifiedUserProfile,
 } from '../utils/emailVerification';
 import '../styles/Auth.css';
+
+const VERIFICATION_TIMEOUT_MS = 10000;
 
 const STATUS_COPY = {
     verified: {
@@ -95,23 +99,94 @@ const EmailVerification = () => {
             setIsLoading(false);
         };
 
-        const finishWithConfirmedUser = async (user) => {
+        const finishWithConfirmedUser = async (user, fallbackStatus = 'verified') => {
             if (!isMounted || isResolved || !user) {
                 return;
             }
 
             isResolved = true;
-            clearSensitiveAuthParamsFromUrl();
+            window.clearTimeout(timeoutId);
 
-            const syncResult = await syncVerifiedUserProfile(user);
-            await supabase.auth.signOut();
+            try {
+                const syncResult = await syncVerifiedUserProfile(user);
+                await supabase.auth.signOut();
+                clearSensitiveAuthParamsFromUrl();
 
-            if (syncResult.error) {
+                if (syncResult.error) {
+                    setPageStatus('error', STATUS_COPY.error.message);
+                    return;
+                }
+
+                setPageStatus(fallbackStatus, STATUS_COPY[fallbackStatus]?.message || STATUS_COPY.verified.message);
+            } catch (verificationError) {
+                console.error('Email verification finish error:', verificationError);
+                clearSensitiveAuthParamsFromUrl();
                 setPageStatus('error', STATUS_COPY.error.message);
-                return;
+            }
+        };
+
+        const tryConfirmFromRedirect = async () => {
+            const searchParams = getLocationSearchParams();
+            const hashParams = getLocationHashParams();
+            const actionType = String(searchParams.get('type') || hashParams.get('type') || '').trim().toLowerCase();
+            const tokenHash = searchParams.get('token_hash') || hashParams.get('token_hash');
+            const code = searchParams.get('code');
+            const accessToken = hashParams.get('access_token') || searchParams.get('access_token');
+            const refreshToken = hashParams.get('refresh_token') || searchParams.get('refresh_token');
+
+            if (tokenHash && ['signup', 'email', 'invite'].includes(actionType)) {
+                const verificationType = actionType === 'email' ? 'email' : actionType === 'invite' ? 'invite' : 'signup';
+                const { data, error: verifyError } = await supabase.auth.verifyOtp({
+                    token_hash: tokenHash,
+                    type: verificationType,
+                });
+
+                if (verifyError) {
+                    throw verifyError;
+                }
+
+                const verifiedUser = data?.user || data?.session?.user;
+
+                if (verifiedUser) {
+                    await finishWithConfirmedUser(verifiedUser, 'verified');
+                    return true;
+                }
             }
 
-            setPageStatus('verified', STATUS_COPY.verified.message);
+            if (code) {
+                const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+
+                if (exchangeError) {
+                    throw exchangeError;
+                }
+
+                const verifiedUser = data?.session?.user || data?.user;
+
+                if (verifiedUser?.email_confirmed_at || verifiedUser?.confirmed_at) {
+                    await finishWithConfirmedUser(verifiedUser, 'verified');
+                    return true;
+                }
+            }
+
+            if (accessToken && refreshToken) {
+                const { data, error: setSessionError } = await supabase.auth.setSession({
+                    access_token: accessToken,
+                    refresh_token: refreshToken,
+                });
+
+                if (setSessionError) {
+                    throw setSessionError;
+                }
+
+                const verifiedUser = data?.session?.user;
+
+                if (verifiedUser?.email_confirmed_at || verifiedUser?.confirmed_at) {
+                    await finishWithConfirmedUser(verifiedUser, 'verified');
+                    return true;
+                }
+            }
+
+            return false;
         };
 
         const resolveFromCurrentSession = async () => {
@@ -119,7 +194,7 @@ const EmailVerification = () => {
             const currentUser = session?.user;
 
             if (currentUser?.email_confirmed_at || currentUser?.confirmed_at) {
-                await finishWithConfirmedUser(currentUser);
+                await finishWithConfirmedUser(currentUser, 'verified');
                 return true;
             }
 
@@ -135,38 +210,64 @@ const EmailVerification = () => {
             return undefined;
         }
 
+        timeoutId = window.setTimeout(() => {
+            if (isResolved || !isMounted) {
+                return;
+            }
+
+            isResolved = true;
+            clearSensitiveAuthParamsFromUrl();
+            setPageStatus('invalid', STATUS_COPY.invalid.message);
+        }, VERIFICATION_TIMEOUT_MS);
+
         const {
             data: { subscription },
         } = supabase.auth.onAuthStateChange(async (_event, session) => {
             const currentUser = session?.user;
 
             if (currentUser?.email_confirmed_at || currentUser?.confirmed_at) {
-                await finishWithConfirmedUser(currentUser);
+                await finishWithConfirmedUser(currentUser, 'verified');
             }
         });
 
-        resolveFromCurrentSession()
+        Promise.resolve()
+            .then(() => tryConfirmFromRedirect())
             .then((resolvedFromSession) => {
                 if (resolvedFromSession || isResolved) {
                     return;
                 }
 
-                timeoutId = window.setTimeout(async () => {
+                return resolveFromCurrentSession();
+            })
+            .then((resolvedFromSession) => {
+                if (resolvedFromSession || isResolved) {
+                    return;
+                }
+
+                window.setTimeout(async () => {
                     if (isResolved || !isMounted) {
                         return;
                     }
 
                     const resolvedAfterDelay = await resolveFromCurrentSession();
 
-                    if (!resolvedAfterDelay && !isResolved && isMounted) {
-                        clearSensitiveAuthParamsFromUrl();
-                        setPageStatus('invalid', STATUS_COPY.invalid.message);
+                    if (resolvedAfterDelay || isResolved || !isMounted) {
+                        return;
                     }
+
+                    isResolved = true;
+                    window.clearTimeout(timeoutId);
+                    clearSensitiveAuthParamsFromUrl();
+                    setPageStatus('invalid', STATUS_COPY.invalid.message);
                 }, 1500);
             })
             .catch((verificationError) => {
                 console.error('Email verification page error:', verificationError);
-                setPageStatus('error', STATUS_COPY.error.message);
+                isResolved = true;
+                window.clearTimeout(timeoutId);
+                clearSensitiveAuthParamsFromUrl();
+                const nextStatus = getStatusFromError(verificationError?.message || '');
+                setPageStatus(nextStatus, STATUS_COPY[nextStatus]?.message || STATUS_COPY.error.message);
             });
 
         return () => {

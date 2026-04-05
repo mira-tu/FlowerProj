@@ -8,7 +8,7 @@ import {
 } from '../utils/customerProfile';
 import {
     ensureVerifiedUserSession,
-    getPasswordResetRedirectUrl,
+    requestPasswordReset,
     resendEmailVerification,
 } from '../utils/emailVerification';
 import '../styles/Auth.css';
@@ -62,8 +62,6 @@ const Login = ({ onLogin }) => {
     const [verificationError, setVerificationError] = useState('');
     const [verificationLoading, setVerificationLoading] = useState(false);
     const [showVerificationHelp, setShowVerificationHelp] = useState(false);
-    const resetRedirectTo = getPasswordResetRedirectUrl();
-
     useEffect(() => {
         const params = new URLSearchParams(location.search);
         const verificationState = params.get('verification');
@@ -249,9 +247,7 @@ const Login = ({ onLogin }) => {
 
         try {
             const normalizedResetEmail = String(resetEmail || '').trim().toLowerCase();
-            const { error: resetPasswordError } = await supabase.auth.resetPasswordForEmail(normalizedResetEmail, {
-                redirectTo: resetRedirectTo,
-            });
+            const { error: resetPasswordError } = await requestPasswordReset(normalizedResetEmail);
 
             if (resetPasswordError) {
                 throw resetPasswordError;

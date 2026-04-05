@@ -28,5 +28,8 @@ verify_jwt = false
 [functions.send-auth-verification-email]
 verify_jwt = false
 
+[functions.request-password-reset]
+verify_jwt = false
+
 [functions.manage-admin-workflows]
 verify_jwt = false

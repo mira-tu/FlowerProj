@@ -244,6 +244,15 @@ function AppContent() {
     let isMounted = true;
 
     const handleSessionUser = async (sessionUser) => {
+      const authCallbackRoute = ['/email-verification', '/reset-password'].includes(window.location.pathname);
+
+      if (authCallbackRoute) {
+        if (isMounted) {
+          syncAuthenticatedUserState(null);
+        }
+        return;
+      }
+
       if (!sessionUser) {
         if (isMounted) {
           syncAuthenticatedUserState(null);

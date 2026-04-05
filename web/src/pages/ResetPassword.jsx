@@ -14,6 +14,7 @@ import {
 import '../styles/Auth.css';
 
 const MIN_PASSWORD_LENGTH = 6;
+const RESET_LINK_TIMEOUT_MS = 10000;
 
 const STATUS_COPY = {
     checking: {
@@ -91,6 +92,7 @@ const ResetPassword = () => {
 
     useEffect(() => {
         let isMounted = true;
+        let hasResolved = false;
         let timeoutId;
         const recoveryIndicatorsPresent = hasRecoveryLinkIndicators();
         const errorMessage = getAuthErrorMessageFromLocation();
@@ -106,6 +108,12 @@ const ResetPassword = () => {
         };
 
         const completeRecoveryReadyState = () => {
+            if (hasResolved || !isMounted) {
+                return;
+            }
+
+            hasResolved = true;
+            window.clearTimeout(timeoutId);
             markPasswordRecoveryInProgress();
             clearSensitiveAuthParamsFromUrl();
             setPageStatus('ready', STATUS_COPY.ready.message);
@@ -114,9 +122,27 @@ const ResetPassword = () => {
         const tryActivateRecoverySession = async () => {
             const searchParams = getLocationSearchParams();
             const hashParams = getLocationHashParams();
+            const tokenHash = searchParams.get('token_hash') || hashParams.get('token_hash');
+            const actionType = String(searchParams.get('type') || hashParams.get('type') || '').trim().toLowerCase();
             const accessToken = hashParams.get('access_token') || searchParams.get('access_token');
             const refreshToken = hashParams.get('refresh_token') || searchParams.get('refresh_token');
             const code = searchParams.get('code');
+
+            if (tokenHash && actionType === 'recovery') {
+                const { data, error: verifyError } = await supabase.auth.verifyOtp({
+                    token_hash: tokenHash,
+                    type: 'recovery',
+                });
+
+                if (verifyError) {
+                    throw verifyError;
+                }
+
+                if (data.session?.user || data.user) {
+                    completeRecoveryReadyState();
+                    return true;
+                }
+            }
 
             if (accessToken && refreshToken) {
                 const { data, error: setSessionError } = await supabase.auth.setSession({
@@ -166,15 +192,28 @@ const ResetPassword = () => {
             const { data: { session } } = await supabase.auth.getSession();
 
             if (session?.user) {
-                clearSensitiveAuthParamsFromUrl();
-                setPageStatus('ready', STATUS_COPY.ready.message);
+                completeRecoveryReadyState();
                 return true;
             }
 
             return false;
         };
 
+        timeoutId = window.setTimeout(() => {
+            if (hasResolved || !isMounted) {
+                return;
+            }
+
+            hasResolved = true;
+            clearSensitiveAuthParamsFromUrl();
+            clearPasswordRecoveryInProgress();
+            const fallbackStatus = recoveryIndicatorsPresent ? 'expired' : 'invalid';
+            setPageStatus(fallbackStatus, STATUS_COPY[fallbackStatus].message);
+        }, RESET_LINK_TIMEOUT_MS);
+
         if (errorMessage) {
+            hasResolved = true;
+            window.clearTimeout(timeoutId);
             clearSensitiveAuthParamsFromUrl();
             clearPasswordRecoveryInProgress();
             const nextStatus = getResetStatusFromError(errorMessage);
@@ -194,25 +233,30 @@ const ResetPassword = () => {
 
         resolveRecoverySession()
             .then((resolvedFromSession) => {
-                if (resolvedFromSession) {
+                if (resolvedFromSession || hasResolved) {
                     return;
                 }
 
-                timeoutId = window.setTimeout(async () => {
+                window.setTimeout(async () => {
                     const resolvedAfterDelay = await resolveRecoverySession();
 
-                    if (!resolvedAfterDelay && isMounted) {
+                    if (!resolvedAfterDelay && isMounted && !hasResolved) {
+                        hasResolved = true;
+                        window.clearTimeout(timeoutId);
                         clearSensitiveAuthParamsFromUrl();
                         clearPasswordRecoveryInProgress();
                         const fallbackStatus = recoveryIndicatorsPresent ? 'expired' : 'invalid';
                         setPageStatus(fallbackStatus, STATUS_COPY[fallbackStatus].message);
                     }
-                }, 6000);
+                }, 1200);
             })
             .catch((resetFlowError) => {
                 console.error('Reset password page error:', resetFlowError);
+                hasResolved = true;
+                window.clearTimeout(timeoutId);
                 clearPasswordRecoveryInProgress();
-                setPageStatus('error', STATUS_COPY.error.message);
+                const nextStatus = getResetStatusFromError(resetFlowError?.message || '');
+                setPageStatus(nextStatus, STATUS_COPY[nextStatus]?.message || STATUS_COPY.error.message);
             });
 
         return () => {
