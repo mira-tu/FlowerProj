@@ -46,6 +46,7 @@ import Contact from './pages/Contact'
 import About from './pages/About'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
+import EmailVerification from './pages/EmailVerification'
 import ResetPassword from './pages/ResetPassword'
 import Wishlist from './pages/Wishlist'
 import Cart from './pages/Cart'
@@ -70,6 +71,7 @@ import { fetchCustomOrderCatalog } from './utils/customOrderCatalog';
 import { normalizeProductPricing } from './utils/productPricing';
 
 import { supabase } from './config/supabase';
+import { ensureVerifiedUserSession } from './utils/emailVerification';
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -85,7 +87,7 @@ function ScrollToTop() {
 
 function AppContent() {
   const location = useLocation();
-  const isAuthRoute = ['/login', '/signup', '/reset-password'].includes(location.pathname);
+  const isAuthRoute = ['/login', '/signup', '/reset-password', '/email-verification'].includes(location.pathname);
   const isCustomOrderCatalogRoute = location.pathname === '/custom-order';
   const showNavbar = !isAuthRoute;
   const [user, setUser] = useState(null);
@@ -97,6 +99,22 @@ function AppContent() {
   const userRef = useRef(null);
 
   const getCartKey = (userId) => `cart_${userId || 'guest'}`;
+
+  const syncAuthenticatedUserState = (currentUser) => {
+    setUser(currentUser);
+    userRef.current = currentUser;
+
+    try {
+      const cartKey = getCartKey(currentUser?.id);
+      const saved = localStorage.getItem(cartKey);
+
+      if (saved) {
+        setCart(JSON.parse(saved));
+      } else {
+        setCart([]);
+      }
+    } catch (e) { }
+  };
 
   const [cart, setCart] = useState(() => {
     try {
@@ -223,44 +241,56 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      const currentUser = session?.user ?? null;
-      setUser(currentUser);
-      userRef.current = currentUser;
+    let isMounted = true;
 
-      // Load user-specific cart on initial session fetch
-      try {
-        const cartKey = getCartKey(currentUser?.id);
-        const saved = localStorage.getItem(cartKey);
-        if (saved) {
-          setCart(JSON.parse(saved));
-        } else if (currentUser) {
-          // If user logged in but no cart, init empty so they don't see guest cart
-          setCart([]);
+    const handleSessionUser = async (sessionUser) => {
+      if (!sessionUser) {
+        if (isMounted) {
+          syncAuthenticatedUserState(null);
         }
-      } catch (e) { }
+        return;
+      }
+
+      const verificationState = await ensureVerifiedUserSession(sessionUser);
+
+      if (verificationState.error) {
+        console.warn('Non-blocking: verification status check failed:', verificationState.error);
+      }
+
+      if (verificationState.shouldSignOut) {
+        await supabase.auth.signOut();
+
+        if (isMounted) {
+          syncAuthenticatedUserState(null);
+        }
+
+        if (!['/login', '/signup', '/email-verification'].includes(window.location.pathname)) {
+          const emailQuery = sessionUser.email ? `&email=${encodeURIComponent(sessionUser.email)}` : '';
+          window.location.href = `/login?verification=required${emailQuery}`;
+        }
+
+        return;
+      }
+
+      if (isMounted) {
+        syncAuthenticatedUserState(sessionUser);
+      }
+    };
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      handleSessionUser(session?.user ?? null);
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      const currentUser = session?.user ?? null;
-      setUser(currentUser);
-      userRef.current = currentUser;
-
-      // Load user-specific cart on auth change
-      try {
-        const cartKey = getCartKey(currentUser?.id);
-        const saved = localStorage.getItem(cartKey);
-        if (saved) {
-          setCart(JSON.parse(saved));
-        } else {
-          setCart([]);
-        }
-      } catch (e) { }
+      handleSessionUser(session?.user ?? null);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const login = () => {
@@ -399,6 +429,7 @@ function AppContent() {
         <Route path="/booking-checkout" element={<BookingCheckout user={user} />} />
         <Route path="/login" element={<Login onLogin={login} />} />
         <Route path="/signup" element={<Signup />} />
+        <Route path="/email-verification" element={<EmailVerification />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/privacy" element={<Privacy />} />

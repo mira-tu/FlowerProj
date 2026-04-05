@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Select from 'react-select';
 import { supabase } from '../config/supabase';
 import { formatPhoneNumber } from '../utils/format';
+import { getUserContactNumber, getUserFullName } from '../utils/customerProfile';
 import InfoModal from '../components/InfoModal';
 import '../styles/CustomOrder.css';
 import '../styles/Shop.css';
@@ -566,11 +567,14 @@ const buildMultiSelectStyles = (hasError) => ({
 });
 
 const CustomOrder = ({ user }) => {
+    const [savedProfile, setSavedProfile] = useState(null);
+    const fallbackUserName = getUserFullName(savedProfile || {}, user) || user?.email?.split('@')[0] || '';
+    const fallbackUserPhone = getUserContactNumber(savedProfile || {}, user);
     const [formData, setFormData] = useState({
-        customerName: user?.user_metadata?.full_name || '',
+        customerName: fallbackUserName,
         email: user?.email || '',
-        contactNumber: formatPhoneNumber(user?.user_metadata?.phone || ''),
-        recipientName: user?.user_metadata?.full_name || '',
+        contactNumber: fallbackUserPhone,
+        recipientName: fallbackUserName,
         occasion: '',
         otherOccasion: '',
         otherArrangementType: '',
@@ -612,6 +616,30 @@ const CustomOrder = ({ user }) => {
         const searchParams = new URLSearchParams(location.search);
         return String(searchParams.get('arrangement') || location.state?.preselectedArrangement || '').trim();
     }, [location.search, location.state]);
+
+    useEffect(() => {
+        const fetchSavedProfile = async () => {
+            if (!user?.id) {
+                setSavedProfile(null);
+                return;
+            }
+
+            const { data, error } = await supabase
+                .from('users')
+                .select('*')
+                .eq('id', user.id)
+                .maybeSingle();
+
+            if (error) {
+                console.error('Error fetching saved customer profile for custom order form:', error);
+                return;
+            }
+
+            setSavedProfile(data || null);
+        };
+
+        fetchSavedProfile();
+    }, [user]);
 
     useEffect(() => {
         let isMounted = true;
@@ -689,9 +717,9 @@ const CustomOrder = ({ user }) => {
 
     useEffect(() => {
         if (user) {
-            const userName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || '';
+            const userName = fallbackUserName;
             const userEmail = user?.email || '';
-            const userPhone = formatPhoneNumber(user?.user_metadata?.phone || '');
+            const userPhone = fallbackUserPhone;
 
             setFormData(prev => ({
                 ...prev,
@@ -701,7 +729,7 @@ const CustomOrder = ({ user }) => {
                 recipientName: prev.recipientName === '' ? userName : prev.recipientName
             }));
         }
-    }, [user]);
+    }, [fallbackUserName, fallbackUserPhone, user]);
 
     useEffect(() => {
         if (!preselectedArrangementValue || appliedArrangementPrefillRef.current === preselectedArrangementValue) {

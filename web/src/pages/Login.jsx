@@ -1,10 +1,38 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { supabase } from '../config/supabase'; // Import supabase client
-// import { authAPI } from '../config/api'; // Remove authAPI
+import React, { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { supabase } from '../config/supabase';
+import {
+    buildCustomerProfilePayload,
+    getUserContactNumber,
+    getUserNameParts,
+} from '../utils/customerProfile';
+import {
+    ensureVerifiedUserSession,
+    getPasswordResetRedirectUrl,
+    resendEmailVerification,
+} from '../utils/emailVerification';
 import '../styles/Auth.css';
 
+const getFriendlyVerificationError = (error) => {
+    const message = String(error?.message || '').toLowerCase();
+
+    if (!message) {
+        return 'Unable to resend the verification email. Please try again.';
+    }
+
+    if (message.includes('email rate limit') || message.includes('rate limit') || message.includes('too many requests')) {
+        return 'Please wait a moment before requesting another verification email.';
+    }
+
+    if (message.includes('already') && (message.includes('confirmed') || message.includes('verified'))) {
+        return 'Your email is already verified. You may now log in.';
+    }
+
+    return error.message || 'Unable to resend the verification email. Please try again.';
+};
+
 const Login = ({ onLogin }) => {
+    const location = useLocation();
     const navigate = useNavigate();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -15,82 +43,174 @@ const Login = ({ onLogin }) => {
     const [resetLoading, setResetLoading] = useState(false);
     const [resetMessage, setResetMessage] = useState('');
     const [resetError, setResetError] = useState('');
-    const resetRedirectTo = `${window.location.origin}/reset-password`;
+    const [verificationEmail, setVerificationEmail] = useState('');
+    const [verificationMessage, setVerificationMessage] = useState('');
+    const [verificationError, setVerificationError] = useState('');
+    const [verificationLoading, setVerificationLoading] = useState(false);
+    const [showVerificationHelp, setShowVerificationHelp] = useState(false);
+    const resetRedirectTo = getPasswordResetRedirectUrl();
 
-    const handleLogin = async (e) => {
-        e.preventDefault();
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const verificationState = params.get('verification');
+        const emailFromQuery = params.get('email') || '';
+
+        if (emailFromQuery) {
+            setEmail(emailFromQuery);
+            setVerificationEmail(emailFromQuery);
+        }
+
+        if (verificationState === 'pending') {
+            setShowVerificationHelp(true);
+            setVerificationMessage('Check your email for the verification link before logging in.');
+            setVerificationError('');
+            setError('');
+            return;
+        }
+
+        if (verificationState === 'required') {
+            setShowVerificationHelp(true);
+            setVerificationMessage('');
+            setVerificationError('');
+            setError('Please verify your email before logging in.');
+        }
+    }, [location.search]);
+
+    const handleResendVerification = async () => {
+        const targetEmail = (verificationEmail || email).trim().toLowerCase();
+
+        setVerificationMessage('');
+        setVerificationError('');
         setError('');
+
+        if (!targetEmail) {
+            setVerificationError('Enter your email address first so we know where to send the link.');
+            return;
+        }
+
+        setVerificationLoading(true);
+
+        try {
+            const { data, error: resendError } = await resendEmailVerification(targetEmail);
+
+            if (resendError) {
+                throw resendError;
+            }
+
+            setVerificationMessage(data?.message || 'We sent a verification link to your email address.');
+            setShowVerificationHelp(true);
+        } catch (resendError) {
+            console.error('Verification resend error:', resendError);
+            const friendlyMessage = getFriendlyVerificationError(resendError);
+
+            if (friendlyMessage.toLowerCase().includes('already verified')) {
+                setVerificationMessage(friendlyMessage);
+                setShowVerificationHelp(true);
+                return;
+            }
+
+            setVerificationError(friendlyMessage);
+        } finally {
+            setVerificationLoading(false);
+        }
+    };
+
+    const handleLogin = async (event) => {
+        event.preventDefault();
+        setError('');
+        setVerificationMessage('');
+        setVerificationError('');
         setLoading(true);
 
         try {
-            // Customer login for web app using Supabase
-            const { data, error } = await supabase.auth.signInWithPassword({
+            const { data, error: signInError } = await supabase.auth.signInWithPassword({
                 email,
                 password,
             });
 
-            if (error || !data?.user) {
-                console.error('Login error:', error || 'Unknown authentication error');
-                if (error && error.message && error.message.toLowerCase().includes('email not confirmed')) {
-                    setError('Please confirm your email address before logging in.');
+            if (signInError || !data?.user) {
+                console.error('Login error:', signInError || 'Unknown authentication error');
+
+                if (signInError?.message?.toLowerCase().includes('email not confirmed')) {
+                    setShowVerificationHelp(true);
+                    setVerificationEmail(email.trim().toLowerCase());
+                    setError('Please verify your email before logging in.');
                 } else {
                     setError('Invalid email or password');
                 }
+
                 return;
             }
 
-            // Login successful — redirect immediately.
-            // The onAuthStateChange listener in App.jsx will pick up the session.
+            const verificationState = await ensureVerifiedUserSession(data.user);
+
+            if (verificationState.shouldSignOut) {
+                await supabase.auth.signOut();
+                setShowVerificationHelp(true);
+                setVerificationEmail(data.user.email || email.trim().toLowerCase());
+                setError('Please verify your email before logging in.');
+                return;
+            }
+
             navigate('/');
 
-            // Fire-and-forget: sync user data to public.users table.
-            // This must NOT block login or navigation — the table schema may
-            // not match (e.g., UUID vs SERIAL id), so we catch and log only.
+            if (typeof onLogin === 'function') {
+                onLogin();
+            }
+
             const { user } = data;
+            const nameParts = getUserNameParts({}, user);
+            const profilePayload = buildCustomerProfilePayload({
+                firstName: nameParts.firstName,
+                middleName: nameParts.middleName,
+                lastName: nameParts.lastName,
+                email: user.email,
+                contactNumber: getUserContactNumber({}, user),
+                birthday: user.user_metadata?.birthdate || '',
+                gender: user.user_metadata?.gender || '',
+            });
+
             supabase
                 .from('users')
                 .upsert({
                     id: user.id,
-                    name: user.user_metadata?.name || user.email,
-                    email: user.email,
-                    phone: user.user_metadata?.phone || null,
-                    role: 'customer'
+                    ...profilePayload,
                 }, { onConflict: 'id' })
                 .then(({ error: upsertError }) => {
                     if (upsertError) {
                         console.warn('Non-blocking: failed to sync user profile to public.users:', upsertError.message);
                     }
                 })
-                .catch((err) => {
-                    console.warn('Non-blocking: user profile sync error:', err);
+                .catch((upsertException) => {
+                    console.warn('Non-blocking: user profile sync error:', upsertException);
                 });
-        } catch (err) {
-            console.error('Unexpected login error:', err);
+        } catch (loginException) {
+            console.error('Unexpected login error:', loginException);
             setError('Invalid email or password');
         } finally {
             setLoading(false);
         }
     };
 
-    const handleResetPassword = async (e) => {
-        e.preventDefault();
+    const handleResetPassword = async (event) => {
+        event.preventDefault();
         setResetMessage('');
         setResetError('');
         setResetLoading(true);
 
         try {
-            const { error: resetError } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+            const { error: resetPasswordError } = await supabase.auth.resetPasswordForEmail(resetEmail, {
                 redirectTo: resetRedirectTo,
             });
 
-            if (resetError) {
-                throw resetError;
+            if (resetPasswordError) {
+                throw resetPasswordError;
             }
 
             setResetMessage('If an account exists for that email, a password reset link has been sent.');
-        } catch (err) {
-            console.error('Password reset error:', err);
-            setResetError(err.message || 'Unable to send reset email. Please try again.');
+        } catch (resetPasswordException) {
+            console.error('Password reset error:', resetPasswordException);
+            setResetError(resetPasswordException.message || 'Unable to send reset email. Please try again.');
         } finally {
             setResetLoading(false);
         }
@@ -103,8 +223,8 @@ const Login = ({ onLogin }) => {
                     <div className="auth-overlay"></div>
                     <div className="auth-text">
                         <h3>Welcome to</h3>
-                        <h2>Jocerry's Flower Shop!</h2>
-                        <p>We're so happy to see you again.</p>
+                        <h2>Jocerry&apos;s Flower Shop!</h2>
+                        <p>We&apos;re so happy to see you again.</p>
                     </div>
                 </div>
                 <div className="auth-form-container">
@@ -130,7 +250,7 @@ const Login = ({ onLogin }) => {
                                         id="resetEmail"
                                         placeholder="name@example.com"
                                         value={resetEmail}
-                                        onChange={(e) => setResetEmail(e.target.value)}
+                                        onChange={(event) => setResetEmail(event.target.value)}
                                         required
                                         disabled={resetLoading}
                                     />
@@ -168,6 +288,16 @@ const Login = ({ onLogin }) => {
                                         {error}
                                     </div>
                                 )}
+                                {verificationMessage && (
+                                    <div className="alert alert-success" role="alert">
+                                        {verificationMessage}
+                                    </div>
+                                )}
+                                {verificationError && (
+                                    <div className="alert alert-danger" role="alert">
+                                        {verificationError}
+                                    </div>
+                                )}
 
                                 <div className="form-floating mb-3">
                                     <input
@@ -176,7 +306,10 @@ const Login = ({ onLogin }) => {
                                         id="floatingInput"
                                         placeholder="name@example.com"
                                         value={email}
-                                        onChange={(e) => setEmail(e.target.value)}
+                                        onChange={(event) => {
+                                            setEmail(event.target.value);
+                                            setVerificationEmail(event.target.value);
+                                        }}
                                         required
                                         disabled={loading}
                                     />
@@ -189,7 +322,7 @@ const Login = ({ onLogin }) => {
                                         id="floatingPassword"
                                         placeholder="Password"
                                         value={password}
-                                        onChange={(e) => setPassword(e.target.value)}
+                                        onChange={(event) => setPassword(event.target.value)}
                                         required
                                         disabled={loading}
                                     />
@@ -202,7 +335,7 @@ const Login = ({ onLogin }) => {
                                         className="auth-link small text-nowrap btn btn-link p-0"
                                         onClick={() => {
                                             setShowReset(true);
-                                            setResetEmail((prev) => prev || email);
+                                            setResetEmail((previousEmail) => previousEmail || email);
                                             setResetMessage('');
                                             setResetError('');
                                         }}
@@ -210,6 +343,19 @@ const Login = ({ onLogin }) => {
                                         Forgot Password?
                                     </button>
                                 </div>
+
+                                {showVerificationHelp && (
+                                    <div className="mb-4">
+                                        <button
+                                            type="button"
+                                            className="auth-link small btn btn-link p-0"
+                                            onClick={handleResendVerification}
+                                            disabled={verificationLoading}
+                                        >
+                                            {verificationLoading ? 'Sending verification email...' : 'Resend verification email'}
+                                        </button>
+                                    </div>
+                                )}
 
                                 <button type="submit" className="btn btn-auth" disabled={loading}>
                                     {loading ? (
@@ -226,7 +372,7 @@ const Login = ({ onLogin }) => {
                     )}
 
                     <div className="auth-footer">
-                        Don't have an account? <Link to="/signup" className="auth-link">Sign Up</Link>
+                        Don&apos;t have an account? <Link to="/signup" className="auth-link">Sign Up</Link>
                     </div>
                 </div>
             </div>

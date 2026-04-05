@@ -3,6 +3,7 @@ import Select from 'react-select';
 import { Link } from 'react-router-dom';
 import { supabase } from '../config/supabase';
 import { formatPhoneNumber } from '../utils/format';
+import { getUserContactNumber, getUserFullName } from '../utils/customerProfile';
 
 const CheckoutAddressSelection = ({
     user,
@@ -14,6 +15,7 @@ const CheckoutAddressSelection = ({
     onAddressesLoaded
 }) => {
     const [savedAddresses, setSavedAddresses] = useState([]);
+    const [savedProfile, setSavedProfile] = useState(null);
     const [showAddressModal, setShowAddressModal] = useState(false);
     const [isEditingAddress, setIsEditingAddress] = useState(false);
     const [addressForm, setAddressForm] = useState({
@@ -33,6 +35,32 @@ const CheckoutAddressSelection = ({
     const [selectedBarangay, setSelectedBarangay] = useState(null);
     const [addressLoading, setAddressLoading] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
+    const fallbackCustomerName = getUserFullName(savedProfile || {}, user) || user?.email || '';
+    const fallbackCustomerPhone = getUserContactNumber(savedProfile || {}, user);
+
+    useEffect(() => {
+        const fetchSavedProfile = async () => {
+            if (!user?.id) {
+                setSavedProfile(null);
+                return;
+            }
+
+            const { data, error } = await supabase
+                .from('users')
+                .select('*')
+                .eq('id', user.id)
+                .maybeSingle();
+
+            if (error) {
+                console.error('Error fetching saved customer profile:', error);
+                return;
+            }
+
+            setSavedProfile(data || null);
+        };
+
+        fetchSavedProfile();
+    }, [user]);
 
     const handleAddressSelect = useCallback((addressId, addressesToSearch = savedAddresses) => {
         if (!addressesToSearch) return;
@@ -76,8 +104,8 @@ const CheckoutAddressSelection = ({
                     }
                 } else {
                     setAddress({
-                        name: user?.user_metadata?.name || user?.email || '',
-                        phone: user?.user_metadata?.phone || '',
+                        name: fallbackCustomerName,
+                        phone: fallbackCustomerPhone,
                         street: '',
                         barangay: '',
                         city: '',
@@ -94,7 +122,7 @@ const CheckoutAddressSelection = ({
         };
 
         fetchAddresses();
-    }, [user, handleAddressSelect]);
+    }, [fallbackCustomerName, fallbackCustomerPhone, user, handleAddressSelect]);
 
     const selectStyles = {
         control: (provided) => ({
@@ -120,8 +148,8 @@ const CheckoutAddressSelection = ({
             setAddressForm({
                 id: null,
                 label: 'Home',
-                name: user?.user_metadata?.name || user?.email || '',
-                phone: user?.user_metadata?.phone || '',
+                name: fallbackCustomerName,
+                phone: fallbackCustomerPhone,
                 street: '',
                 barangay: '',
                 city: 'Zamboanga City',

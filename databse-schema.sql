@@ -13,8 +13,13 @@ CREATE TYPE stock_reservation_status AS ENUM ('reserved', 'consumed', 'released'
 CREATE TABLE users (
   id UUID PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
+  first_name VARCHAR(100),
+  middle_name VARCHAR(100),
+  last_name VARCHAR(100),
   email VARCHAR(255) NOT NULL UNIQUE,
   phone VARCHAR(20),
+  birthdate DATE,
+  gender VARCHAR(50),
   role user_role NOT NULL DEFAULT 'customer',
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );

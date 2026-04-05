@@ -1,0 +1,1 @@
+-- Placeholder migration file to align local history with the remote Supabase project.

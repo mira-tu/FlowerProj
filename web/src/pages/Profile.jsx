@@ -4,6 +4,14 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import '../styles/Shop.css';
 import { supabase } from '../config/supabase';
 import { formatPhoneNumber } from '../utils/format';
+import {
+    buildCustomerMetadata,
+    buildCustomerProfileFormState,
+    buildCustomerProfilePayload,
+    GENDER_OPTIONS,
+    getUserContactNumber,
+    getUserFullName,
+} from '../utils/customerProfile';
 import InfoModal from '../components/InfoModal';
 import qrCodeImage from '../assets/qr-code-1.jpg';
 import { insertUserNotification } from '../utils/notificationApi';
@@ -266,13 +274,7 @@ const Profile = ({ user, logout }) => {
     const [cancelReasonError, setCancelReasonError] = useState('');
     const [showWaitingModal, setShowWaitingModal] = useState(false);
     const [modalContent, setModalContent] = useState(null);
-    const [profileForm, setProfileForm] = useState({
-        fullName: '',
-        phone: '',
-        dateOfBirth: '',
-        currentPassword: '',
-        newPassword: '',
-    });
+    const [profileForm, setProfileForm] = useState(() => buildCustomerProfileFormState({}, user));
     const [profileData, setProfileData] = useState(null); // New state for fetched profile data
     const [status, setStatus] = useState(null);
     const [showQRModal, setShowQRModal] = useState(false);
@@ -280,6 +282,8 @@ const Profile = ({ user, logout }) => {
     const [receiptFile, setReceiptFile] = useState(null);
     const [receiptPreview, setReceiptPreview] = useState(null);
     const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+    const fallbackProfileName = getUserFullName(profileData || {}, user) || user?.email || '';
+    const fallbackProfilePhone = getUserContactNumber(profileData || {}, user);
 
     const handleReceiptUpload = (e) => {
         const file = e.target.files[0];
@@ -366,7 +370,7 @@ const Profile = ({ user, logout }) => {
                     .from('users')
                     .select('*')
                     .eq('id', user.id)
-                    .single();
+                    .maybeSingle();
 
                 if (error) {
                     console.error('Error fetching profile:', error);
@@ -379,14 +383,8 @@ const Profile = ({ user, logout }) => {
     }, [user]); // Re-run when user changes
 
     useEffect(() => {
-        if (profileData) {
-            setProfileForm({
-                fullName: profileData.name || '',
-                phone: formatPhoneNumber(profileData.phone || ''),
-                dateOfBirth: profileData.birthdate || '',
-            });
-        }
-    }, [profileData]); // Re-run when profileData changes
+        setProfileForm(buildCustomerProfileFormState(profileData || {}, user));
+    }, [profileData, user]); // Re-run when profileData or auth user changes
 
     // Load orders and requests from Supabase
     const loadOrders = async (currentUserId) => {
@@ -667,7 +665,7 @@ const Profile = ({ user, logout }) => {
         }
 
         setShowAddressModal(false);
-        setAddressForm({ label: '', name: user?.user_metadata?.name || user?.email || '', phone: user?.user_metadata?.phone || '', street: '', barangay: '' });
+        setAddressForm({ label: '', name: fallbackProfileName, phone: fallbackProfilePhone, street: '', barangay: '' });
         setEditingAddress(null);
     };
     const handleDeleteAddress = (id) => {
@@ -1372,8 +1370,8 @@ const Profile = ({ user, logout }) => {
                         setSelectedBarangay(null);
                         setAddressForm({
                             label: '',
-                            name: user?.user_metadata?.name || '', // Use user_metadata
-                            phone: formatPhoneNumber(user?.user_metadata?.phone || ''), // Use user_metadata
+                            name: fallbackProfileName,
+                            phone: fallbackProfilePhone,
                             street: '',
                             barangay: ''
                         });
@@ -1443,28 +1441,52 @@ const Profile = ({ user, logout }) => {
             return;
         }
 
+        const today = new Date().toISOString().split('T')[0];
+        if (!profileForm.firstName.trim() || !profileForm.lastName.trim() || !profileForm.phone.trim() || !profileForm.dateOfBirth || !profileForm.gender) {
+            setStatus({ type: 'error', message: 'First name, last name, contact number, birthday, and gender are required.' });
+            return;
+        }
+
+        if (!/^09\d{9}$/.test(profileForm.phone.replace(/\D/g, ''))) {
+            setStatus({ type: 'error', message: 'Please enter a valid mobile number (11 digits starting with 09).' });
+            return;
+        }
+
+        if (profileForm.dateOfBirth > today) {
+            setStatus({ type: 'error', message: 'Birthday cannot be in the future.' });
+            return;
+        }
+
+        const profilePayload = buildCustomerProfilePayload({
+            firstName: profileForm.firstName,
+            middleName: profileForm.middleName,
+            lastName: profileForm.lastName,
+            email: user.email,
+            contactNumber: profileForm.phone,
+            birthday: profileForm.dateOfBirth,
+            gender: profileForm.gender,
+        });
+        delete profilePayload.role;
+
         try {
-            // Update the public 'users' table
             const { error: profileError } = await supabase
                 .from('users')
-                .update({
-                    name: profileForm.fullName,
-                    phone: profileForm.phone,
-                    birthdate: profileForm.dateOfBirth,
-                })
+                .update(profilePayload)
                 .eq('id', user.id);
 
             if (profileError) {
                 throw profileError;
             }
 
-            // Also update the user_metadata in auth.users to keep it in sync
-            // This is what the rest of the app seems to use
             const { error: authError } = await supabase.auth.updateUser({
-                data: {
-                    name: profileForm.fullName,
-                    phone: profileForm.phone,
-                },
+                data: buildCustomerMetadata({
+                    firstName: profileForm.firstName,
+                    middleName: profileForm.middleName,
+                    lastName: profileForm.lastName,
+                    contactNumber: profileForm.phone,
+                    birthday: profileForm.dateOfBirth,
+                    gender: profileForm.gender,
+                }),
             });
 
             if (authError) {
@@ -1480,7 +1502,6 @@ const Profile = ({ user, logout }) => {
                     throw passwordError;
                 }
 
-                // Clear password fields from state after successful update
                 setProfileForm(prev => ({
                     ...prev,
                     currentPassword: '',
@@ -1488,6 +1509,10 @@ const Profile = ({ user, logout }) => {
                 }));
             }
 
+            setProfileData((prev) => ({
+                ...(prev || {}),
+                ...profilePayload,
+            }));
             setStatus({ type: 'success', message: 'Profile updated successfully!' });
 
         } catch (error) {
@@ -1504,7 +1529,13 @@ const Profile = ({ user, logout }) => {
         }
     };
 
-    const renderSettingsContent = () => (
+    const renderSettingsContent = () => {
+        const defaultAddress = addresses.find((item) => item.is_default) || addresses[0] || null;
+        const defaultAddressSummary = defaultAddress
+            ? `${defaultAddress.street}, ${defaultAddress.barangay}, ${defaultAddress.city}`
+            : 'Manage from My Addresses';
+
+        return (
         <>
             <h5 className="fw-bold mb-4">Account Settings</h5>
             {status && (
@@ -1514,13 +1545,34 @@ const Profile = ({ user, logout }) => {
             )}
             <form onSubmit={handleProfileUpdate}>
                 <div className="row">
-                    <div className="col-md-6 mb-3">
-                        <label className="form-label">Full Name</label>
+                    <div className="col-md-4 mb-3">
+                        <label className="form-label">First Name</label>
                         <input
                             type="text"
                             className="form-control"
-                            name="fullName"
-                            value={profileForm.fullName}
+                            name="firstName"
+                            value={profileForm.firstName}
+                            onChange={handleProfileFormChange}
+                        />
+                    </div>
+                    <div className="col-md-4 mb-3">
+                        <label className="form-label">Middle Name</label>
+                        <input
+                            type="text"
+                            className="form-control"
+                            name="middleName"
+                            value={profileForm.middleName}
+                            onChange={handleProfileFormChange}
+                            placeholder="Optional"
+                        />
+                    </div>
+                    <div className="col-md-4 mb-3">
+                        <label className="form-label">Last Name</label>
+                        <input
+                            type="text"
+                            className="form-control"
+                            name="lastName"
+                            value={profileForm.lastName}
                             onChange={handleProfileFormChange}
                         />
                     </div>
@@ -1545,13 +1597,39 @@ const Profile = ({ user, logout }) => {
                         />
                     </div>
                     <div className="col-md-6 mb-3">
-                        <label className="form-label">Date of Birth</label>
+                        <label className="form-label">Birthday</label>
                         <input
                             type="date"
                             className="form-control"
                             name="dateOfBirth"
                             value={profileForm.dateOfBirth}
                             onChange={handleProfileFormChange}
+                            max={new Date().toISOString().split('T')[0]}
+                        />
+                    </div>
+                    <div className="col-md-6 mb-3">
+                        <label className="form-label">Gender</label>
+                        <select
+                            className="form-select"
+                            name="gender"
+                            value={profileForm.gender}
+                            onChange={handleProfileFormChange}
+                        >
+                            <option value="">Select Gender</option>
+                            {GENDER_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                    {option.label}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="col-md-6 mb-3">
+                        <label className="form-label">Saved Address</label>
+                        <input
+                            type="text"
+                            className="form-control"
+                            value={defaultAddressSummary}
+                            disabled
                         />
                     </div>
                 </div>
@@ -1589,29 +1667,10 @@ const Profile = ({ user, logout }) => {
                 </button>
             </form>
         </>
-    );
+        );
+    };
 
     const renderMessagesContent = () => {
-        // Check for complete profile from the fetched profile data
-        const isProfileComplete = profileData && profileData.name && profileData.phone;
-
-        if (!isProfileComplete) {
-            return (
-                <div className="text-center p-5">
-                    <i className="fas fa-user-edit fa-3x text-muted mb-3"></i>
-                    <h5 className="fw-bold">Complete Your Profile</h5>
-                    <p className="text-muted">Please complete your profile setup in the "Account Settings" tab before you can send messages.</p>
-                    <button
-                        className="btn mt-3"
-                        style={{ background: 'var(--shop-pink)', color: 'white' }}
-                        onClick={() => openProfileMenu('settings')}
-                    >
-                        Go to Account Settings
-                    </button>
-                </div>
-            );
-        }
-
         return (
             <>
                 <div className="d-flex justify-content-between align-items-center mb-4">
