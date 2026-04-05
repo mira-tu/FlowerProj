@@ -1,6 +1,12 @@
 import { supabase } from '../config/supabase'
 
 const NOTIFICATION_COLUMNS = 'id, title, message, link, is_read, created_at, type, icon'
+const LEGACY_NOTIFICATION_COLUMNS = 'id, title, message, link, is_read, created_at, type'
+
+const isMissingNotificationIconError = (error) => {
+  const message = String(error?.message || '').toLowerCase()
+  return message.includes("'icon' column") && message.includes('notifications')
+}
 
 const mapNotification = (record) => ({
   id: record.id,
@@ -18,12 +24,21 @@ export const fetchUserNotifications = async (userId, limit = 100) => {
     return []
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('notifications')
     .select(NOTIFICATION_COLUMNS)
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .limit(limit)
+
+  if (error && isMissingNotificationIconError(error)) {
+    ;({ data, error } = await supabase
+      .from('notifications')
+      .select(LEGACY_NOTIFICATION_COLUMNS)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(limit))
+  }
 
   if (error) {
     throw error
@@ -72,18 +87,30 @@ export const insertUserNotification = async ({
     return null
   }
 
-  const { data, error } = await supabase
+  const payload = {
+    user_id: userId,
+    title,
+    message,
+    type,
+    link,
+    icon,
+  }
+
+  let { data, error } = await supabase
     .from('notifications')
-    .insert([{
-      user_id: userId,
-      title,
-      message,
-      type,
-      link,
-      icon,
-    }])
+    .insert([payload])
     .select('id')
     .maybeSingle()
+
+  if (error && isMissingNotificationIconError(error)) {
+    const { icon: _icon, ...legacyPayload } = payload
+
+    ;({ data, error } = await supabase
+      .from('notifications')
+      .insert([legacyPayload])
+      .select('id')
+      .maybeSingle())
+  }
 
   if (error) {
     throw error
@@ -130,9 +157,16 @@ export const insertStaffNotifications = async (
     icon,
   }))
 
-  const { error: insertError } = await supabase
+  let { error: insertError } = await supabase
     .from('notifications')
     .insert(payload)
+
+  if (insertError && isMissingNotificationIconError(insertError)) {
+    const legacyPayload = payload.map(({ icon: _icon, ...notification }) => notification)
+    ;({ error: insertError } = await supabase
+      .from('notifications')
+      .insert(legacyPayload))
+  }
 
   if (insertError) {
     throw insertError

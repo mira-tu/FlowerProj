@@ -711,21 +711,25 @@ const MyOrders = () => {
 
             const { data: { session } } = await supabase.auth.getSession();
 
-            await insertUserNotification({
-                userId: session?.user?.id,
-                type: 'cancellation',
-                title: `${orderTypeLabel} Updated`,
-                message: `${quantityToCancel} item${quantityToCancel > 1 ? 's were' : ' was'} cancelled from your ${orderTypeLabel.toLowerCase()} ${orderId}.`,
-                icon: 'fa-times-circle',
-                link: '/my-orders',
-            });
+            try {
+                await insertUserNotification({
+                    userId: session?.user?.id,
+                    type: 'cancellation',
+                    title: `${orderTypeLabel} Updated`,
+                    message: `${quantityToCancel} item${quantityToCancel > 1 ? 's were' : ' was'} cancelled from your ${orderTypeLabel.toLowerCase()} ${orderId}.`,
+                    icon: 'fa-times-circle',
+                    link: '/my-orders',
+                });
+            } catch (notificationError) {
+                console.warn('Cancellation completed but notification could not be created:', notificationError);
+            }
 
             // Reload orders from Supabase
-            loadOrders(session.user.id);
+            await loadOrders(session?.user?.id);
             closeCancelModal();
         } catch (error) {
             console.error('Error cancelling order:', error);
-            setInfoModal({ show: true, title: 'Error', message: 'Failed to cancel order. Please try again.' });
+            setInfoModal({ show: true, title: 'Error', message: error.message || 'Failed to cancel order. Please try again.' });
         }
     };
 

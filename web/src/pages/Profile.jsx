@@ -1122,17 +1122,21 @@ const Profile = ({ user, logout }) => {
                             : 'Request')
                 : 'Order';
             const orderNumber = orderToCancel.order_number ? `#${orderToCancel.order_number}` : '';
-            await insertUserNotification({
-                userId: user.id,
-                type: 'cancellation',
-                title: `${orderTypeLabel} Updated`,
-                message: `${quantityToCancel} item${quantityToCancel > 1 ? 's were' : ' was'} cancelled from your ${orderTypeLabel.toLowerCase()} ${orderNumber}.`,
-                icon: 'fa-times-circle',
-                link: '/profile',
-            });
+            try {
+                await insertUserNotification({
+                    userId: user.id,
+                    type: 'cancellation',
+                    title: `${orderTypeLabel} Updated`,
+                    message: `${quantityToCancel} item${quantityToCancel > 1 ? 's were' : ' was'} cancelled from your ${orderTypeLabel.toLowerCase()} ${orderNumber}.`,
+                    icon: 'fa-times-circle',
+                    link: '/profile',
+                });
+            } catch (notificationError) {
+                console.warn('Cancellation completed but notification could not be created:', notificationError);
+            }
 
             // Reload orders from Supabase
-            loadOrders(user.id);
+            await loadOrders(user.id);
             closeCancelModal();
         } catch (error) {
             console.error('Error during cancellation:', error);
