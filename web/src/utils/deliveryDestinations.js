@@ -71,8 +71,7 @@ const uniqueAddressIds = (addressIds = []) => Array.from(
 
 export const calculateDeliveryFee = ({
     deliveryMethod,
-    subtotal,
-    freeShippingThreshold,
+    hasFreeShipping = false,
     selectedAddressId,
     multiAddressEnabled,
     assignments = [],
@@ -82,7 +81,7 @@ export const calculateDeliveryFee = ({
         return 0;
     }
 
-    if (toFiniteNumber(subtotal) >= toFiniteNumber(freeShippingThreshold)) {
+    if (hasFreeShipping) {
         return 0;
     }
 

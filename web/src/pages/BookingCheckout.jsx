@@ -203,8 +203,7 @@ const BookingCheckout = ({ user }) => {
 
     const shippingFee = useMemo(() => calculateDeliveryFee({
         deliveryMethod,
-        subtotal: 0,
-        freeShippingThreshold: Number.POSITIVE_INFINITY,
+        hasFreeShipping: false,
         selectedAddressId,
         multiAddressEnabled,
         assignments: deliveryAssignments,

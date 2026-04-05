@@ -20,13 +20,8 @@ const DeliveryFeesTab = () => {
     const [deliveryFee, setDeliveryFee] = useState('');
     const [confirmDelete, setConfirmDelete] = useState(false);
 
-    // Free Shipping State
-    const [freeShippingThreshold, setFreeShippingThreshold] = useState('');
-    const [savingThreshold, setSavingThreshold] = useState(false);
-
     useEffect(() => {
         fetchBarangays();
-        fetchSettings();
     }, []);
 
     const fetchBarangays = async () => {
@@ -44,41 +39,6 @@ const DeliveryFeesTab = () => {
             Toast.show({ type: 'error', text1: 'Failed to load delivery fees.' });
         } finally {
             setLoading(false);
-        }
-    };
-
-    const fetchSettings = async () => {
-        try {
-            const { data, error } = await supabase
-                .from('app_content')
-                .select('value')
-                .eq('key', 'free_shipping_threshold')
-                .single();
-            if (error && error.code !== 'PGRST116') throw error;
-            if (data) setFreeShippingThreshold(data.value);
-        } catch (error) {
-            console.error('Error fetching threshold:', error);
-        }
-    };
-
-    const handleSaveThreshold = async () => {
-        const thresholdNum = parseFloat(freeShippingThreshold);
-        if (isNaN(thresholdNum) || thresholdNum < 0) {
-            Alert.alert('Error', 'Please enter a valid amount.');
-            return;
-        }
-        setSavingThreshold(true);
-        try {
-            const { error } = await supabase
-                .from('app_content')
-                .upsert({ key: 'free_shipping_threshold', value: String(thresholdNum) }, { onConflict: 'key' });
-            if (error) throw error;
-            Toast.show({ type: 'success', text1: 'Promo updated successfully.' });
-        } catch (error) {
-            console.error('Error saving threshold:', error);
-            Toast.show({ type: 'error', text1: 'Failed to update promo.' });
-        } finally {
-            setSavingThreshold(false);
         }
     };
 
@@ -208,28 +168,8 @@ const DeliveryFeesTab = () => {
 
             <View style={styles.promoContainer}>
                 <View style={{ flex: 1 }}>
-                    <Text style={styles.promoTitle}>Free Shipping Promo</Text>
-                    <Text style={styles.promoDesc}>Minimum order amount (₱)</Text>
-                </View>
-                <View style={styles.promoInputContainer}>
-                    <TextInput
-                        style={styles.promoInput}
-                        keyboardType="numeric"
-                        value={freeShippingThreshold}
-                        onChangeText={setFreeShippingThreshold}
-                        placeholder="e.g. 2000"
-                    />
-                    <TouchableOpacity
-                        style={styles.promoSaveBtn}
-                        onPress={handleSaveThreshold}
-                        disabled={savingThreshold}
-                    >
-                        {savingThreshold ? (
-                            <ActivityIndicator size="small" color="#fff" />
-                        ) : (
-                            <Text style={styles.promoSaveBtnText}>Save</Text>
-                        )}
-                    </TouchableOpacity>
+                    <Text style={styles.promoTitle}>Free Shipping</Text>
+                    <Text style={styles.promoDesc}>Free shipping is now managed per catalogue product in the Product Catalogue tab.</Text>
                 </View>
             </View>
 

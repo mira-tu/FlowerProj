@@ -80,6 +80,7 @@ const CatalogueTab = () => {
     stock_quantity: '',
     description: '',
     image: null,
+    is_free_shipping: false,
     is_active: true,
   });
 
@@ -227,6 +228,7 @@ const CatalogueTab = () => {
         description: formData.description || '',
         category_id: formData.category_id || '1',
         image: formData.image, // Pass the image object from the state
+        is_free_shipping: formData.is_free_shipping === true,
         is_active: formData.is_active,
       };
 
@@ -262,6 +264,7 @@ const CatalogueTab = () => {
       stock_quantity: product.stock_quantity?.toString() || '0',
       description: product.description || '',
       image: product.image_url ? { uri: product.image_url.startsWith('http') ? product.image_url : `${BASE_URL}${product.image_url}` } : null,
+      is_free_shipping: product.is_free_shipping === true,
       is_active: product.is_active !== false,
     });
     setModalVisible(true);
@@ -281,6 +284,7 @@ const CatalogueTab = () => {
       stock_quantity: '',
       description: '',
       image: null,
+      is_free_shipping: false,
       is_active: true,
     });
     setEditingProduct(null);
@@ -357,7 +361,13 @@ const CatalogueTab = () => {
         statusBadge={item.is_active === false ? 'Unavailable' : null}
         onEdit={() => handleEdit(item)}
         onDelete={() => handleDelete(item.id)}
-      />
+      >
+        {item.is_free_shipping === true ? (
+          <Text style={[styles.unavailableBadge, { backgroundColor: '#ecfdf5', color: '#047857', marginTop: 10 }]}>
+            Free Shipping
+          </Text>
+        ) : null}
+      </ProductCard>
     );
   };
 
@@ -514,6 +524,21 @@ const CatalogueTab = () => {
                   onValueChange={(value) => setFormData({ ...formData, is_active: value })}
                   trackColor={{ false: '#d1d5db', true: '#f9a8d4' }}
                   thumbColor={formData.is_active ? '#ec4899' : '#9ca3af'}
+                />
+              </View>
+
+              <View style={styles.toggleRow}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={styles.inputLabel}>Eligible for Free Shipping</Text>
+                  <Text style={styles.inputHelperText}>
+                    Delivery becomes free only when all catalogue items in the checkout are marked eligible.
+                  </Text>
+                </View>
+                <Switch
+                  value={formData.is_free_shipping}
+                  onValueChange={(value) => setFormData({ ...formData, is_free_shipping: value })}
+                  trackColor={{ false: '#d1d5db', true: '#bbf7d0' }}
+                  thumbColor={formData.is_free_shipping ? '#16a34a' : '#9ca3af'}
                 />
               </View>
 

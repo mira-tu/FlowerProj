@@ -96,29 +96,10 @@ const CustomizedCheckout = ({ user }) => {
     });
     const [selectedAddressId, setSelectedAddressId] = useState(null);
     const [dynamicShippingFee, setDynamicShippingFee] = useState(100);
-    const [freeShippingThreshold, setFreeShippingThreshold] = useState(2000);
     const [savedAddresses, setSavedAddresses] = useState([]);
     const [barangayFees, setBarangayFees] = useState([]);
     const [multiAddressEnabled, setMultiAddressEnabled] = useState(false);
     const [deliveryAssignments, setDeliveryAssignments] = useState([]);
-
-    useEffect(() => {
-        const fetchThreshold = async () => {
-            try {
-                const { data, error } = await supabase
-                    .from('app_content')
-                    .select('value')
-                    .eq('key', 'free_shipping_threshold')
-                    .single();
-                if (!error && data && data.value) {
-                    setFreeShippingThreshold(parseFloat(data.value) || 2000);
-                }
-            } catch (err) {
-                console.error("Error fetching free shipping threshold:", err);
-            }
-        };
-        fetchThreshold();
-    }, []);
 
     useEffect(() => {
         const fetchBarangayFees = async () => {
@@ -205,8 +186,7 @@ const CustomizedCheckout = ({ user }) => {
         ? 0
         : calculateDeliveryFee({
             deliveryMethod,
-            subtotal,
-            freeShippingThreshold,
+            hasFreeShipping: false,
             selectedAddressId,
             multiAddressEnabled,
             assignments: deliveryAssignments,
@@ -688,13 +668,6 @@ const CustomizedCheckout = ({ user }) => {
                                     Pickup: {selectedPickupDate} - {selectedPickupTime}
                                 </div>
                             )}
-                            {shippingFee === 0 && deliveryMethod === 'delivery' && (
-                                <div className="text-success small mb-2">
-                                    <i className="fas fa-check-circle me-1"></i>
-                                    Free shipping for orders ₱{freeShippingThreshold.toLocaleString()}+
-                                </div>
-                            )}
-
                             <div className="summary-row total">
                                 <span>Total</span>
                                 <span>₱{total.toLocaleString()}</span>

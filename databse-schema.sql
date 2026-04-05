@@ -58,6 +58,7 @@ CREATE TABLE products (
   category_id INT,
   image_url VARCHAR(255),
   stock_quantity INT NOT NULL DEFAULT 0,
+  is_free_shipping BOOLEAN NOT NULL DEFAULT FALSE,
   is_active BOOLEAN DEFAULT TRUE,
   FOREIGN KEY (category_id) REFERENCES categories(id)
 );

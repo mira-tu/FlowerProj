@@ -15,6 +15,7 @@ import {
     serializeMultiDeliveryNotes,
     syncDeliveryAssignments,
 } from '../utils/deliveryDestinations';
+import { buildFreeShippingLookup, cartQualifiesForFreeShipping } from '../utils/freeShipping';
 
 const paymentMethods = [
     { id: 'cod', name: 'Cash on Delivery', description: 'Pay when you receive', icon: 'fa-money-bill-wave' },
@@ -62,7 +63,7 @@ const insertOrderWithNotesFallback = async (orderPayload) => {
     };
 };
 
-const Checkout = ({ setCart, user }) => {
+const Checkout = ({ setCart, user, products = [] }) => {
     const navigate = useNavigate();
     const [checkoutItems, setCheckoutItems] = useState([]);
     const [orderType, setOrderType] = useState('ecommerce');
@@ -88,7 +89,6 @@ const Checkout = ({ setCart, user }) => {
     const [savedAddresses, setSavedAddresses] = useState([]);
     const [selectedAddressId, setSelectedAddressId] = useState(null);
     const [dynamicShippingFee, setDynamicShippingFee] = useState(100);
-    const [freeShippingThreshold, setFreeShippingThreshold] = useState(2000);
     const [barangayFees, setBarangayFees] = useState([]);
     const [multiAddressEnabled, setMultiAddressEnabled] = useState(false);
     const [deliveryAssignments, setDeliveryAssignments] = useState([]);
@@ -103,24 +103,6 @@ const Checkout = ({ setCart, user }) => {
             block: 'center',
         });
     };
-
-    useEffect(() => {
-        const fetchThreshold = async () => {
-            try {
-                const { data, error } = await supabase
-                    .from('app_content')
-                    .select('value')
-                    .eq('key', 'free_shipping_threshold')
-                    .single();
-                if (!error && data && data.value) {
-                    setFreeShippingThreshold(parseFloat(data.value) || 2000);
-                }
-            } catch (err) {
-                console.error("Error fetching free shipping threshold:", err);
-            }
-        };
-        fetchThreshold();
-    }, []);
 
     useEffect(() => {
         const fetchBarangayFees = async () => {
@@ -209,14 +191,21 @@ const Checkout = ({ setCart, user }) => {
         () => buildAddressFeeMap(savedAddresses, barangayFees),
         [savedAddresses, barangayFees]
     );
+    const freeShippingLookup = useMemo(
+        () => buildFreeShippingLookup(products),
+        [products]
+    );
+    const qualifiesForFreeShipping = useMemo(
+        () => cartQualifiesForFreeShipping(checkoutItems, freeShippingLookup),
+        [checkoutItems, freeShippingLookup]
+    );
 
     const subtotal = checkoutItems.reduce((acc, item) => acc + (item.price * (item.qty || 1)), 0);
     const shippingFee = deliveryMethod === 'pickup'
         ? 0
         : calculateDeliveryFee({
             deliveryMethod,
-            subtotal,
-            freeShippingThreshold,
+            hasFreeShipping: qualifiesForFreeShipping,
             selectedAddressId,
             multiAddressEnabled,
             assignments: deliveryAssignments,
@@ -761,10 +750,10 @@ const Checkout = ({ setCart, user }) => {
                                     Pickup: {selectedPickupDate} - {selectedPickupTime}
                                 </div>
                             )}
-                            {shippingFee === 0 && deliveryMethod === 'delivery' && (
+                            {shippingFee === 0 && deliveryMethod === 'delivery' && qualifiesForFreeShipping && (
                                 <div className="text-success small mb-2">
                                     <i className="fas fa-check-circle me-1"></i>
-                                    Free shipping for orders ₱{freeShippingThreshold.toLocaleString()}+
+                                    Free shipping applied to all eligible products in this order.
                                 </div>
                             )}
 

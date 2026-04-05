@@ -1128,6 +1128,22 @@ const PRODUCT_SELECT_WITH_DISCOUNTS = `
                 category_id,
                 image_url,
                 stock_quantity,
+                is_free_shipping,
+                is_active,
+                categories ( name )
+            `;
+
+const PRODUCT_SELECT_WITH_DISCOUNTS_LEGACY_SHIPPING = `
+                id,
+                name,
+                description,
+                price,
+                original_price,
+                discount_percentage,
+                discounted_price,
+                category_id,
+                image_url,
+                stock_quantity,
                 is_active,
                 categories ( name )
             `;
@@ -1158,20 +1174,35 @@ const shouldRetryLegacyProductQuery = (error) => {
             message.includes('original_price') ||
             message.includes('discount_percentage') ||
             message.includes('discounted_price') ||
+            message.includes('is_free_shipping') ||
             message.includes('could not find the') ||
             message.includes('column') && (
                 message.includes('original_price') ||
                 message.includes('discount_percentage') ||
-                message.includes('discounted_price')
+                message.includes('discounted_price') ||
+                message.includes('is_free_shipping')
             )
         )
     );
 };
 
-const buildProductsQuery = ({ params, includeDiscountFields = true }) => {
+const isMissingProductColumns = (error, columns = []) => {
+    const message = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+    return columns.some((column) => message.includes(column.toLowerCase()));
+};
+
+const buildProductsQuery = ({ params, includeDiscountFields = true, includeFreeShippingField = true }) => {
+    let selectColumns = PRODUCT_SELECT_LEGACY;
+
+    if (includeDiscountFields && includeFreeShippingField) {
+        selectColumns = PRODUCT_SELECT_WITH_DISCOUNTS;
+    } else if (includeDiscountFields) {
+        selectColumns = PRODUCT_SELECT_WITH_DISCOUNTS_LEGACY_SHIPPING;
+    }
+
     let query = supabase
         .from('products')
-        .select(includeDiscountFields ? PRODUCT_SELECT_WITH_DISCOUNTS : PRODUCT_SELECT_LEGACY);
+        .select(selectColumns);
 
     if (!params?.includeInactive) {
         query = query.eq('is_active', true);
@@ -1191,7 +1222,7 @@ const formatProductsForAdmin = (products = []) => (
     }))
 );
 
-const buildProductPayload = ({ formData, imageUrl, includeDiscountFields = true }) => {
+const buildProductPayload = ({ formData, imageUrl, includeDiscountFields = true, includeFreeShippingField = true }) => {
     const originalPrice = Math.max(0, roundCurrencyValue(formData.price));
     const discountPercentage = clampDiscountPercentage(formData.discount_percentage);
     const discountedPrice = computeDiscountedPrice(originalPrice, discountPercentage);
@@ -1205,6 +1236,10 @@ const buildProductPayload = ({ formData, imageUrl, includeDiscountFields = true 
         is_active: formData.is_active !== false,
     };
 
+    if (includeFreeShippingField) {
+        payload.is_free_shipping = formData.is_free_shipping === true;
+    }
+
     if (includeDiscountFields) {
         payload.original_price = originalPrice;
         payload.discount_percentage = discountPercentage;
@@ -1216,11 +1251,22 @@ const buildProductPayload = ({ formData, imageUrl, includeDiscountFields = true 
 
 export const productAPI = {
     getAll: async (params) => {
-        let { data: products, error } = await buildProductsQuery({ params, includeDiscountFields: true });
+        let { data: products, error } = await buildProductsQuery({
+            params,
+            includeDiscountFields: true,
+            includeFreeShippingField: true,
+        });
 
         if (error && shouldRetryLegacyProductQuery(error)) {
-            console.warn('Discount-aware product query failed. Falling back to the legacy catalogue query until the migration is applied.', error);
-            ({ data: products, error } = await buildProductsQuery({ params, includeDiscountFields: false }));
+            console.warn('Extended product query failed. Falling back to the compatible catalogue query until the latest migrations are applied.', error);
+            const missingDiscountFields = isMissingProductColumns(error, ['original_price', 'discount_percentage', 'discounted_price']);
+            const missingFreeShippingField = isMissingProductColumns(error, ['is_free_shipping']);
+
+            ({ data: products, error } = await buildProductsQuery({
+                params,
+                includeDiscountFields: !missingDiscountFields,
+                includeFreeShippingField: !missingFreeShippingField,
+            }));
         }
 
         if (error) {
@@ -1288,7 +1334,12 @@ export const productAPI = {
             }
         }
 
-        const productToInsert = buildProductPayload({ formData, imageUrl, includeDiscountFields: true });
+        const productToInsert = buildProductPayload({
+            formData,
+            imageUrl,
+            includeDiscountFields: true,
+            includeFreeShippingField: true,
+        });
 
         let { data: newProduct, error } = await supabase
             .from('products')
@@ -1297,13 +1348,25 @@ export const productAPI = {
             .single();
 
         if (error && shouldRetryLegacyProductQuery(error)) {
+            const missingDiscountFields = isMissingProductColumns(error, ['original_price', 'discount_percentage', 'discounted_price']);
+            const missingFreeShippingField = isMissingProductColumns(error, ['is_free_shipping']);
+
             if (clampDiscountPercentage(formData.discount_percentage) > 0) {
                 throw new Error('Discount fields are not available in the database yet. Please apply migration 20260330120000_add_product_discounts.sql first.');
             }
 
+            if (missingFreeShippingField && formData.is_free_shipping === true) {
+                throw new Error('Free shipping fields are not available in the database yet. Please apply migration 20260405183000_add_product_free_shipping_flag.sql first.');
+            }
+
             ({ data: newProduct, error } = await supabase
                 .from('products')
-                .insert(buildProductPayload({ formData, imageUrl, includeDiscountFields: false }))
+                .insert(buildProductPayload({
+                    formData,
+                    imageUrl,
+                    includeDiscountFields: !missingDiscountFields,
+                    includeFreeShippingField: !missingFreeShippingField,
+                }))
                 .select()
                 .single());
         }
@@ -1348,7 +1411,12 @@ export const productAPI = {
             imageUrl = imageFile.uri;
         }
 
-        const productToUpdate = buildProductPayload({ formData, imageUrl, includeDiscountFields: true });
+        const productToUpdate = buildProductPayload({
+            formData,
+            imageUrl,
+            includeDiscountFields: true,
+            includeFreeShippingField: true,
+        });
 
         Object.keys(productToUpdate).forEach(key => (productToUpdate[key] === undefined || Number.isNaN(productToUpdate[key])) && delete productToUpdate[key]);
 
@@ -1360,11 +1428,23 @@ export const productAPI = {
             .single();
 
         if (error && shouldRetryLegacyProductQuery(error)) {
+            const missingDiscountFields = isMissingProductColumns(error, ['original_price', 'discount_percentage', 'discounted_price']);
+            const missingFreeShippingField = isMissingProductColumns(error, ['is_free_shipping']);
+
             if (clampDiscountPercentage(formData.discount_percentage) > 0) {
                 throw new Error('Discount fields are not available in the database yet. Please apply migration 20260330120000_add_product_discounts.sql first.');
             }
 
-            const legacyProductUpdate = buildProductPayload({ formData, imageUrl, includeDiscountFields: false });
+            if (missingFreeShippingField && formData.is_free_shipping === true) {
+                throw new Error('Free shipping fields are not available in the database yet. Please apply migration 20260405183000_add_product_free_shipping_flag.sql first.');
+            }
+
+            const legacyProductUpdate = buildProductPayload({
+                formData,
+                imageUrl,
+                includeDiscountFields: !missingDiscountFields,
+                includeFreeShippingField: !missingFreeShippingField,
+            });
             Object.keys(legacyProductUpdate).forEach(key => (legacyProductUpdate[key] === undefined || Number.isNaN(legacyProductUpdate[key])) && delete legacyProductUpdate[key]);
 
             ({ data: updatedProduct, error } = await supabase
