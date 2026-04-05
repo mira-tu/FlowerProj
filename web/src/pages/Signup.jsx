@@ -17,11 +17,26 @@ import { getEmailVerificationRedirectUrl } from '../utils/emailVerification';
 import '../styles/Auth.css';
 
 const MIN_SIGNUP_AGE = 13;
+const EARLIEST_BIRTH_YEAR = 1900;
 const BIRTHDAY_INPUT_LENGTHS = {
     birthMonth: 2,
     birthDay: 2,
     birthYear: 4,
 };
+const MONTH_OPTIONS = [
+    { value: '01', label: 'January' },
+    { value: '02', label: 'February' },
+    { value: '03', label: 'March' },
+    { value: '04', label: 'April' },
+    { value: '05', label: 'May' },
+    { value: '06', label: 'June' },
+    { value: '07', label: 'July' },
+    { value: '08', label: 'August' },
+    { value: '09', label: 'September' },
+    { value: '10', label: 'October' },
+    { value: '11', label: 'November' },
+    { value: '12', label: 'December' },
+];
 
 const sanitizeBirthdayInput = (part, value) => String(value || '')
     .replace(/\D/g, '')
@@ -108,6 +123,22 @@ const Signup = () => {
         () => GENDER_OPTIONS.filter((option) => option.value !== 'Non-binary'),
         [],
     );
+    const birthdayDayOptions = useMemo(() => {
+        const totalDays = getDaysInMonth(formData.birthYear, formData.birthMonth);
+
+        return Array.from({ length: totalDays }, (_, index) => {
+            const value = String(index + 1).padStart(2, '0');
+            return { value, label: String(index + 1) };
+        });
+    }, [formData.birthMonth, formData.birthYear]);
+    const birthdayYearOptions = useMemo(() => {
+        const latestYear = Number(latestAllowedBirthday.year);
+
+        return Array.from({ length: latestYear - EARLIEST_BIRTH_YEAR + 1 }, (_, index) => {
+            const value = String(latestYear - index);
+            return { value, label: value };
+        });
+    }, [latestAllowedBirthday.year]);
     const noticeRef = useRef(null);
 
     const scrollNoticeIntoView = () => {
@@ -423,75 +454,78 @@ const Signup = () => {
                             {fieldErrors.email && <div className="invalid-feedback">{fieldErrors.email}</div>}
                         </div>
 
-                        <div className="row g-2 mb-3">
-                            <div className="col-md-6">
-                                <div className="form-floating">
-                                    <input
-                                        type="tel"
-                                        className={`form-control ${fieldErrors.contactNumber ? 'is-invalid' : ''}`}
-                                        id="floatingContactNumber"
-                                        name="contactNumber"
-                                        placeholder="0917-123-4567"
-                                        value={formData.contactNumber}
-                                        onChange={handleChange}
+                        <div className="form-floating mb-3">
+                            <input
+                                type="tel"
+                                className={`form-control ${fieldErrors.contactNumber ? 'is-invalid' : ''}`}
+                                id="floatingContactNumber"
+                                name="contactNumber"
+                                placeholder="0917-123-4567"
+                                value={formData.contactNumber}
+                                onChange={handleChange}
+                                required
+                                disabled={loading}
+                            />
+                            <label htmlFor="floatingContactNumber">Contact Number</label>
+                            {fieldErrors.contactNumber && <div className="invalid-feedback">{fieldErrors.contactNumber}</div>}
+                        </div>
+
+                        <div className="mb-3">
+                            <label className="form-label auth-select-label" htmlFor="signupBirthMonth">
+                                Birthday
+                            </label>
+                            <div className="row g-2">
+                                <div className="col-md-4 col-12">
+                                    <select
+                                        id="signupBirthMonth"
+                                        className={`form-select auth-select ${fieldErrors.birthday ? 'is-invalid' : ''}`}
+                                        value={formData.birthMonth}
+                                        onChange={(event) => handleBirthdayChange('birthMonth', event.target.value)}
                                         required
                                         disabled={loading}
-                                    />
-                                    <label htmlFor="floatingContactNumber">Contact Number</label>
-                                    {fieldErrors.contactNumber && <div className="invalid-feedback">{fieldErrors.contactNumber}</div>}
+                                    >
+                                        <option value="">Month</option>
+                                        {MONTH_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="col-md-4 col-12">
+                                    <select
+                                        className={`form-select auth-select ${fieldErrors.birthday ? 'is-invalid' : ''}`}
+                                        value={formData.birthDay}
+                                        onChange={(event) => handleBirthdayChange('birthDay', event.target.value)}
+                                        required
+                                        disabled={loading}
+                                    >
+                                        <option value="">Day</option>
+                                        {birthdayDayOptions.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="col-md-4 col-12">
+                                    <select
+                                        className={`form-select auth-select ${fieldErrors.birthday ? 'is-invalid' : ''}`}
+                                        value={formData.birthYear}
+                                        onChange={(event) => handleBirthdayChange('birthYear', event.target.value)}
+                                        required
+                                        disabled={loading}
+                                    >
+                                        <option value="">Year</option>
+                                        {birthdayYearOptions.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
                                 </div>
                             </div>
-                            <div className="col-md-6">
-                                <label className="form-label auth-select-label" htmlFor="signupBirthMonth">
-                                    Birthday
-                                </label>
-                                <div className="row g-2">
-                                    <div className="col-4">
-                                        <input
-                                            id="signupBirthMonth"
-                                            type="text"
-                                            inputMode="numeric"
-                                            pattern="[0-9]*"
-                                            maxLength={2}
-                                            className={`form-control auth-birthday-input ${fieldErrors.birthday ? 'is-invalid' : ''}`}
-                                            value={formData.birthMonth}
-                                            onChange={(event) => handleBirthdayChange('birthMonth', event.target.value)}
-                                            disabled={loading}
-                                            placeholder="MM"
-                                            aria-label="Birth month"
-                                        />
-                                    </div>
-                                    <div className="col-4">
-                                        <input
-                                            type="text"
-                                            inputMode="numeric"
-                                            pattern="[0-9]*"
-                                            maxLength={2}
-                                            className={`form-control auth-birthday-input ${fieldErrors.birthday ? 'is-invalid' : ''}`}
-                                            value={formData.birthDay}
-                                            onChange={(event) => handleBirthdayChange('birthDay', event.target.value)}
-                                            disabled={loading}
-                                            placeholder="DD"
-                                            aria-label="Birth day"
-                                        />
-                                    </div>
-                                    <div className="col-4">
-                                        <input
-                                            type="text"
-                                            inputMode="numeric"
-                                            pattern="[0-9]*"
-                                            maxLength={4}
-                                            className={`form-control auth-birthday-input ${fieldErrors.birthday ? 'is-invalid' : ''}`}
-                                            value={formData.birthYear}
-                                            onChange={(event) => handleBirthdayChange('birthYear', event.target.value)}
-                                            disabled={loading}
-                                            placeholder="YYYY"
-                                            aria-label="Birth year"
-                                        />
-                                    </div>
-                                </div>
-                                {fieldErrors.birthday && <div className="invalid-feedback d-block">{fieldErrors.birthday}</div>}
-                            </div>
+                            {fieldErrors.birthday && <div className="invalid-feedback d-block">{fieldErrors.birthday}</div>}
                         </div>
 
                         <div className="mb-3">
@@ -507,7 +541,7 @@ const Signup = () => {
                                 required
                                 disabled={loading}
                             >
-                                <option value="">Select Gender</option>
+                                <option value="" disabled hidden></option>
                                 {signupGenderOptions.map((option) => (
                                     <option key={option.value} value={option.value}>
                                         {option.label}
