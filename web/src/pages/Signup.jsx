@@ -17,15 +17,15 @@ import { getEmailVerificationRedirectUrl } from '../utils/emailVerification';
 import '../styles/Auth.css';
 
 const MIN_SIGNUP_AGE = 13;
-const EARLIEST_BIRTH_YEAR = 1900;
-const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => {
-    const value = String(index + 1).padStart(2, '0');
-    return { value, label: value };
-});
+const BIRTHDAY_INPUT_LENGTHS = {
+    birthMonth: 2,
+    birthDay: 2,
+    birthYear: 4,
+};
 
-const buildIsoBirthday = (year, month, day) => (
-    year && month && day ? `${year}-${month}-${day}` : ''
-);
+const sanitizeBirthdayInput = (part, value) => String(value || '')
+    .replace(/\D/g, '')
+    .slice(0, BIRTHDAY_INPUT_LENGTHS[part] || 4);
 
 const getDaysInMonth = (year, month) => {
     if (!month) {
@@ -36,6 +36,38 @@ const getDaysInMonth = (year, month) => {
     const normalizedMonth = Number(month);
     return new Date(normalizedYear, normalizedMonth, 0).getDate();
 };
+
+const isValidBirthdayParts = (year, month, day) => {
+    if (!year || !month || !day) {
+        return false;
+    }
+
+    const normalizedYear = Number(year);
+    const normalizedMonth = Number(month);
+    const normalizedDay = Number(day);
+
+    if (!Number.isInteger(normalizedYear) || String(year).length !== 4) {
+        return false;
+    }
+
+    if (!Number.isInteger(normalizedMonth) || normalizedMonth < 1 || normalizedMonth > 12) {
+        return false;
+    }
+
+    const maxDay = getDaysInMonth(year, month);
+
+    if (!Number.isInteger(normalizedDay) || normalizedDay < 1 || normalizedDay > maxDay) {
+        return false;
+    }
+
+    return true;
+};
+
+const buildIsoBirthday = (year, month, day) => (
+    isValidBirthdayParts(year, month, day)
+        ? `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+        : ''
+);
 
 const Signup = () => {
     const navigate = useNavigate();
@@ -76,22 +108,6 @@ const Signup = () => {
         () => GENDER_OPTIONS.filter((option) => option.value !== 'Non-binary'),
         [],
     );
-    const birthdayDayOptions = useMemo(() => {
-        const totalDays = getDaysInMonth(formData.birthYear, formData.birthMonth);
-
-        return Array.from({ length: totalDays }, (_, index) => {
-            const value = String(index + 1).padStart(2, '0');
-            return { value, label: value };
-        });
-    }, [formData.birthMonth, formData.birthYear]);
-    const birthdayYearOptions = useMemo(() => {
-        const latestYear = Number(latestAllowedBirthday.year);
-
-        return Array.from({ length: latestYear - EARLIEST_BIRTH_YEAR + 1 }, (_, index) => {
-            const value = String(latestYear - index);
-            return { value, label: value };
-        });
-    }, [latestAllowedBirthday.year]);
     const noticeRef = useRef(null);
 
     const scrollNoticeIntoView = () => {
@@ -135,18 +151,11 @@ const Signup = () => {
 
     const handleBirthdayChange = (part, value) => {
         setFormData((prev) => {
+            const sanitizedValue = sanitizeBirthdayInput(part, value);
             const next = {
                 ...prev,
-                [part]: value,
+                [part]: sanitizedValue,
             };
-
-            if ((part === 'birthMonth' || part === 'birthYear') && next.birthDay) {
-                const maxDayForSelection = getDaysInMonth(next.birthYear, next.birthMonth);
-
-                if (Number(next.birthDay) > maxDayForSelection) {
-                    next.birthDay = '';
-                }
-            }
 
             next.birthday = buildIsoBirthday(next.birthYear, next.birthMonth, next.birthDay);
             return next;
@@ -181,7 +190,7 @@ const Signup = () => {
         if (!formData.lastName.trim()) nextErrors.lastName = 'Last name is required.';
         if (!formData.email.trim()) nextErrors.email = 'Email is required.';
         if (!formData.contactNumber.trim()) nextErrors.contactNumber = 'Contact number is required.';
-        if (!formData.birthday) nextErrors.birthday = 'Birthday is required.';
+        if (!formData.birthMonth || !formData.birthDay || !formData.birthYear) nextErrors.birthday = 'Birthday is required.';
         if (!formData.gender) nextErrors.gender = 'Gender is required.';
         if (!formData.password) nextErrors.password = 'Password is required.';
         if (!formData.confirmPassword) nextErrors.confirmPassword = 'Please confirm your password.';
@@ -198,7 +207,11 @@ const Signup = () => {
             nextErrors.contactNumber = 'Please enter a valid mobile number (11 digits starting with 09).';
         }
 
-        if (formData.birthday && formData.birthday > latestAllowedBirthday.iso) {
+        if (!nextErrors.birthday && !isValidBirthdayParts(formData.birthYear, formData.birthMonth, formData.birthDay)) {
+            nextErrors.birthday = 'Please enter a valid birth date.';
+        }
+
+        if (!nextErrors.birthday && formData.birthday > latestAllowedBirthday.iso) {
             nextErrors.birthday = 'You must be at least 13 years old to create an account.';
         }
 
@@ -434,53 +447,47 @@ const Signup = () => {
                                 </label>
                                 <div className="row g-2">
                                     <div className="col-4">
-                                        <select
+                                        <input
                                             id="signupBirthMonth"
-                                            className={`form-select auth-select ${fieldErrors.birthday ? 'is-invalid' : ''}`}
+                                            type="text"
+                                            inputMode="numeric"
+                                            pattern="[0-9]*"
+                                            maxLength={2}
+                                            className={`form-control auth-birthday-input ${fieldErrors.birthday ? 'is-invalid' : ''}`}
                                             value={formData.birthMonth}
                                             onChange={(event) => handleBirthdayChange('birthMonth', event.target.value)}
-                                            required
                                             disabled={loading}
-                                        >
-                                            <option value="">MM</option>
-                                            {MONTH_OPTIONS.map((option) => (
-                                                <option key={option.value} value={option.value}>
-                                                    {option.label}
-                                                </option>
-                                            ))}
-                                        </select>
+                                            placeholder="MM"
+                                            aria-label="Birth month"
+                                        />
                                     </div>
                                     <div className="col-4">
-                                        <select
-                                            className={`form-select auth-select ${fieldErrors.birthday ? 'is-invalid' : ''}`}
+                                        <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            pattern="[0-9]*"
+                                            maxLength={2}
+                                            className={`form-control auth-birthday-input ${fieldErrors.birthday ? 'is-invalid' : ''}`}
                                             value={formData.birthDay}
                                             onChange={(event) => handleBirthdayChange('birthDay', event.target.value)}
-                                            required
                                             disabled={loading}
-                                        >
-                                            <option value="">DD</option>
-                                            {birthdayDayOptions.map((option) => (
-                                                <option key={option.value} value={option.value}>
-                                                    {option.label}
-                                                </option>
-                                            ))}
-                                        </select>
+                                            placeholder="DD"
+                                            aria-label="Birth day"
+                                        />
                                     </div>
                                     <div className="col-4">
-                                        <select
-                                            className={`form-select auth-select ${fieldErrors.birthday ? 'is-invalid' : ''}`}
+                                        <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            pattern="[0-9]*"
+                                            maxLength={4}
+                                            className={`form-control auth-birthday-input ${fieldErrors.birthday ? 'is-invalid' : ''}`}
                                             value={formData.birthYear}
                                             onChange={(event) => handleBirthdayChange('birthYear', event.target.value)}
-                                            required
                                             disabled={loading}
-                                        >
-                                            <option value="">YYYY</option>
-                                            {birthdayYearOptions.map((option) => (
-                                                <option key={option.value} value={option.value}>
-                                                    {option.label}
-                                                </option>
-                                            ))}
-                                        </select>
+                                            placeholder="YYYY"
+                                            aria-label="Birth year"
+                                        />
                                     </div>
                                 </div>
                                 {fieldErrors.birthday && <div className="invalid-feedback d-block">{fieldErrors.birthday}</div>}

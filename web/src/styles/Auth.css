@@ -277,6 +277,10 @@
     background-color: #fff;
 }
 
+.auth-birthday-input {
+    text-align: center;
+}
+
 .auth-select-label {
     font-size: 0.95rem;
     color: #4f4f4f;
