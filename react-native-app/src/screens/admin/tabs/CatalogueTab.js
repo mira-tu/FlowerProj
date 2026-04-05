@@ -81,6 +81,7 @@ const CatalogueTab = () => {
     description: '',
     image: null,
     is_free_shipping: false,
+    free_shipping_min_order_amount: '',
     is_active: true,
   });
 
@@ -187,7 +188,7 @@ const CatalogueTab = () => {
   };
 
   const handleSubmit = async () => {
-    const { name, price, discount_percentage, stock_quantity, category_id } = formData;
+    const { name, price, discount_percentage, stock_quantity, category_id, is_free_shipping, free_shipping_min_order_amount } = formData;
     const errors = [];
 
     if (!name.trim()) {
@@ -213,6 +214,16 @@ const CatalogueTab = () => {
       errors.push('Discount cannot be greater than 100%.');
     }
 
+    if (is_free_shipping) {
+      if (!free_shipping_min_order_amount) {
+        errors.push('Free shipping promo minimum order amount is required.');
+      } else if (!/^\d+(\.\d{1,2})?$/.test(free_shipping_min_order_amount)) {
+        errors.push('Free shipping promo minimum order amount must be a valid number.');
+      } else if (parseFloat(free_shipping_min_order_amount) <= 0) {
+        errors.push('Free shipping promo minimum order amount must be greater than 0.');
+      }
+    }
+
     if (errors.length > 0) {
       Alert.alert('Please fix the following issues:', errors.join('\n'));
       return;
@@ -229,6 +240,7 @@ const CatalogueTab = () => {
         category_id: formData.category_id || '1',
         image: formData.image, // Pass the image object from the state
         is_free_shipping: formData.is_free_shipping === true,
+        free_shipping_min_order_amount: formData.free_shipping_min_order_amount || '0',
         is_active: formData.is_active,
       };
 
@@ -265,6 +277,7 @@ const CatalogueTab = () => {
       description: product.description || '',
       image: product.image_url ? { uri: product.image_url.startsWith('http') ? product.image_url : `${BASE_URL}${product.image_url}` } : null,
       is_free_shipping: product.is_free_shipping === true,
+      free_shipping_min_order_amount: product.free_shipping_min_order_amount ? product.free_shipping_min_order_amount.toString() : '',
       is_active: product.is_active !== false,
     });
     setModalVisible(true);
@@ -285,6 +298,7 @@ const CatalogueTab = () => {
       description: '',
       image: null,
       is_free_shipping: false,
+      free_shipping_min_order_amount: '',
       is_active: true,
     });
     setEditingProduct(null);
@@ -344,6 +358,9 @@ const CatalogueTab = () => {
     const discountPercentage = clampDiscountPercentage(item.discount_percentage);
     const discountedPrice = computeDiscountedPrice(originalPrice, discountPercentage);
     const hasDiscount = discountPercentage > 0 && discountedPrice < originalPrice;
+    const freeShippingPromoAmount = roundCurrencyValue(item.free_shipping_min_order_amount || 0);
+    const hasFreeShippingPromo = item.is_free_shipping === true && freeShippingPromoAmount > 0;
+    const hasIncompleteFreeShippingPromo = item.is_free_shipping === true && freeShippingPromoAmount <= 0;
 
     return (
       <ProductCard
@@ -362,9 +379,14 @@ const CatalogueTab = () => {
         onEdit={() => handleEdit(item)}
         onDelete={() => handleDelete(item.id)}
       >
-        {item.is_free_shipping === true ? (
+        {hasFreeShippingPromo ? (
           <Text style={[styles.unavailableBadge, { backgroundColor: '#ecfdf5', color: '#047857', marginTop: 10 }]}>
-            Free Shipping
+            Free Shipping Promo from {formatCurrency(freeShippingPromoAmount)}
+          </Text>
+        ) : null}
+        {hasIncompleteFreeShippingPromo ? (
+          <Text style={[styles.unavailableBadge, { backgroundColor: '#fff7ed', color: '#c2410c', marginTop: 10 }]}>
+            Promo needs a minimum amount
           </Text>
         ) : null}
       </ProductCard>
@@ -384,6 +406,8 @@ const CatalogueTab = () => {
   const discountPercentagePreview = clampDiscountPercentage(formData.discount_percentage);
   const discountedPricePreview = computeDiscountedPrice(originalPricePreview, discountPercentagePreview);
   const hasDiscountPreview = discountPercentagePreview > 0 && discountedPricePreview < originalPricePreview;
+  const freeShippingPromoAmountPreview = roundCurrencyValue(formData.free_shipping_min_order_amount);
+  const hasFreeShippingPromoPreview = formData.is_free_shipping === true && freeShippingPromoAmountPreview > 0;
 
   return (
     <View style={styles.tabContent}>
@@ -529,9 +553,9 @@ const CatalogueTab = () => {
 
               <View style={styles.toggleRow}>
                 <View style={{ flex: 1, paddingRight: 12 }}>
-                  <Text style={styles.inputLabel}>Eligible for Free Shipping</Text>
+                  <Text style={styles.inputLabel}>Free Shipping Promo</Text>
                   <Text style={styles.inputHelperText}>
-                    Delivery becomes free only when all catalogue items in the checkout are marked eligible.
+                    Set a product-specific promo that unlocks free delivery once the minimum order amount is reached.
                   </Text>
                 </View>
                 <Switch
@@ -541,6 +565,32 @@ const CatalogueTab = () => {
                   thumbColor={formData.is_free_shipping ? '#16a34a' : '#9ca3af'}
                 />
               </View>
+              {formData.is_free_shipping && (
+                <>
+                  <Text style={styles.inputLabel}>Promo Minimum Order Amount *</Text>
+                  <Text style={styles.inputHelperText}>
+                    Free delivery will unlock only when the checkout subtotal reaches this amount and all catalogue items are promo-eligible.
+                  </Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter minimum order amount"
+                    keyboardType="numeric"
+                    value={formData.free_shipping_min_order_amount}
+                    onChangeText={(text) => handleNumericInput('free_shipping_min_order_amount', text)}
+                  />
+                  <View style={styles.catalogueDiscountPreview}>
+                    <Text style={styles.catalogueDiscountPreviewLabel}>Promo Unlock Amount</Text>
+                    <Text style={styles.catalogueDiscountPreviewValue}>
+                      {hasFreeShippingPromoPreview ? formatCurrency(freeShippingPromoAmountPreview) : 'Set a minimum amount'}
+                    </Text>
+                    <Text style={styles.catalogueDiscountHint}>
+                      {hasFreeShippingPromoPreview
+                        ? 'Checkout will show the free shipping promo once this subtotal is reached.'
+                        : 'Enter an amount greater than 0 to finish setting up this promo.'}
+                    </Text>
+                  </View>
+                </>
+              )}
 
               <Text style={styles.inputLabel}>Description</Text>
               <Text style={styles.inputHelperText}>Max 20 words</Text>

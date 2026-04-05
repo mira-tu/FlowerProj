@@ -1107,6 +1107,7 @@ const normalizeProductDiscountFields = (product) => {
     const discountedPrice = discountPercentage > 0
         ? roundCurrencyValue(product?.discounted_price ?? computeDiscountedPrice(originalPrice, discountPercentage))
         : originalPrice;
+    const freeShippingPromoAmount = Math.max(0, roundCurrencyValue(product?.free_shipping_min_order_amount ?? 0));
 
     return {
         ...product,
@@ -1114,6 +1115,7 @@ const normalizeProductDiscountFields = (product) => {
         discount_percentage: discountPercentage,
         discounted_price: discountedPrice,
         effective_price: discountPercentage > 0 ? discountedPrice : originalPrice,
+        free_shipping_min_order_amount: freeShippingPromoAmount,
     };
 };
 
@@ -1129,6 +1131,7 @@ const PRODUCT_SELECT_WITH_DISCOUNTS = `
                 image_url,
                 stock_quantity,
                 is_free_shipping,
+                free_shipping_min_order_amount,
                 is_active,
                 categories ( name )
             `;
@@ -1175,12 +1178,14 @@ const shouldRetryLegacyProductQuery = (error) => {
             message.includes('discount_percentage') ||
             message.includes('discounted_price') ||
             message.includes('is_free_shipping') ||
+            message.includes('free_shipping_min_order_amount') ||
             message.includes('could not find the') ||
             message.includes('column') && (
                 message.includes('original_price') ||
                 message.includes('discount_percentage') ||
                 message.includes('discounted_price') ||
-                message.includes('is_free_shipping')
+                message.includes('is_free_shipping') ||
+                message.includes('free_shipping_min_order_amount')
             )
         )
     );
@@ -1226,6 +1231,7 @@ const buildProductPayload = ({ formData, imageUrl, includeDiscountFields = true,
     const originalPrice = Math.max(0, roundCurrencyValue(formData.price));
     const discountPercentage = clampDiscountPercentage(formData.discount_percentage);
     const discountedPrice = computeDiscountedPrice(originalPrice, discountPercentage);
+    const freeShippingPromoAmount = Math.max(0, roundCurrencyValue(formData.free_shipping_min_order_amount));
     const payload = {
         name: formData.name,
         price: originalPrice,
@@ -1238,6 +1244,7 @@ const buildProductPayload = ({ formData, imageUrl, includeDiscountFields = true,
 
     if (includeFreeShippingField) {
         payload.is_free_shipping = formData.is_free_shipping === true;
+        payload.free_shipping_min_order_amount = formData.is_free_shipping === true ? freeShippingPromoAmount : 0;
     }
 
     if (includeDiscountFields) {
@@ -1260,7 +1267,7 @@ export const productAPI = {
         if (error && shouldRetryLegacyProductQuery(error)) {
             console.warn('Extended product query failed. Falling back to the compatible catalogue query until the latest migrations are applied.', error);
             const missingDiscountFields = isMissingProductColumns(error, ['original_price', 'discount_percentage', 'discounted_price']);
-            const missingFreeShippingField = isMissingProductColumns(error, ['is_free_shipping']);
+            const missingFreeShippingField = isMissingProductColumns(error, ['is_free_shipping', 'free_shipping_min_order_amount']);
 
             ({ data: products, error } = await buildProductsQuery({
                 params,
@@ -1349,14 +1356,14 @@ export const productAPI = {
 
         if (error && shouldRetryLegacyProductQuery(error)) {
             const missingDiscountFields = isMissingProductColumns(error, ['original_price', 'discount_percentage', 'discounted_price']);
-            const missingFreeShippingField = isMissingProductColumns(error, ['is_free_shipping']);
+            const missingFreeShippingField = isMissingProductColumns(error, ['is_free_shipping', 'free_shipping_min_order_amount']);
 
             if (clampDiscountPercentage(formData.discount_percentage) > 0) {
                 throw new Error('Discount fields are not available in the database yet. Please apply migration 20260330120000_add_product_discounts.sql first.');
             }
 
             if (missingFreeShippingField && formData.is_free_shipping === true) {
-                throw new Error('Free shipping fields are not available in the database yet. Please apply migration 20260405183000_add_product_free_shipping_flag.sql first.');
+                throw new Error('Free shipping promo fields are not available in the database yet. Please apply migration 20260405210000_add_product_free_shipping_promo_amount.sql first.');
             }
 
             ({ data: newProduct, error } = await supabase
@@ -1429,14 +1436,14 @@ export const productAPI = {
 
         if (error && shouldRetryLegacyProductQuery(error)) {
             const missingDiscountFields = isMissingProductColumns(error, ['original_price', 'discount_percentage', 'discounted_price']);
-            const missingFreeShippingField = isMissingProductColumns(error, ['is_free_shipping']);
+            const missingFreeShippingField = isMissingProductColumns(error, ['is_free_shipping', 'free_shipping_min_order_amount']);
 
             if (clampDiscountPercentage(formData.discount_percentage) > 0) {
                 throw new Error('Discount fields are not available in the database yet. Please apply migration 20260330120000_add_product_discounts.sql first.');
             }
 
             if (missingFreeShippingField && formData.is_free_shipping === true) {
-                throw new Error('Free shipping fields are not available in the database yet. Please apply migration 20260405183000_add_product_free_shipping_flag.sql first.');
+                throw new Error('Free shipping promo fields are not available in the database yet. Please apply migration 20260405210000_add_product_free_shipping_promo_amount.sql first.');
             }
 
             const legacyProductUpdate = buildProductPayload({

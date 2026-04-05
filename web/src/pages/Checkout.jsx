@@ -15,7 +15,7 @@ import {
     serializeMultiDeliveryNotes,
     syncDeliveryAssignments,
 } from '../utils/deliveryDestinations';
-import { buildFreeShippingLookup, cartQualifiesForFreeShipping } from '../utils/freeShipping';
+import { buildFreeShippingLookup, evaluateFreeShippingPromo } from '../utils/freeShipping';
 
 const paymentMethods = [
     { id: 'cod', name: 'Cash on Delivery', description: 'Pay when you receive', icon: 'fa-money-bill-wave' },
@@ -195,8 +195,8 @@ const Checkout = ({ setCart, user, products = [] }) => {
         () => buildFreeShippingLookup(products),
         [products]
     );
-    const qualifiesForFreeShipping = useMemo(
-        () => cartQualifiesForFreeShipping(checkoutItems, freeShippingLookup),
+    const freeShippingPromo = useMemo(
+        () => evaluateFreeShippingPromo(checkoutItems, freeShippingLookup),
         [checkoutItems, freeShippingLookup]
     );
 
@@ -205,7 +205,7 @@ const Checkout = ({ setCart, user, products = [] }) => {
         ? 0
         : calculateDeliveryFee({
             deliveryMethod,
-            hasFreeShipping: qualifiesForFreeShipping,
+            hasFreeShipping: freeShippingPromo.qualifies,
             selectedAddressId,
             multiAddressEnabled,
             assignments: deliveryAssignments,
@@ -750,10 +750,22 @@ const Checkout = ({ setCart, user, products = [] }) => {
                                     Pickup: {selectedPickupDate} - {selectedPickupTime}
                                 </div>
                             )}
-                            {shippingFee === 0 && deliveryMethod === 'delivery' && qualifiesForFreeShipping && (
+                            {shippingFee === 0 && deliveryMethod === 'delivery' && freeShippingPromo.qualifies && (
                                 <div className="text-success small mb-2">
                                     <i className="fas fa-check-circle me-1"></i>
-                                    Free shipping applied to all eligible products in this order.
+                                    Free shipping promo applied to this order.
+                                </div>
+                            )}
+                            {deliveryMethod === 'delivery' && !freeShippingPromo.qualifies && freeShippingPromo.allProductsEligible && freeShippingPromo.amountRemaining > 0 && (
+                                <div className="small mb-2" style={{ color: 'var(--shop-pink)' }}>
+                                    <i className="fas fa-tag me-1"></i>
+                                    Spend another â‚±{freeShippingPromo.amountRemaining.toLocaleString()} to unlock the free shipping promo.
+                                </div>
+                            )}
+                            {deliveryMethod === 'delivery' && !freeShippingPromo.qualifies && freeShippingPromo.hasPromoProducts && !freeShippingPromo.allProductsEligible && (
+                                <div className="small mb-2 text-muted">
+                                    <i className="fas fa-info-circle me-1"></i>
+                                    Free shipping promo only works when every catalogue item in this order is promo-eligible.
                                 </div>
                             )}
 
