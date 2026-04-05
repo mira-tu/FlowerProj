@@ -97,6 +97,20 @@ const Login = ({ onLogin }) => {
         }
     }, [location.search]);
 
+    useEffect(() => {
+        if (!verificationMessage) {
+            return undefined;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            setVerificationMessage('');
+        }, 10000);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+        };
+    }, [verificationMessage]);
+
     const handleResendVerification = async () => {
         const targetEmail = (verificationEmail || email).trim().toLowerCase();
 
