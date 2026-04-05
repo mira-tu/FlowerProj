@@ -5,6 +5,7 @@ import { supabase } from '../config/supabase';
 import { formatPhoneNumber } from '../utils/format';
 import { getUserContactNumber, getUserFullName } from '../utils/customerProfile';
 import { BUSINESS_HOURS_LABEL, CUSTOM_ORDER_TIME_MAX, CUSTOM_ORDER_TIME_MIN, isWithinBusinessHours } from '../utils/businessHours';
+import { buildTentativeBreakdownFromSelections, formatTentativePriceRange } from '../utils/customOrderTentativePricing';
 import InfoModal from '../components/InfoModal';
 import '../styles/CustomOrder.css';
 import '../styles/Shop.css';
@@ -860,6 +861,9 @@ const CustomOrder = ({ user }) => {
             const flowersPerArrangement = isOther
                 ? otherFlowersPerArrangement
                 : (Number(option.flowersPerArrangement) || extractFlowersPerArrangement(option.label));
+            const estimatedPriceMin = Number(option.estimatedPriceMin) || 0;
+            const estimatedPriceMax = Number(option.estimatedPriceMax) || estimatedPriceMin;
+            const estimatedPriceNote = String(option.estimatedPriceNote || '').trim();
 
             return {
                 value: option.value,
@@ -868,7 +872,16 @@ const CustomOrder = ({ user }) => {
                 description: option.description || '',
                 quantity,
                 flowersPerArrangement,
-                totalFlowers: flowersPerArrangement > 0 ? flowersPerArrangement * quantity : 0
+                totalFlowers: flowersPerArrangement > 0 ? flowersPerArrangement * quantity : 0,
+                estimatedPriceMin,
+                estimatedPriceMax,
+                estimatedPriceNote,
+                tentativeSubtotalMin: estimatedPriceMin > 0 ? estimatedPriceMin * quantity : 0,
+                tentativeSubtotalMax: estimatedPriceMax > 0 ? estimatedPriceMax * quantity : 0,
+                formattedEstimatedRange: formatTentativePriceRange(estimatedPriceMin, estimatedPriceMax, estimatedPriceNote),
+                formattedTentativeSubtotal: estimatedPriceMin > 0 || estimatedPriceMax > 0
+                    ? formatTentativePriceRange(estimatedPriceMin * quantity, estimatedPriceMax * quantity)
+                    : 'For discussion',
             };
         });
     }, [formData.arrangementQuantities, formData.otherArrangementType, otherFlowersPerArrangement, selectedArrangementOptions]);
@@ -885,6 +898,19 @@ const CustomOrder = ({ user }) => {
 
     const totalEstimatedFlowers = useMemo(
         () => arrangementDetails.reduce((sum, detail) => sum + detail.totalFlowers, 0),
+        [arrangementDetails]
+    );
+
+    const tentativeBreakdown = useMemo(
+        () => buildTentativeBreakdownFromSelections(arrangementDetails.map((detail) => ({
+            arrangementLabel: detail.label,
+            quantity: detail.quantity,
+            estimatedPriceMin: detail.estimatedPriceMin,
+            estimatedPriceMax: detail.estimatedPriceMax,
+            estimatedPriceNote: detail.estimatedPriceNote,
+            tentativeSubtotalMin: detail.tentativeSubtotalMin,
+            tentativeSubtotalMax: detail.tentativeSubtotalMax,
+        }))),
         [arrangementDetails]
     );
 
@@ -1180,6 +1206,11 @@ const CustomOrder = ({ user }) => {
                 quantity: detail.quantity,
                 flowers_per_arrangement: detail.flowersPerArrangement || 0,
                 total_flowers: detail.totalFlowers || 0,
+                estimated_price_min: detail.estimatedPriceMin || 0,
+                estimated_price_max: detail.estimatedPriceMax || 0,
+                estimated_price_note: detail.estimatedPriceNote || '',
+                tentative_subtotal_min: detail.tentativeSubtotalMin || 0,
+                tentative_subtotal_max: detail.tentativeSubtotalMax || 0,
                 preferredFlowers: arrangementFlowerLabels,
                 preferred_flowers: arrangementFlowerLabels,
                 otherFlowersText: arrangementOtherFlowersText || null,
@@ -1214,6 +1245,7 @@ const CustomOrder = ({ user }) => {
             arrangementTypeValues: selectedArrangementOptions.map((option) => option.value),
             arrangementQuantities: formData.arrangementQuantities,
             arrangementSelections,
+            tentativeBreakdown,
             arrangementSummary,
             arrangementQuantity: totalArrangementQuantity || 1,
             flowerQuantity: hasOtherArrangement ? (formData.flowerQuantity || null) : null,
@@ -1884,6 +1916,37 @@ const CustomOrder = ({ user }) => {
                             <div className="d-flex justify-content-between mb-2">
                                 <span className="text-muted">Total Quantity:</span>
                                 <span className="fw-semibold text-end">{totalArrangementQuantity || 1}</span>
+                            </div>
+                            <div className="mt-3 pt-2 border-top">
+                                <span className="text-muted d-block mb-2">Tentative Breakdown:</span>
+                                <div className="d-grid gap-2">
+                                    {tentativeBreakdown.lineItems.map((lineItem) => (
+                                        <div key={lineItem.key} className="border rounded-3 bg-white px-3 py-2">
+                                            <div className="d-flex justify-content-between gap-3">
+                                                <span className="fw-semibold">{lineItem.label} x{lineItem.quantity}</span>
+                                                <span className="fw-semibold text-end">{lineItem.formattedLineRange}</span>
+                                            </div>
+                                            {lineItem.hasEstimate ? (
+                                                <div className="text-muted small mt-1">
+                                                    Each: {lineItem.formattedUnitRange}
+                                                </div>
+                                            ) : (
+                                                <div className="text-muted small mt-1">
+                                                    Tentative pricing will be confirmed after review.
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="d-flex justify-content-between mt-3">
+                                    <span className="text-muted">Tentative Subtotal:</span>
+                                    <span className="fw-semibold text-end">
+                                        {tentativeBreakdown.hasCompleteEstimate ? tentativeBreakdown.formattedSubtotalRange : 'For discussion'}
+                                    </span>
+                                </div>
+                                <div className="text-muted small mt-2">
+                                    Final price may change after review and confirmation.
+                                </div>
                             </div>
                             {hasOtherArrangement && formData.flowerQuantity && (
                                 <div className="d-flex justify-content-between mb-2">

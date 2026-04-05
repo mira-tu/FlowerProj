@@ -17,6 +17,7 @@ import { uploadBookingRequestImages } from '../utils/requestImageUploads';
 import { insertUserNotification } from '../utils/notificationApi';
 import { resolveBookingRequestStockReservations } from '../utils/requestSubmission';
 import { PICKUP_TIME_OPTIONS } from '../utils/businessHours';
+import { buildTentativePricingSummary, getTentativeBreakdownFromItem } from '../utils/customOrderTentativePricing';
 
 const pickupTimes = PICKUP_TIME_OPTIONS;
 const DEFAULT_SHIPPING_FEE = 100;
@@ -220,6 +221,25 @@ const BookingCheckout = ({ user }) => {
     const hasEstimatedInquiryTotal = useMemo(() => (
         inquiryItems.some((item) => !!(getSelectedEstimateFromItem(item)?.estimatedPrice || item.estimatedPrice))
     ), [inquiryItems]);
+    const tentativeInquiryBreakdowns = useMemo(
+        () => inquiryItems.map((item) => getTentativeBreakdownFromItem(item)),
+        [inquiryItems]
+    );
+    const combinedPricingSummary = useMemo(
+        () => buildTentativePricingSummary({
+            fixedAmount: estimatedInquiryTotal,
+            tentativeBreakdowns: tentativeInquiryBreakdowns,
+        }),
+        [estimatedInquiryTotal, tentativeInquiryBreakdowns]
+    );
+    const combinedPricingSummaryWithShipping = useMemo(
+        () => buildTentativePricingSummary({
+            fixedAmount: estimatedInquiryTotal,
+            tentativeBreakdowns: tentativeInquiryBreakdowns,
+            extraFixedAmount: deliveryMethod === 'delivery' ? shippingFee : 0,
+        }),
+        [deliveryMethod, estimatedInquiryTotal, shippingFee, tentativeInquiryBreakdowns]
+    );
 
     const handleSubmitInquiry = async () => {
         if (!user) {
@@ -284,7 +304,6 @@ const BookingCheckout = ({ user }) => {
                 delivery_method: deliveryMethod,
                 pickup_time: pickupDateTime,
                 shipping_fee: shippingFee,
-                estimated_price: hasEstimatedInquiryTotal ? estimatedInquiryTotal : null,
                 payment_status: 'to_pay',
                 image_url: firstItem.image_url || null,
                 notes: commonNotes || null,
@@ -314,6 +333,11 @@ const BookingCheckout = ({ user }) => {
                     selectedFlowers: firstItem.selectedFlowers || [],
                     flowers: firstItem.flowers || null,
                     estimated_total: hasEstimatedInquiryTotal ? estimatedInquiryTotal : null,
+                    tentative_pricing: combinedPricingSummary.hasAnyEstimate ? {
+                        has_complete_estimate: combinedPricingSummary.hasCompleteEstimate,
+                        subtotal_min: combinedPricingSummary.subtotalMin,
+                        subtotal_max: combinedPricingSummary.subtotalMax,
+                    } : null,
                     colorPreference: firstItem.colorPreference || null,
                     specialInstructions: firstItem.specialInstructions || null,
                     address: deliveryMethod === 'delivery' ? address : null,
@@ -503,7 +527,10 @@ const BookingCheckout = ({ user }) => {
                         <div className="checkout-section">
                             <h5 className="section-title"><i className="fas fa-info-circle"></i> Inquiry Details</h5>
                             <div className="p-3 rounded" style={{ backgroundColor: '#f8f9fa' }}>
-                                {inquiryItems.map((item, idx) => (
+                                {inquiryItems.map((item, idx) => {
+                                    const tentativeBreakdown = tentativeInquiryBreakdowns[idx];
+
+                                    return (
                                     <div key={item.id || idx} className="mb-4 pb-3 border-bottom">
                                         <div className="d-flex align-items-center mb-3">
                                             <img
@@ -529,6 +556,28 @@ const BookingCheckout = ({ user }) => {
                                         <p className="mb-1"><strong>Event Venue / Location:</strong> {item.venue}</p>
                                         <p className="mb-1"><strong>Total Quantity:</strong> {item.arrangementQuantity || 1}</p>
                                         {item.flowerQuantity && <p className="mb-1"><strong>No. of Flower Pieces:</strong> {item.flowerQuantity}</p>}
+                                        {tentativeBreakdown?.lineItems?.length ? (
+                                            <div className="mt-3">
+                                                <p className="mb-2"><strong>Tentative Breakdown:</strong></p>
+                                                <div className="border rounded-3 bg-white p-3">
+                                                    {tentativeBreakdown.lineItems.map((lineItem) => (
+                                                        <div key={lineItem.key} className="d-flex justify-content-between gap-3 small mb-2">
+                                                            <div>
+                                                                <div className="fw-semibold text-dark">{lineItem.label} x{lineItem.quantity}</div>
+                                                                <div className="text-muted">Each: {lineItem.formattedUnitRange}</div>
+                                                            </div>
+                                                            <div className="fw-semibold text-end">{lineItem.formattedLineRange}</div>
+                                                        </div>
+                                                    ))}
+                                                    <div className="d-flex justify-content-between pt-2 mt-2 border-top">
+                                                        <span className="text-muted">Tentative Subtotal</span>
+                                                        <span className="fw-semibold">
+                                                            {tentativeBreakdown.hasCompleteEstimate ? tentativeBreakdown.formattedSubtotalRange : 'For discussion'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ) : null}
                                         {item.flowers && <p className="mb-1"><strong>Preferred Flowers:</strong> {item.flowers}</p>}
                                         {isCustomOrderV4Item(item) && (
                                             <>
@@ -541,7 +590,7 @@ const BookingCheckout = ({ user }) => {
                                         {item.colorPreference && <p className="mb-1"><strong>Color Theme:</strong> {item.colorPreference}</p>}
                                         {item.specialInstructions && <p className="mb-1 mt-2"><strong>Details:</strong> {item.specialInstructions}</p>}
                                     </div>
-                                ))}
+                                )})}
                             </div>
                         </div>
                     </div>
@@ -559,16 +608,28 @@ const BookingCheckout = ({ user }) => {
                                     <span>{formatCustomOrderV4Currency(estimatedInquiryTotal)}</span>
                                 </div>
                             )}
+                            {tentativeInquiryBreakdowns.some((breakdown) => breakdown.hasAnyEstimate) && (
+                                <div className="summary-row">
+                                    <span>Tentative subtotal</span>
+                                    <span>{combinedPricingSummary.hasCompleteEstimate ? combinedPricingSummary.formattedSubtotalRange : 'For discussion'}</span>
+                                </div>
+                            )}
                             <div className="summary-row">
                                 <span>{deliveryMethod === 'pickup' ? 'Pickup' : 'Delivery Fee'}</span>
                                 <span>{deliveryMethod === 'pickup' ? 'FREE' : `PHP ${shippingFee.toLocaleString()}`}</span>
                             </div>
                             <hr />
                             <div className="summary-row total">
-                                <span>Total</span>
-                                <span className="fw-bold fs-5">{hasEstimatedInquiryTotal ? `Guide: ${formatCustomOrderV4Currency(estimatedInquiryTotal)}` : 'For Discussion'}</span>
+                                <span>Tentative Total</span>
+                                <span className="fw-bold fs-5">
+                                    {combinedPricingSummaryWithShipping.hasCompleteEstimate
+                                        ? combinedPricingSummaryWithShipping.formattedTotalRange
+                                        : hasEstimatedInquiryTotal
+                                            ? `Guide: ${formatCustomOrderV4Currency(estimatedInquiryTotal)}`
+                                            : 'For Discussion'}
+                                </span>
                             </div>
-                            {hasEstimatedInquiryTotal && (
+                            {(hasEstimatedInquiryTotal || tentativeInquiryBreakdowns.some((breakdown) => breakdown.hasAnyEstimate)) && (
                                 <div className="small text-muted mb-3">
                                     Final pricing will still be confirmed after our team reviews your request.
                                 </div>

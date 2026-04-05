@@ -41,6 +41,88 @@ const parseCurrencyNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const formatTentativePeso = (value) => `PHP ${Number(value || 0).toLocaleString(undefined, {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+})}`;
+
+const formatTentativeRange = (min, max, note = '') => {
+  const safeMin = parseCurrencyNumber(min);
+  const safeMaxCandidate = parseCurrencyNumber(max);
+  const safeMax = safeMaxCandidate < safeMin ? safeMin : safeMaxCandidate;
+  const trimmedNote = String(note || '').trim();
+
+  if (safeMin <= 0 && safeMax <= 0) {
+    return '';
+  }
+
+  const rangeText = safeMax > safeMin
+    ? `${formatTentativePeso(safeMin)}-${formatTentativePeso(safeMax)}`
+    : formatTentativePeso(Math.max(safeMin, safeMax));
+
+  return trimmedNote ? `${rangeText} ${trimmedNote}` : rangeText;
+};
+
+const getTentativeBreakdown = (item = {}) => {
+  const storedBreakdown = item?.tentativeBreakdown || item?.tentative_breakdown || {};
+  const sourceLineItems = Array.isArray(storedBreakdown?.lineItems)
+    ? storedBreakdown.lineItems
+    : Array.isArray(storedBreakdown?.line_items)
+      ? storedBreakdown.line_items
+      : Array.isArray(item?.arrangementSelections)
+        ? item.arrangementSelections
+        : [];
+
+  const lineItems = sourceLineItems
+    .map((entry, index) => {
+      const label = String(
+        entry?.label
+        || entry?.arrangementLabel
+        || entry?.arrangement_label
+        || entry?.arrangementType
+        || entry?.arrangement_type
+        || ''
+      ).trim();
+
+      if (!label) return null;
+
+      const quantity = toPositiveInt(entry?.quantity || entry?.arrangement_quantity, 1);
+      const unitMin = parseCurrencyNumber(entry?.unitMin ?? entry?.estimatedPriceMin ?? entry?.estimated_price_min);
+      const unitMaxCandidate = parseCurrencyNumber(entry?.unitMax ?? entry?.estimatedPriceMax ?? entry?.estimated_price_max);
+      const unitMax = unitMaxCandidate < unitMin ? unitMin : unitMaxCandidate;
+      const lineMin = parseCurrencyNumber(entry?.lineMin ?? entry?.tentativeSubtotalMin ?? entry?.tentative_subtotal_min);
+      const lineMaxCandidate = parseCurrencyNumber(entry?.lineMax ?? entry?.tentativeSubtotalMax ?? entry?.tentative_subtotal_max);
+      const lineMax = lineMaxCandidate < lineMin ? lineMin : lineMaxCandidate;
+      const note = String(entry?.note ?? entry?.estimatedPriceNote ?? entry?.estimated_price_note ?? '').trim();
+      const hasEstimate = unitMin > 0 || unitMax > 0 || lineMin > 0 || lineMax > 0;
+
+      return {
+        key: `${label}-${index}`,
+        label,
+        quantity,
+        hasEstimate,
+        formattedUnitRange: hasEstimate ? formatTentativeRange(unitMin, unitMax, note) : 'For discussion',
+        formattedLineRange: hasEstimate ? formatTentativeRange(lineMin || (unitMin * quantity), lineMax || (unitMax * quantity)) : 'For discussion',
+        lineMin: lineMin || (unitMin * quantity),
+        lineMax: lineMax || (unitMax * quantity),
+      };
+    })
+    .filter(Boolean);
+
+  const estimatedLineItems = lineItems.filter((lineItem) => lineItem.hasEstimate);
+  const hasAnyEstimate = estimatedLineItems.length > 0;
+  const hasCompleteEstimate = hasAnyEstimate && estimatedLineItems.length === lineItems.length;
+  const subtotalMin = estimatedLineItems.reduce((sum, lineItem) => sum + lineItem.lineMin, 0);
+  const subtotalMax = estimatedLineItems.reduce((sum, lineItem) => sum + lineItem.lineMax, 0);
+
+  return {
+    lineItems,
+    hasAnyEstimate,
+    hasCompleteEstimate,
+    formattedSubtotalRange: hasCompleteEstimate ? formatTentativeRange(subtotalMin, subtotalMax) : 'For discussion',
+  };
+};
+
 const getArrangementFlowerCount = (arrangementType = '') => {
   if (!arrangementType) return 0;
   const match = arrangementType.match(/(\d+)\s*flowers?/i);
@@ -1423,6 +1505,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
           const cancelledQuantity = toPositiveInt(item.cancelled_quantity ?? item.cancelledQuantity, 0);
           const colorTheme = getBookingColorText(item);
           const preferredFlowers = getBookingFlowerText(item);
+          const tentativeBreakdown = getTentativeBreakdown(item);
           const customOrderVersion = item.custom_order_version || requestData.custom_order_version;
           const isBudgetAwareCustomOrder = customOrderVersion === 2 || customOrderVersion === 4;
           const hasBudgetAwareDetails = Boolean(
@@ -1489,6 +1572,26 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
               <DetailSection label="Arrangement:" value={arrangementType} />
               <DetailSection label="Quantity:" value={remainingQuantity ? String(remainingQuantity) : (arrangementQuantity ? String(arrangementQuantity) : null)} />
               <DetailSection label="Cancelled Quantity:" value={cancelledQuantity ? String(cancelledQuantity) : null} />
+              {tentativeBreakdown.lineItems.length ? (
+                <View style={styles.detailSection}>
+                  <Text style={styles.detailLabel}>Tentative Breakdown</Text>
+                  <View style={{ backgroundColor: '#ffffff', borderRadius: 12, padding: 12, marginTop: 6 }}>
+                    {tentativeBreakdown.lineItems.map((lineItem) => (
+                      <View key={lineItem.key} style={{ marginBottom: 10 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
+                          <Text style={[styles.detailValue, { flex: 1 }]}>{lineItem.label} x{lineItem.quantity}</Text>
+                          <Text style={[styles.detailValue, { textAlign: 'right' }]}>{lineItem.formattedLineRange}</Text>
+                        </View>
+                        <Text style={[styles.detailLabel, { marginTop: 2, textTransform: 'none', letterSpacing: 0 }]}>Each: {lineItem.formattedUnitRange}</Text>
+                      </View>
+                    ))}
+                    <View style={{ borderTopWidth: 1, borderTopColor: '#f3d7e3', paddingTop: 10, marginTop: 2, flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
+                      <Text style={styles.detailLabel}>Tentative Subtotal</Text>
+                      <Text style={[styles.detailValue, { textAlign: 'right' }]}>{tentativeBreakdown.formattedSubtotalRange}</Text>
+                    </View>
+                  </View>
+                </View>
+              ) : null}
               <DetailSection label="Preferred Flowers:" value={preferredFlowers} />
               <DetailSection label="Original Target Price:" value={showBudgetAwareDetails ? `PHP ${parseCurrencyNumber(item.originalEstimatedPrice).toFixed(2)}` : null} />
               <DetailSection label="Customer Budget:" value={showBudgetAwareDetails ? `PHP ${parseCurrencyNumber(item.customerBudget).toFixed(2)}` : null} />

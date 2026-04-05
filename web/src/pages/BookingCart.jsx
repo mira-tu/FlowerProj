@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import '../styles/Shop.css';
+import { buildTentativePricingSummary, getTentativeBreakdownFromItem } from '../utils/customOrderTentativePricing';
 
 const BookingCart = ({ user }) => {
     const navigate = useNavigate();
@@ -39,6 +40,11 @@ const BookingCart = ({ user }) => {
         navigate('/booking-checkout');
     };
 
+    const itemTentativeBreakdowns = inquiryItems.map((item) => getTentativeBreakdownFromItem(item));
+    const tentativePricingSummary = buildTentativePricingSummary({
+        tentativeBreakdowns: itemTentativeBreakdowns,
+    });
+
     if (!inquiryItems || inquiryItems.length === 0) {
         return (
             <div className="container py-5 mt-5 text-center">
@@ -59,7 +65,7 @@ const BookingCart = ({ user }) => {
                         <div className="card-body py-2" style={{ overflowX: 'auto' }}>
                             <div className="row align-items-center text-muted small fw-bold text-uppercase g-0">
                                 <div className="col-5">Product</div>
-                                <div className="col-2 text-center">Price</div>
+                                <div className="col-2 text-center">Tentative</div>
                                 <div className="col-2 text-center">Quantity</div>
                                 <div className="col-2 text-center">Total Price</div>
                                 <div className="col-1 text-center" style={{ whiteSpace: 'nowrap' }}>Action</div>
@@ -67,7 +73,10 @@ const BookingCart = ({ user }) => {
                         </div>
                     </div>
 
-                    {inquiryItems.map((item) => (
+                    {inquiryItems.map((item, index) => {
+                        const tentativeBreakdown = itemTentativeBreakdowns[index];
+
+                        return (
                         <div key={item.id} className="card border-0 shadow-sm mb-3">
                             <div className="card-body">
                                 <div className="row align-items-center g-0">
@@ -87,7 +96,13 @@ const BookingCart = ({ user }) => {
                                     </div>
                                     <div className="col-md-2 text-center mb-2 mb-md-0">
                                         <span className="d-md-none text-muted small me-2">Price:</span>
-                                        <span className="fw-bold">For Discussion</span>
+                                        <span className="fw-bold">
+                                            {tentativeBreakdown?.hasCompleteEstimate
+                                                ? (tentativeBreakdown.lineItems.length === 1
+                                                    ? tentativeBreakdown.lineItems[0]?.formattedUnitRange || 'For discussion'
+                                                    : 'Varies')
+                                                : 'For Discussion'}
+                                        </span>
                                     </div>
                                     <div className="col-md-2 text-center mb-2 mb-md-0">
                                         <span className="d-md-none text-muted small me-2">Quantity:</span>
@@ -95,7 +110,9 @@ const BookingCart = ({ user }) => {
                                     </div>
                                     <div className="col-md-2 text-center fw-bold mb-2 mb-md-0" style={{ color: '#d63384' }}>
                                         <span className="d-md-none text-muted small me-2">Total:</span>
-                                        For Discussion
+                                        {tentativeBreakdown?.hasCompleteEstimate
+                                            ? tentativeBreakdown.formattedSubtotalRange
+                                            : 'For Discussion'}
                                     </div>
                                     <div className="col-md-1 text-center">
                                         <button
@@ -110,7 +127,7 @@ const BookingCart = ({ user }) => {
                                 </div>
                             </div>
                         </div>
-                    ))}
+                    )})}
                 </div>
 
                 <div className="col-lg-4">
@@ -123,8 +140,13 @@ const BookingCart = ({ user }) => {
                             </div>
                             <hr />
                             <div className="d-flex justify-content-between mb-4">
-                                <span className="fw-bold fs-5">Total Payment</span>
-                                <span className="fw-bold fs-5" style={{ color: '#d63384' }}>For Discussion</span>
+                                <span className="fw-bold fs-5">Tentative Total</span>
+                                <span className="fw-bold fs-5" style={{ color: '#d63384' }}>
+                                    {tentativePricingSummary.hasCompleteEstimate ? tentativePricingSummary.formattedSubtotalRange : 'For Discussion'}
+                                </span>
+                            </div>
+                            <div className="small text-muted mb-3">
+                                Final price may change after review and confirmation.
                             </div>
                             <button
                                 className="btn btn-primary w-100 py-2 fw-bold rounded-pill shadow-sm"

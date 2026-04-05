@@ -227,7 +227,12 @@ const MyOrders = () => {
                     quantity: item.remainingQuantity,
                 }));
                 const shippingFee = parseFloat(request.shipping_fee || requestData?.shipping_fee || 0);
-                const fallbackTotal = parseFloat(request.final_price || request.estimated_price || 0);
+                const fallbackTotal = parseFloat(
+                    request.final_price
+                    || request.estimated_price
+                    || requestData?.estimated_total
+                    || 0
+                );
                 const computedTotal = requestItemSummary.hasItems
                     ? (requestItemSummary.allCancelled ? 0 : roundCurrency(requestItemSummary.remainingSubtotal + shippingFee))
                     : fallbackTotal;
@@ -624,10 +629,6 @@ const MyOrders = () => {
 
         if (currentRequest.final_price != null) {
             updatePayload.final_price = nextTotal;
-        }
-
-        if (currentRequest.estimated_price != null || currentRequest.final_price == null) {
-            updatePayload.estimated_price = nextSubtotal;
         }
 
         const { error: updateRequestError } = await supabase
