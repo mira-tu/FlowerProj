@@ -70,6 +70,10 @@ const getResetStatusFromError = (value = '') => {
         return 'invalid';
     }
 
+    if (message.includes('invalid') && message.includes('expired')) {
+        return 'invalid';
+    }
+
     if (message.includes('expired')) {
         return 'expired';
     }
