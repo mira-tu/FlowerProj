@@ -782,7 +782,8 @@ const getCollectedCashAmount = (totalAmount, amountReceived, paymentStatus) => {
 
 const getRequestScheduleDate = (request) => {
     const requestData = parseJsonObject(request?.data);
-    const dateValue = requestData?.dateNeeded
+    const dateValue = request?.event_date
+        || requestData?.dateNeeded
         || requestData?.date_needed
         || requestData?.eventDate
         || requestData?.event_date
@@ -2246,7 +2247,7 @@ export const adminAPI = {
             `)
             .order('created_at', { ascending: false });
 
-        let requestsQuery = supabase
+        const buildSalesRequestsQuery = (options = {}) => supabase
             .from('requests')
             .select(`
                 id,
@@ -2257,7 +2258,7 @@ export const adminAPI = {
                 payment_status,
                 amount_received,
                 final_price,
-                estimated_price,
+                ${options.includeEstimatedPrice !== false ? 'estimated_price,' : ''}
                 delivery_method,
                 pickup_time,
                 data,
@@ -2269,13 +2270,49 @@ export const adminAPI = {
             .order('created_at', { ascending: false });
 
         ordersQuery = applyDateRangeToQuery(ordersQuery, 'created_at', periodRange);
-        requestsQuery = applyDateRangeToQuery(requestsQuery, 'created_at', periodRange);
+        let requestQueryOptions = {
+            includeEstimatedPrice: true,
+        };
+        let requestsQuery = applyDateRangeToQuery(buildSalesRequestsQuery(requestQueryOptions), 'created_at', periodRange);
 
         const [
             { data: sales, error: salesError },
             { data: orders, error: ordersError },
-            { data: requests, error: requestsError },
+            requestsResult,
         ] = await Promise.all([salesQuery, ordersQuery, requestsQuery]);
+
+        let { data: requests, error: requestsError } = requestsResult;
+
+        const requestSalesColumnFallbacks = [
+            ['requests.estimated_price', 'includeEstimatedPrice', 'estimated_price'],
+        ];
+
+        let shouldRetryRequests = true;
+        while (requestsError && shouldRetryRequests) {
+            shouldRetryRequests = false;
+            const message = String(requestsError.message || '');
+            const missingColumn = requestSalesColumnFallbacks.find(([qualifiedName]) => (
+                message.includes(qualifiedName)
+            ));
+
+            if (missingColumn) {
+                const [, optionKey, columnLabel] = missingColumn;
+                requestQueryOptions = {
+                    ...requestQueryOptions,
+                    [optionKey]: false,
+                };
+
+                console.warn(`Retrying sales request summary without optional column ${columnLabel}`);
+                const retryResult = await applyDateRangeToQuery(
+                    buildSalesRequestsQuery(requestQueryOptions),
+                    'created_at',
+                    periodRange
+                );
+                requests = retryResult.data;
+                requestsError = retryResult.error;
+                shouldRetryRequests = Boolean(requestsError);
+            }
+        }
 
         if (salesError || ordersError || requestsError) {
             console.error('Error fetching sales summary sources:', { salesError, ordersError, requestsError });
