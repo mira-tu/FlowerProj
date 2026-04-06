@@ -602,7 +602,7 @@ const MyOrders = () => {
         const nextData = {
             ...(requestData && typeof requestData === 'object' ? requestData : {}),
             items: updatedItems,
-            item_count: summary.activeItems.length,
+            item_count: summary.remainingQuantityTotal || summary.activeItems.length,
             subtotal: nextSubtotal,
             shipping_fee: nextShippingFee,
             estimated_total: nextSubtotal,

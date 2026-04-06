@@ -586,6 +586,9 @@ const CustomizedCheckout = ({ user }) => {
                 payment_status,
                 subtotal,
                 final_price: total,
+                item_count: uploadedItems.reduce((sum, item) => (
+                    sum + (Number(item?.qty ?? item?.quantity ?? 1) || 1)
+                ), 0),
                 shipping_fee: shippingFee,
                 receipt_url: uploadedReceiptUrl,
                 image_url: firstItem.image_url || null,

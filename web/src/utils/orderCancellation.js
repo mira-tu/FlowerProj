@@ -14,6 +14,11 @@ const toPositiveInteger = (value, fallback = 0) => {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
+const toNonNegativeNumber = (value, fallback = 0) => {
+    const parsed = Number.parseFloat(String(value ?? fallback));
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+};
+
 export const buildCancellationItemKey = (item = {}, index = 0) => (
     String(
         item.cancellation_key
@@ -53,14 +58,97 @@ export const getRemainingItemQuantity = (item = {}) => (
     Math.max(0, getOriginalItemQuantity(item) - getCancelledItemQuantity(item))
 );
 
+const getTentativeBreakdownTotal = (item = {}) => {
+    const breakdown = item.tentativeBreakdown || item.tentative_breakdown || {};
+    const breakdownCandidates = [
+        breakdown.subtotalMax,
+        breakdown.subtotal_max,
+        breakdown.subtotalMin,
+        breakdown.subtotal_min,
+        breakdown.totalMax,
+        breakdown.total_max,
+        breakdown.totalMin,
+        breakdown.total_min,
+    ];
+
+    for (const candidate of breakdownCandidates) {
+        const parsed = roundCurrency(candidate);
+        if (parsed > 0) {
+            return parsed;
+        }
+    }
+
+    const lineItems = Array.isArray(breakdown.lineItems)
+        ? breakdown.lineItems
+        : (Array.isArray(breakdown.line_items) ? breakdown.line_items : []);
+    if (lineItems.length) {
+        const lineTotal = roundCurrency(
+            lineItems.reduce((sum, lineItem) => (
+                sum + roundCurrency(
+                    lineItem?.lineMax
+                    ?? lineItem?.line_max
+                    ?? lineItem?.lineMin
+                    ?? lineItem?.line_min
+                    ?? 0,
+                )
+            ), 0),
+        );
+
+        if (lineTotal > 0) {
+            return lineTotal;
+        }
+    }
+
+    const arrangementSelections = Array.isArray(item.arrangementSelections)
+        ? item.arrangementSelections
+        : (Array.isArray(item.arrangement_selections) ? item.arrangement_selections : []);
+    if (!arrangementSelections.length) {
+        return 0;
+    }
+
+    const selectionTotal = roundCurrency(
+        arrangementSelections.reduce((sum, selection) => {
+            const selectionQuantity = toPositiveInteger(
+                selection?.quantity ?? selection?.arrangement_quantity,
+                1,
+            );
+            const lineEstimate = toNonNegativeNumber(
+                selection?.tentative_subtotal_max
+                ?? selection?.tentativeSubtotalMax
+                ?? selection?.tentative_subtotal_min
+                ?? selection?.tentativeSubtotalMin,
+                0,
+            );
+
+            if (lineEstimate > 0) {
+                return sum + lineEstimate;
+            }
+
+            const unitEstimate = toNonNegativeNumber(
+                selection?.estimated_price_max
+                ?? selection?.estimatedPriceMax
+                ?? selection?.estimated_price_min
+                ?? selection?.estimatedPriceMin,
+                0,
+            );
+
+            return sum + roundCurrency(unitEstimate * selectionQuantity);
+        }, 0),
+    );
+
+    return selectionTotal > 0 ? selectionTotal : 0;
+};
+
 export const getItemUnitPrice = (item = {}) => {
     const originalQuantity = getOriginalItemQuantity(item);
     const selectedEstimate = getSelectedEstimateFromItem(item);
+    const tentativeBreakdownTotal = getTentativeBreakdownTotal(item);
     const totalPriceCandidates = [
         item.total_price,
         item.line_total,
         item.lineTotal,
         item.total,
+        tentativeBreakdownTotal,
         selectedEstimate?.estimatedPrice,
         item.estimatedPrice,
     ];
@@ -123,6 +211,9 @@ export const summarizeCancellationItems = (items = []) => {
         hasItems: normalizedItems.length > 0,
         hasCancellations: normalizedItems.some((item) => item.cancelledQuantity > 0),
         allCancelled: normalizedItems.length > 0 && activeItems.length === 0,
+        originalQuantityTotal: normalizedItems.reduce((sum, item) => sum + item.originalQuantity, 0),
+        remainingQuantityTotal: normalizedItems.reduce((sum, item) => sum + item.remainingQuantity, 0),
+        cancelledQuantityTotal: normalizedItems.reduce((sum, item) => sum + item.cancelledQuantity, 0),
         remainingSubtotal: roundCurrency(activeItems.reduce((sum, item) => sum + item.remainingTotal, 0)),
         cancelledSubtotal: roundCurrency(normalizedItems.reduce((sum, item) => sum + item.cancelledTotal, 0)),
     };

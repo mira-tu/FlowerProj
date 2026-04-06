@@ -209,7 +209,7 @@ const buildBookingOverview = (requestData = {}) => {
 
     return {
         items,
-        itemCount: items.length,
+        itemCount: items.reduce((sum, item) => sum + (item.remainingQuantity || item.quantity || item.qty || 0), 0),
         occasionText: uniqueValues(requestData.combined_occasions || items.map((item) => item.occasion)).join(', '),
         eventDateText: uniqueValues(requestData.combined_dates || items.map((item) => item.eventDate || item.event_date)).join(', '),
         eventTimeText: uniqueValues(items.map((item) => formatBookingEventTime(item.eventTime || item.event_time))).join(', '),
@@ -973,6 +973,7 @@ const OrderBookingTracking = () => {
                                                         ? arrangementSelections.reduce((sum, selection) => sum + Number(selection?.quantity || 1), 0)
                                                         : null
                                                 );
+                                                const displayQuantity = item.remainingQuantity || totalArrangementQuantity || null;
                                                 const selectedEstimate = getSelectedEstimateFromItem(item);
 
                                                 return (
@@ -992,7 +993,7 @@ const OrderBookingTracking = () => {
                                                             <div className="d-flex flex-column mb-2">
                                                                 <span className="text-muted small fw-medium">Quantity</span>
                                                                 <span className="fw-bold text-dark">
-                                                                    {item.remainingQuantity > 0 ? totalArrangementQuantity : 'Cancelled'}
+                                                                    {item.remainingQuantity > 0 ? displayQuantity : 'Cancelled'}
                                                                 </span>
                                                                 {item.cancelledQuantity > 0 && (
                                                                     <span className="text-danger small">Cancelled: {item.cancelledQuantity}</span>

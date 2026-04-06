@@ -338,7 +338,15 @@ const BookingCheckout = ({ user }) => {
                         : uploadedItems.some((item) => item.custom_order_version === 2)
                             ? 2
                             : null,
-                    item_count: uploadedItems.length,
+                    item_count: uploadedItems.reduce((sum, item) => (
+                        sum + (Number(
+                            item?.arrangementQuantity
+                            ?? item?.arrangement_quantity
+                            ?? item?.quantity
+                            ?? item?.qty
+                            ?? 1,
+                        ) || 1)
+                    ), 0),
                     summary_label: inquirySummary.summaryLabel,
                     combined_occasions: inquirySummary.combinedOccasions,
                     combined_dates: inquirySummary.combinedDates,

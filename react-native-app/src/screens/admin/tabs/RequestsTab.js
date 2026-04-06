@@ -137,6 +137,22 @@ const toPositiveInt = (value, fallback = 0) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
+const getRemainingRequestItemQuantity = (item = {}) => {
+  const fallbackQuantity = toPositiveInt(
+    item?.quantity
+    ?? item?.qty
+    ?? item?.arrangementQuantity
+    ?? item?.arrangement_quantity,
+    0
+  );
+
+  return toPositiveInt(item?.remaining_quantity ?? item?.remainingQuantity, fallbackQuantity);
+};
+
+const getCancelledRequestItemQuantity = (item = {}) => (
+  toPositiveInt(item?.cancelled_quantity ?? item?.cancelledQuantity, 0)
+);
+
 const normalizeFreeTextList = (value) => {
   if (!value || typeof value !== 'string') return [];
   return value
@@ -455,7 +471,7 @@ const buildFlowerPricingContext = (request) => {
     arrangementSelections,
     flowerTypes: normalizedFlowerTypes,
     flowerQuantities,
-    itemCount: bookingItems.length || 1,
+    itemCount: bookingItems.reduce((sum, item) => sum + getRemainingRequestItemQuantity(item), 0) || bookingItems.length || 1,
   };
 };
 const formatCurrency = (value) => {
@@ -1506,8 +1522,8 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
             arrangementSelections.length ? arrangementSelections.reduce((sum, selection) => sum + toPositiveInt(selection?.quantity, 1), 0) : null,
             item.arrangement_quantity
           );
-          const remainingQuantity = toPositiveInt(item.remaining_quantity ?? item.remainingQuantity, 0);
-          const cancelledQuantity = toPositiveInt(item.cancelled_quantity ?? item.cancelledQuantity, 0);
+          const remainingQuantity = getRemainingRequestItemQuantity(item);
+          const cancelledQuantity = getCancelledRequestItemQuantity(item);
           const colorTheme = getBookingColorText(item);
           const preferredFlowers = getBookingFlowerText(item);
           const tentativeBreakdown = getTentativeBreakdown(item);
@@ -1644,6 +1660,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
 
   const renderCustomizedDetails = (request) => {
     const customizedItems = getCustomizedRequestItems(request);
+    const customizedQuantityTotal = customizedItems.reduce((sum, item) => sum + getRemainingRequestItemQuantity(item), 0);
 
     return (
       <>
@@ -1655,12 +1672,12 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
         />
         <DetailSection
                   label="Customizer Studio:"
-          value={customizedItems.length ? String(customizedItems.length) : null}
+          value={customizedQuantityTotal ? String(customizedQuantityTotal) : (customizedItems.length ? String(customizedItems.length) : null)}
         />
 
         {customizedItems.map((item) => {
-          const remainingQuantity = toPositiveInt(item.remaining_quantity ?? item.remainingQuantity ?? item.quantity, 0);
-          const cancelledQuantity = toPositiveInt(item.cancelled_quantity ?? item.cancelledQuantity, 0);
+          const remainingQuantity = getRemainingRequestItemQuantity(item);
+          const cancelledQuantity = getCancelledRequestItemQuantity(item);
 
           return (
           <View key={item.key} style={styles.customizedRequestDetailCard}>
@@ -2518,7 +2535,9 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
           <View style={styles.eoSection}>
             <View style={styles.eoSectionHeader}>
               <Ionicons name="image-outline" size={16} color="#6B7280" />
-                    <Text style={styles.eoSectionTitle}>Customizer Studio ({customizedItems.length})</Text>
+              <Text style={styles.eoSectionTitle}>
+                {`Customizer Studio (${customizedItems.reduce((sum, customizedItem) => sum + getRemainingRequestItemQuantity(customizedItem), 0) || customizedItems.length})`}
+              </Text>
             </View>
             {customizedItems.map((customizedItem, index) => (
               <TouchableOpacity
@@ -2557,6 +2576,14 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                     ) : null;
                   })()}
                   <Text style={styles.eoItemName}>{customizedItem.title}</Text>
+                  <Text style={styles.eoItemQuantity}>
+                    Quantity: {getRemainingRequestItemQuantity(customizedItem)}
+                  </Text>
+                  {getCancelledRequestItemQuantity(customizedItem) > 0 ? (
+                    <Text style={styles.eoItemQuantity}>
+                      Cancelled: {getCancelledRequestItemQuantity(customizedItem)}
+                    </Text>
+                  ) : null}
                   {customizedItem.bundleSizeText ? (
                     <Text style={styles.eoItemQuantity}>Bundle Size: {customizedItem.bundleSizeText}</Text>
                   ) : null}
@@ -2584,7 +2611,9 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
           <View style={styles.eoSection}>
             <View style={styles.eoSectionHeader}>
               <Ionicons name="images-outline" size={16} color="#6B7280" />
-              <Text style={styles.eoSectionTitle}>Custom Order Items ({bookingItems.length})</Text>
+              <Text style={styles.eoSectionTitle}>
+                {`Custom Order Items (${bookingItems.reduce((sum, bookingItem) => sum + getRemainingRequestItemQuantity(bookingItem), 0) || bookingItems.length})`}
+              </Text>
             </View>
             {bookingItems.map((bookingItem, index) => {
               const assignedRiderNames = bookingItem.assignedRiderIds
@@ -2611,6 +2640,14 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                   <View style={{ flex: 1 }}>
                     <Text style={styles.customizedRequestItemMeta}>{bookingItem.label}</Text>
                     <Text style={styles.eoItemName}>{bookingItem.title}</Text>
+                    <Text style={styles.eoItemQuantity}>
+                      Quantity: {getRemainingRequestItemQuantity(bookingItem)}
+                    </Text>
+                    {getCancelledRequestItemQuantity(bookingItem) > 0 ? (
+                      <Text style={styles.eoItemQuantity}>
+                        Cancelled: {getCancelledRequestItemQuantity(bookingItem)}
+                      </Text>
+                    ) : null}
                     {bookingItem.arrangementText ? (
                       <Text style={styles.eoItemQuantity} numberOfLines={2}>
                         Arrangement: {bookingItem.arrangementText}
