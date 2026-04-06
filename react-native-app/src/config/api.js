@@ -693,9 +693,38 @@ const getWeekRange = () => {
     };
 };
 
-const getPeriodRange = (period = 'all', monthKey = null) => {
+const getDateRange = (dateKey) => {
+    const normalizedKey = String(dateKey || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedKey)) {
+        return null;
+    }
+
+    const [yearText, monthText, dayText] = normalizedKey.split('-');
+    const start = new Date(Number(yearText), Number(monthText) - 1, Number(dayText));
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return null;
+    }
+
+    return {
+        key: normalizedKey,
+        start,
+        end,
+        startIso: start.toISOString(),
+        endIso: end.toISOString(),
+        label: start.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' }),
+    };
+};
+
+const getPeriodRange = (period = 'all', monthKey = null, dateKey = null) => {
     if (period === 'today') {
         return getTodayRange();
+    }
+
+    if (period === 'date') {
+        return getDateRange(dateKey);
     }
 
     if (period === 'week') {
@@ -2220,7 +2249,7 @@ export const adminAPI = {
 
     getSalesSummary: async (filters = {}) => {
         const period = filters?.period || 'all';
-        const periodRange = getPeriodRange(period, filters?.monthKey);
+        const periodRange = getPeriodRange(period, filters?.monthKey, filters?.dateKey);
         const todayRange = getTodayRange();
         const weekRange = getWeekRange();
         const currentMonthRange = getMonthRange(formatMonthKey(new Date()));
@@ -2487,8 +2516,8 @@ export const adminAPI = {
         return { data: summary };
     },
 
-    getSalesChartData: async (period = 'week', monthKey = null) => {
-        const periodRange = getPeriodRange(period, monthKey);
+    getSalesChartData: async (period = 'week', monthKey = null, dateKey = null) => {
+        const periodRange = getPeriodRange(period, monthKey, dateKey);
         let query = supabase
             .from('sales')
             .select('sale_date, total_amount')
@@ -2505,8 +2534,8 @@ export const adminAPI = {
         return { data };
     },
 
-    getBestSellingProducts: async (period = 'all', monthKey = null) => {
-        const periodRange = getPeriodRange(period, monthKey);
+    getBestSellingProducts: async (period = 'all', monthKey = null, dateKey = null) => {
+        const periodRange = getPeriodRange(period, monthKey, dateKey);
         let query = supabase
             .from('sales')
             .select(`
@@ -2566,7 +2595,7 @@ export const adminAPI = {
         return { data: sorted.slice(0, 5) };
     },
 
-    getTransactionHistory: async (period = 'all', monthKey = null) => {
+    getTransactionHistory: async (period = 'all', monthKey = null, dateKey = null) => {
         let query = supabase
             .from('sales')
             .select(`
@@ -2597,7 +2626,7 @@ export const adminAPI = {
             `)
             .order('sale_date', { ascending: false });
 
-        const periodRange = getPeriodRange(period, monthKey);
+        const periodRange = getPeriodRange(period, monthKey, dateKey);
         query = applyDateRangeToQuery(query, 'sale_date', periodRange);
 
         const { data, error } = await query;

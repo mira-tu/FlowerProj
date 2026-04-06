@@ -10,6 +10,7 @@ import {
   RefreshControl,
   ScrollView,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
   useWindowDimensions,
@@ -27,6 +28,26 @@ const formatMonthKey = (date) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   return `${year}-${month}`;
+};
+
+const formatDateKey = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getDateLabel = (dateKey) => {
+  const normalized = String(dateKey || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return 'Selected Date';
+  }
+
+  const [year, month, day] = normalized.split('-').map(Number);
+  const parsed = new Date(year, month - 1, day);
+  return Number.isNaN(parsed.getTime())
+    ? normalized
+    : parsed.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' });
 };
 
 const getMonthRange = (monthKey) => {
@@ -84,6 +105,8 @@ const SalesTab = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState('today');
   const [selectedMonthKey, setSelectedMonthKey] = useState(formatMonthKey(new Date()));
+  const [selectedDateKey, setSelectedDateKey] = useState(formatDateKey(new Date()));
+  const [dateInputValue, setDateInputValue] = useState(formatDateKey(new Date()));
   const [bestSellers, setBestSellers] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [expandedTxn, setExpandedTxn] = useState(null);
@@ -111,7 +134,7 @@ const SalesTab = () => {
     return () => {
       supabase.removeChannel(subscription);
     };
-  }, [selectedPeriod, selectedMonthKey]);
+  }, [selectedPeriod, selectedMonthKey, selectedDateKey]);
 
   const loadAllData = async () => {
     setLoading(true);
@@ -132,7 +155,8 @@ const SalesTab = () => {
     try {
       const activeMonthKey = selectedPeriod === 'month' ? selectedMonthKey : null;
       const selectedMonthRange = selectedPeriod === 'month' ? getMonthRange(selectedMonthKey) : null;
-      const summaryRes = await adminAPI.getSalesSummary({ period: selectedPeriod, monthKey: activeMonthKey });
+      const activeDateKey = selectedPeriod === 'date' ? selectedDateKey : null;
+      const summaryRes = await adminAPI.getSalesSummary({ period: selectedPeriod, monthKey: activeMonthKey, dateKey: activeDateKey });
       if (summaryRes.error) throw summaryRes.error;
       const summary = summaryRes.data;
 
@@ -155,14 +179,14 @@ const SalesTab = () => {
       });
 
       // Process data for chart
-      const chartRes = await adminAPI.getSalesChartData(selectedPeriod, activeMonthKey);
+      const chartRes = await adminAPI.getSalesChartData(selectedPeriod, activeMonthKey, activeDateKey);
       if (chartRes.error) throw chartRes.error;
       const allSales = chartRes.data || [];
 
       let labels = [];
       let data = [];
 
-      if (selectedPeriod === 'today') {
+      if (selectedPeriod === 'today' || selectedPeriod === 'date') {
         labels = ['12AM', '4AM', '8AM', '12PM', '4PM', '8PM'];
         data = Array(6).fill(0);
 
@@ -262,7 +286,8 @@ const SalesTab = () => {
     try {
       const res = await adminAPI.getBestSellingProducts(
         selectedPeriod,
-        selectedPeriod === 'month' ? selectedMonthKey : null
+        selectedPeriod === 'month' ? selectedMonthKey : null,
+        selectedPeriod === 'date' ? selectedDateKey : null
       );
       setBestSellers(res.data || []);
     } catch (error) {
@@ -275,7 +300,8 @@ const SalesTab = () => {
     try {
       const res = await adminAPI.getTransactionHistory(
         selectedPeriod,
-        selectedPeriod === 'month' ? selectedMonthKey : null
+        selectedPeriod === 'month' ? selectedMonthKey : null,
+        selectedPeriod === 'date' ? selectedDateKey : null
       );
       setTransactions(res.data || []);
     } catch (error) {
@@ -426,6 +452,18 @@ const SalesTab = () => {
     setExportModalVisible(true);
   };
 
+  const applyDateInput = (value) => {
+    const normalized = String(value || '')
+      .replace(/[^\d-]/g, '')
+      .slice(0, 10);
+
+    setDateInputValue(normalized);
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+      setSelectedDateKey(normalized);
+    }
+  };
+
   const handleExportReport = async () => {
     setExportModalVisible(false); // Close modal
     setExporting(true);
@@ -438,7 +476,9 @@ const SalesTab = () => {
 
       const periodLabel = period === 'month' && selectedMonthOption
         ? selectedMonthOption.fullLabel
-        : period.charAt(0).toUpperCase() + period.slice(1);
+        : period === 'date'
+          ? getDateLabel(selectedDateKey)
+          : period.charAt(0).toUpperCase() + period.slice(1);
       const dateGenerated = new Date().toLocaleDateString('en-PH', {
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
         hour: '2-digit', minute: '2-digit',
@@ -591,6 +631,8 @@ const SalesTab = () => {
   const currentSales = salesData.cashSales;
   const currentSalesLabel = selectedPeriod === 'all'
     ? 'Cash Sales'
+    : selectedPeriod === 'date'
+      ? `Cash Sales (${getDateLabel(selectedDateKey)})`
     : selectedPeriod === 'month' && selectedMonthOption
       ? `Cash Sales (${selectedMonthOption.fullLabel})`
       : `Cash Sales (${selectedPeriod.charAt(0).toUpperCase() + selectedPeriod.slice(1)})`;
@@ -635,7 +677,7 @@ const SalesTab = () => {
         <View style={styles.filterContainer}>
           <Text style={styles.filterLabel}>Period:</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
-            {['today', 'week', 'month', 'all'].map((period) => (
+            {['today', 'date', 'week', 'month', 'all'].map((period) => (
               <TouchableOpacity
                 key={period}
                 style={[
@@ -648,12 +690,47 @@ const SalesTab = () => {
                   styles.categoryChipText,
                   selectedPeriod === period && styles.categoryChipTextActive
                 ]}>
-                  {period.charAt(0).toUpperCase() + period.slice(1)}
+                  {period === 'date' ? 'Date' : period.charAt(0).toUpperCase() + period.slice(1)}
                 </Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
         </View>
+
+        {selectedPeriod === 'date' && (
+          <View style={styles.filterContainer}>
+            <Text style={styles.filterLabel}>Specific date:</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <TextInput
+                value={dateInputValue}
+                onChangeText={applyDateInput}
+                placeholder="YYYY-MM-DD"
+                keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'numeric'}
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={[styles.input, { flex: 1, marginTop: 0, marginBottom: 0 }]}
+              />
+              <TouchableOpacity
+                style={{
+                  backgroundColor: '#ec4899',
+                  paddingHorizontal: 14,
+                  paddingVertical: 12,
+                  borderRadius: 10,
+                }}
+                onPress={() => {
+                  const todayKey = formatDateKey(new Date());
+                  setDateInputValue(todayKey);
+                  setSelectedDateKey(todayKey);
+                }}
+              >
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Today</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
+              Use the format YYYY-MM-DD. The filter updates once the full date is entered.
+            </Text>
+          </View>
+        )}
 
         {selectedPeriod === 'month' && (
           <View style={styles.filterContainer}>
