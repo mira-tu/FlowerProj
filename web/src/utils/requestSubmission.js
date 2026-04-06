@@ -115,3 +115,46 @@ export const resolveBookingRequestStockReservations = async ({
     return reservations;
   }, []);
 };
+
+const isMissingRequestStockAllocationRpcError = (error) => {
+  const message = String(error?.message || '').toLowerCase();
+  const details = String(error?.details || '').toLowerCase();
+  const hint = String(error?.hint || '').toLowerCase();
+  const code = String(error?.code || '').toLowerCase();
+  const combined = `${message} ${details} ${hint}`;
+
+  return code === 'pgrst202'
+    || combined.includes('apply_request_stock_allocations')
+    || combined.includes('could not find the function')
+    || combined.includes('function public.apply_request_stock_allocations')
+    || combined.includes('schema cache')
+    || (combined.includes('stock_allocations') && combined.includes('not found'))
+    || (combined.includes('stock_allocations') && combined.includes('404'));
+};
+
+export const reserveRequestStockAllocations = async ({
+  supabase,
+  requestId,
+  allocations = [],
+}) => {
+  if (!supabase || !requestId || !Array.isArray(allocations) || allocations.length === 0) {
+    return { success: true, skipped: true, usedFallback: false };
+  }
+
+  const { error } = await supabase.rpc('apply_request_stock_allocations', {
+    p_request_id: requestId,
+    p_allocations: allocations,
+    p_mode: 'reserve',
+  });
+
+  if (!error) {
+    return { success: true, skipped: false, usedFallback: false };
+  }
+
+  if (isMissingRequestStockAllocationRpcError(error)) {
+    console.warn('Request stock allocation RPC is unavailable. Falling back to trigger-based reservation handling.');
+    return { success: true, skipped: false, usedFallback: true };
+  }
+
+  return { success: false, error, skipped: false, usedFallback: false };
+};

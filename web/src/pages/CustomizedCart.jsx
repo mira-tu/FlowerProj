@@ -192,7 +192,7 @@ const CustomizedCart = ({ user }) => {
                                                     }}
                                                 />
                                             </div>
-                                            <CustomizedBouquetPreview item={item} size={80} />
+                                            <CustomizedBouquetPreview item={item} size={80} zoomable />
                                             <div className="ms-3">
                                                 <h6 className="mb-0 fw-bold">{item.name}</h6>
                                                 <small className="text-muted">{item.bundleSize} stems</small>

@@ -15,7 +15,7 @@ import {
 } from '../utils/deliveryDestinations';
 import { uploadBookingRequestImages } from '../utils/requestImageUploads';
 import { insertUserNotification } from '../utils/notificationApi';
-import { resolveBookingRequestStockReservations } from '../utils/requestSubmission';
+import { reserveRequestStockAllocations, resolveBookingRequestStockReservations } from '../utils/requestSubmission';
 import { PICKUP_TIME_OPTIONS } from '../utils/businessHours';
 import { buildTentativePricingSummary, getTentativeBreakdownFromItem } from '../utils/customOrderTentativePricing';
 import { fetchCustomOrderCatalog } from '../utils/customOrderCatalog';
@@ -377,14 +377,14 @@ const BookingCheckout = ({ user }) => {
             if (error) throw error;
 
             if (stockAllocations.length > 0 && insertedRequest?.id) {
-                const { error: allocationError } = await supabase.rpc('apply_request_stock_allocations', {
-                    p_request_id: insertedRequest.id,
-                    p_allocations: stockAllocations,
-                    p_mode: 'reserve',
+                const reservationResult = await reserveRequestStockAllocations({
+                    supabase,
+                    requestId: insertedRequest.id,
+                    allocations: stockAllocations,
                 });
 
-                if (allocationError) {
-                    console.error('Error reserving booking request stock:', allocationError);
+                if (!reservationResult.success) {
+                    console.error('Error reserving booking request stock:', reservationResult.error);
                     await supabase.from('requests').delete().eq('id', insertedRequest.id);
                     showInfoModal(
                         'Stock Changed',

@@ -21,6 +21,7 @@ import {
 } from '../utils/freeShipping';
 import { PICKUP_TIME_OPTIONS } from '../utils/businessHours';
 import { hydrateCustomizedBouquetItems } from '../utils/customizedBouquetPreview';
+import { reserveRequestStockAllocations } from '../utils/requestSubmission';
 
 const paymentMethods = [
     { id: 'gcash', name: 'GCash', description: 'Pay via GCash e-wallet', icon: 'fa-wallet' },
@@ -607,14 +608,14 @@ const CustomizedCheckout = ({ user }) => {
         }
 
         if (stockAllocations.length > 0) {
-            const { error: allocationError } = await supabase.rpc('apply_request_stock_allocations', {
-                p_request_id: data.id,
-                p_allocations: stockAllocations,
-                p_mode: 'reserve',
+            const reservationResult = await reserveRequestStockAllocations({
+                supabase,
+                requestId: data.id,
+                allocations: stockAllocations,
             });
 
-            if (allocationError) {
-                console.error('Error reserving customized request stock:', allocationError);
+            if (!reservationResult.success) {
+                console.error('Error reserving customized request stock:', reservationResult.error);
                 await supabase.from('requests').delete().eq('id', data.id);
                 setInfoModal({
                     show: true,
@@ -806,7 +807,7 @@ const CustomizedCheckout = ({ user }) => {
 
                             {displayCheckoutItems.map((item, index) => (
                                 <div key={index} className="checkout-item">
-                                    <CustomizedBouquetPreview item={item} size={80} />
+                                    <CustomizedBouquetPreview item={item} size={80} zoomable />
                                     <div className="checkout-item-info">
                                         <div className="checkout-item-name">{item.name}</div>
                                         <div className="checkout-item-qty">Qty: {item.qty || 1}</div>

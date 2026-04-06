@@ -608,7 +608,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                                         <div className="form-check me-3 mb-0" onClick={(e) => e.stopPropagation()}>
                                                             <input className="form-check-input" type="checkbox" checked={item.selected} disabled={isTypeDisabled('customized')} onChange={() => toggleSelect(item.listId, 'customized')} style={{ borderColor: item.selected ? 'var(--shop-pink)' : '#dee2e6', backgroundColor: item.selected ? 'var(--shop-pink)' : 'white', cursor: isTypeDisabled('customized') ? 'not-allowed' : 'pointer', transform: 'scale(1.2)' }} />
                                                         </div>
-                                                        <CustomizedBouquetPreview item={item} size={80} />
+                                                        <CustomizedBouquetPreview item={item} size={80} zoomable />
                                                         <div className="ms-3 pe-4 flex-grow-1">
                                                             <h6 className="mb-1 fw-bold">Customizer Studio ({item.bundleSize || '?'} stems)</h6>
                                                             <div className="text-muted small">
