@@ -798,7 +798,6 @@ const SalesTab = () => {
 
         <View style={{ marginTop: 4, marginBottom: 16 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
-            <Ionicons name="wallet-outline" size={22} color="#DC2626" />
             <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#333' }}>Orders Not Yet Paid</Text>
             <View style={{
               backgroundColor: '#FEE2E2',
@@ -828,7 +827,6 @@ const SalesTab = () => {
 
         <View style={{ marginTop: 4, marginBottom: 16 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
-            <Ionicons name="calendar-outline" size={22} color="#F59E0B" />
             <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#333' }}>Upcoming Sales</Text>
             <View style={{
               backgroundColor: '#FEF3C7',
@@ -859,7 +857,6 @@ const SalesTab = () => {
         {/* ========== Best Selling Products ========== */}
         <View style={{ marginTop: 10, marginBottom: 15 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
-            <Ionicons name="trophy" size={22} color="#D97706" />
             <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#333' }}>Best Selling Products</Text>
           </View>
 
@@ -941,7 +938,6 @@ const SalesTab = () => {
         {/* ========== Transaction History ========== */}
         <View style={{ marginTop: 5, marginBottom: 20 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
-            <Ionicons name="receipt" size={22} color="#3B82F6" />
             <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#333' }}>Transaction History</Text>
             <View style={{
               backgroundColor: '#EFF6FF', borderRadius: 10,
