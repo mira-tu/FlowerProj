@@ -7,6 +7,7 @@ import { getUserContactNumber, getUserFullName } from '../utils/customerProfile'
 import { BUSINESS_HOURS_LABEL, CUSTOM_ORDER_TIME_MAX, CUSTOM_ORDER_TIME_MIN, isWithinBusinessHours } from '../utils/businessHours';
 import { buildTentativeBreakdownFromSelections, formatTentativePriceRange } from '../utils/customOrderTentativePricing';
 import {
+    CUSTOM_ORDER_CATALOG_KEY as SHARED_CUSTOM_ORDER_CATALOG_KEY,
     DEFAULT_CUSTOM_ORDER_CATALOG as SHARED_DEFAULT_CUSTOM_ORDER_CATALOG,
     buildGroupedArrangementOptions as buildSharedGroupedArrangementOptions,
     fetchCustomOrderCatalog as fetchSharedCustomOrderCatalog,
@@ -662,8 +663,28 @@ const CustomOrder = ({ user }) => {
 
         loadCatalog();
 
+        const catalogChannel = supabase
+            .channel('custom_order_catalog_updates')
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'app_content',
+                    filter: `key=eq.${SHARED_CUSTOM_ORDER_CATALOG_KEY}`,
+                },
+                async () => {
+                    const latestCatalog = await fetchSharedCustomOrderCatalog();
+                    if (isMounted) {
+                        setCustomOrderCatalog(latestCatalog);
+                    }
+                }
+            )
+            .subscribe();
+
         return () => {
             isMounted = false;
+            supabase.removeChannel(catalogChannel);
         };
     }, []);
 
