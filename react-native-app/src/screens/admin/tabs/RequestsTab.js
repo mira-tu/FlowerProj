@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   View,
   ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -1193,6 +1194,7 @@ const resolveAcceptedRequestStatus = (request) => {
 };
 
 const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, focusedEntityTarget, clearFocusedEntityTarget }) => {
+  const { height: screenHeight } = useWindowDimensions();
   const getCustomerInitials = (name) => {
     if (!name) return '??';
     const names = name.trim().split(' ');
@@ -1365,6 +1367,9 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
   );
 
   const isStopAssignmentMode = assignableStopGroups.length > 0;
+  const assignRiderModalMaxHeight = Math.max(420, Math.min(screenHeight - 36, 760));
+  const assignRiderStopListMaxHeight = Math.max(120, Math.min(screenHeight * 0.22, 220));
+  const assignRiderListMaxHeight = Math.max(180, Math.min(screenHeight * 0.34, 320));
 
   // Filter wrapper
   const filteredRequests = React.useMemo(() => {
@@ -3669,11 +3674,17 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
       </Modal >
 
       {/* Assign Rider Modal */}
-      < Modal visible={assignRiderModalVisible} animationType="fade" transparent >
+      < Modal visible={assignRiderModalVisible} animationType="fade" transparent statusBarTranslucent >
         <View style={styles.modalContainer}>
-          <View style={[styles.modalContent, styles.assignRiderModalContent]}>
+          <View style={[styles.modalContent, styles.assignRiderModalContent, { maxHeight: assignRiderModalMaxHeight }]}>
             <Text style={styles.modalTitle}>{isStopAssignmentMode ? 'Assign Delivery Stop Riders' : 'Assign Rider'}</Text>
-            <View style={styles.assignRiderModalBody}>
+            <ScrollView
+              style={styles.assignRiderModalBody}
+              contentContainerStyle={styles.assignRiderModalBodyContent}
+              showsVerticalScrollIndicator
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+            >
               {isStopAssignmentMode && (
                 <>
                   <Text style={styles.stopAssignmentHelpText}>
@@ -3681,7 +3692,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                   </Text>
 
                   <ScrollView
-                    style={styles.stopAssignmentList}
+                    style={[styles.stopAssignmentList, { maxHeight: assignRiderStopListMaxHeight }]}
                     contentContainerStyle={styles.stopAssignmentListContent}
                     nestedScrollEnabled
                     showsVerticalScrollIndicator={assignableStopGroups.length > 3}
@@ -3785,11 +3796,12 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                 )}
                 keyExtractor={(item) => item.id.toString()}
                 ListEmptyComponent={<Text style={styles.assignRiderEmptyText}>No riders found.</Text>}
-                style={styles.assignRiderList}
+                style={[styles.assignRiderList, { maxHeight: assignRiderListMaxHeight }]}
                 contentContainerStyle={styles.assignRiderListContent}
                 keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
               />
-            </View>
+            </ScrollView>
             <View style={[styles.modalButtons, styles.assignRiderFooter]}>
               <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={closeAssignRiderModal}>
                 <Text style={styles.buttonText}>Cancel</Text>

@@ -904,6 +904,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 14,
+    paddingVertical: 20,
   },
   modalContent: {
     backgroundColor: '#fff',
@@ -2020,7 +2022,6 @@ const styles = StyleSheet.create({
     width: '94%',
     maxWidth: 560,
     maxHeight: '92%',
-    minHeight: 520,
     paddingHorizontal: 18,
     paddingTop: 18,
     paddingBottom: 16,
@@ -2028,9 +2029,13 @@ const styles = StyleSheet.create({
   },
   assignRiderModalBody: {
     flex: 1,
+    flexGrow: 1,
     flexShrink: 1,
-    minHeight: 360,
+    minHeight: 0,
     marginTop: 12,
+  },
+  assignRiderModalBodyContent: {
+    paddingBottom: 4,
   },
   stopAssignmentList: {
     borderWidth: 1,
@@ -2038,7 +2043,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     marginBottom: 8,
-    minHeight: 140,
+    minHeight: 120,
     maxHeight: 240,
   },
   stopAssignmentListContent: {
@@ -2108,13 +2113,13 @@ const styles = StyleSheet.create({
   },
   assignRiderList: {
     flex: 1,
-    minHeight: 190,
+    minHeight: 0,
     marginTop: 10,
     borderWidth: 1,
     borderColor: '#e5e7eb',
     borderRadius: 12,
     overflow: 'hidden',
-    maxHeight: 260,
+    maxHeight: 320,
   },
   assignRiderListContent: {
     flexGrow: 1,
