@@ -3012,6 +3012,16 @@ export const adminAPI = {
     },
 
     createStock: async (formData) => {
+        const insertStockRecord = async (payload) => {
+            const { data, error } = await supabase
+                .from('stock_products')
+                .insert([payload])
+                .select()
+                .single();
+
+            return { data, error };
+        };
+
         let imageUrl = null;
         const imageFile = formData.image;
 
@@ -3063,11 +3073,16 @@ export const adminAPI = {
             customization_config: formData.customization_config || null,
         };
 
-        const { data: newStock, error } = await supabase
-            .from('stock_products')
-            .insert([stockToInsert])
-            .select()
-            .single();
+        let { data: newStock, error } = await insertStockRecord(stockToInsert);
+
+        const isMissingCustomizationConfig = String(error?.message || '').toLowerCase().includes('customization_config')
+            && ['PGRST204', '42703'].includes(String(error?.code || '').toUpperCase());
+
+        if (isMissingCustomizationConfig) {
+            const fallbackPayload = { ...stockToInsert };
+            delete fallbackPayload.customization_config;
+            ({ data: newStock, error } = await insertStockRecord(fallbackPayload));
+        }
 
         if (error) {
             console.error('Database insert error for stock:', error);
@@ -3078,6 +3093,17 @@ export const adminAPI = {
     },
 
     updateStock: async (id, formData) => {
+        const updateStockRecord = async (payload) => {
+            const { data, error } = await supabase
+                .from('stock_products')
+                .update(payload)
+                .eq('id', id)
+                .select()
+                .single();
+
+            return { data, error };
+        };
+
         let imageUrl = formData.image_url_hidden; // This might be the existing image URL
         const imageFile = formData.image;
         const oldImageUrl = formData.old_image_url; // Assuming this is passed for old image deletion
@@ -3148,12 +3174,16 @@ export const adminAPI = {
             updated_at: new Date().toISOString(),
         };
 
-        const { data: updatedStock, error } = await supabase
-            .from('stock_products')
-            .update(stockToUpdate)
-            .eq('id', id)
-            .select()
-            .single();
+        let { data: updatedStock, error } = await updateStockRecord(stockToUpdate);
+
+        const isMissingCustomizationConfig = String(error?.message || '').toLowerCase().includes('customization_config')
+            && ['PGRST204', '42703'].includes(String(error?.code || '').toUpperCase());
+
+        if (isMissingCustomizationConfig) {
+            const fallbackPayload = { ...stockToUpdate };
+            delete fallbackPayload.customization_config;
+            ({ data: updatedStock, error } = await updateStockRecord(fallbackPayload));
+        }
 
         if (error) {
             console.error('Error updating stock:', error);
