@@ -328,13 +328,14 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
     };
 
     const handleCustomizedCheckout = () => {
-        // CustomizedCheckout.jsx reads from 'checkoutItems' in localStorage
-        const selectedBouquets = hydratedCustomizedItems.filter(item => item.selected).map(item => ({
-            ...item,
-            name: `Customizer Studio (${item.bundleSize || '?'} stems)`,
-            qty: 1,
-        }));
-        localStorage.setItem('checkoutItems', JSON.stringify(selectedBouquets));
+        const selectedBouquetIds = hydratedCustomizedItems
+            .filter(item => item.selected)
+            .map(item => item.id);
+
+        if (user?.id) {
+            localStorage.setItem(`customizedCheckoutIds_${user.id}`, JSON.stringify(selectedBouquetIds));
+        }
+        localStorage.removeItem('checkoutItems');
         navigate('/customized-checkout');
     };
 

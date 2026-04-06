@@ -67,11 +67,12 @@ export const hydrateCustomizedBouquetItem = (item, stockItems = []) => {
   const hydratedWrapper = hydrateSelectionItem(item.wrapper, stockLookup);
   let hydratedRibbon = hydrateSelectionItem(item.ribbon, stockLookup);
 
-  if (
-    !hydratedRibbon
-    && normalizeText(hydratedWrapper?.name || hydratedWrapper?.groupName || hydratedWrapper?.wrapper_group_name) === 'palm halo wrap'
-  ) {
-    hydratedRibbon = buildPalmHaloFallbackRibbon();
+  const isPalmHaloWrap = normalizeText(
+    hydratedWrapper?.name || hydratedWrapper?.groupName || hydratedWrapper?.wrapper_group_name
+  ) === 'palm halo wrap';
+
+  if (isPalmHaloWrap && (!hydratedRibbon || (!hydratedRibbon?.img && !hydratedRibbon?.layerImg))) {
+    hydratedRibbon = buildPalmHaloFallbackRibbon(hydratedRibbon || item.ribbon);
   }
 
   return {
@@ -85,4 +86,3 @@ export const hydrateCustomizedBouquetItem = (item, stockItems = []) => {
 export const hydrateCustomizedBouquetItems = (items = [], stockItems = []) => (
   (Array.isArray(items) ? items : []).map((item) => hydrateCustomizedBouquetItem(item, stockItems))
 );
-

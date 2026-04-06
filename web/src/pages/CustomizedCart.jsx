@@ -250,8 +250,11 @@ const CustomizedCart = ({ user }) => {
                                     className="btn btn-primary w-100 py-2 fw-bold rounded-pill shadow-sm"
                                     style={{ background: 'var(--shop-pink)', border: 'none' }}
                                     onClick={() => {
-                                        const selectedItems = displayCartItems.filter(item => item.selected);
-                                        localStorage.setItem('checkoutItems', JSON.stringify(selectedItems));
+                                        const selectedIds = displayCartItems.filter(item => item.selected).map(item => item.id);
+                                        if (user?.id) {
+                                            localStorage.setItem(`customizedCheckoutIds_${user.id}`, JSON.stringify(selectedIds));
+                                        }
+                                        localStorage.removeItem('checkoutItems');
                                         navigate('/customized-checkout');
                                     }}
                                     disabled={totalItems === 0}

@@ -202,11 +202,35 @@ const CustomizedCheckout = ({ user }) => {
     }, [address.barangay, deliveryMethod]);
 
     useEffect(() => {
+        const userScopedKey = user?.id ? `customizedCheckoutIds_${user.id}` : null;
+        const savedSelectedIds = userScopedKey ? localStorage.getItem(userScopedKey) : null;
+        const savedCartKey = `customizedCart_${user?.id || 'guest'}`;
+        const savedCart = localStorage.getItem(savedCartKey) || localStorage.getItem('customizedCart');
+
+        if (savedSelectedIds && savedCart) {
+            try {
+                const selectedIds = JSON.parse(savedSelectedIds);
+                const allCustomizedItems = JSON.parse(savedCart);
+                const selectedItems = Array.isArray(allCustomizedItems)
+                    ? allCustomizedItems.filter((item) => selectedIds.includes(item.id)).map((item) => ({
+                        ...item,
+                        name: `Customizer Studio (${item.bundleSize || '?'} stems)`,
+                        qty: 1,
+                    }))
+                    : [];
+
+                setCheckoutItems(selectedItems);
+                return;
+            } catch (error) {
+                console.error('Error restoring customized checkout items:', error);
+            }
+        }
+
         const savedCheckoutItems = localStorage.getItem('checkoutItems');
         if (savedCheckoutItems) {
             setCheckoutItems(JSON.parse(savedCheckoutItems));
         }
-    }, []);
+    }, [user?.id]);
 
     useEffect(() => {
         let isMounted = true;
@@ -464,6 +488,7 @@ const CustomizedCheckout = ({ user }) => {
         localStorage.removeItem('customizedCart');
         localStorage.removeItem(`customizedCart_${user.id}`);
         localStorage.removeItem('checkoutItems');
+        localStorage.removeItem(`customizedCheckoutIds_${user.id}`);
 
         // 7. Navigate to tracking page
         navigate(`/customized-request-tracking/${request_number}`);

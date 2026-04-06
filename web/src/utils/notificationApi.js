@@ -5,7 +5,17 @@ const LEGACY_NOTIFICATION_COLUMNS = 'id, title, message, link, is_read, created_
 
 const isMissingNotificationIconError = (error) => {
   const message = String(error?.message || '').toLowerCase()
-  return message.includes("'icon' column") && message.includes('notifications')
+  const details = String(error?.details || '').toLowerCase()
+  const hint = String(error?.hint || '').toLowerCase()
+  const code = String(error?.code || '').toLowerCase()
+  const combined = `${message} ${details} ${hint}`
+
+  if (code === 'pgrst204') {
+    return combined.includes('icon') || combined.includes('schema cache')
+  }
+
+  return combined.includes('icon')
+    && (combined.includes('notifications') || combined.includes('schema cache') || combined.includes('column'))
 }
 
 const mapNotification = (record) => ({
