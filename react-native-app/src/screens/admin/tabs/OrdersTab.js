@@ -1383,15 +1383,9 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
       {/* Assign Rider Modal */}
       <Modal visible={assignRiderModalVisible} animationType="fade" transparent statusBarTranslucent>
         <View style={styles.modalContainer}>
-          <View style={[styles.modalContent, styles.assignRiderModalContent, { maxHeight: assignRiderModalMaxHeight }]}>
+          <View style={[styles.modalContent, styles.assignRiderModalContent, { height: assignRiderModalMaxHeight }]}>
             <Text style={styles.modalTitle}>{isStopAssignmentMode ? 'Assign Delivery Stop Riders' : 'Assign Rider'}</Text>
-            <ScrollView
-              style={styles.assignRiderModalBody}
-              contentContainerStyle={styles.assignRiderModalBodyContent}
-              showsVerticalScrollIndicator
-              nestedScrollEnabled
-              keyboardShouldPersistTaps="handled"
-            >
+            <View style={styles.assignRiderModalBody}>
               {isStopAssignmentMode && (
                 <>
                   <Text style={styles.stopAssignmentHelpText}>
@@ -1483,7 +1477,7 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
                       : 'No rider selected'}
                   </Text>
                 </View>
-              ) : null}
+                ) : null}
 
               <FlatList
                 data={filteredAndSortedRiders}
@@ -1507,8 +1501,10 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
                 contentContainerStyle={styles.assignRiderListContent}
                 keyboardShouldPersistTaps="handled"
                 nestedScrollEnabled
+                removeClippedSubviews={false}
+                initialNumToRender={12}
               />
-            </ScrollView>
+            </View>
             <View style={[styles.modalButtons, styles.assignRiderFooter]}>
               <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={closeAssignRiderModal}>
                 <Text style={styles.buttonText}>Cancel</Text>

@@ -1101,6 +1101,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 16,
+    paddingVertical: 24,
   },
   modalContent: {
     backgroundColor: '#fff',
@@ -1953,9 +1955,11 @@ const styles = StyleSheet.create({
   radioButtonContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 12,
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+    backgroundColor: '#fff',
   },
   radioButton: {
     height: 24,
@@ -2006,6 +2010,7 @@ const styles = StyleSheet.create({
   riderName: {
     fontSize: 16,
     fontWeight: '600',
+    color: '#111827',
   },
   riderEmail: {
     fontSize: 14,
@@ -2021,7 +2026,6 @@ const styles = StyleSheet.create({
   assignRiderModalContent: {
     width: '94%',
     maxWidth: 560,
-    maxHeight: '92%',
     paddingHorizontal: 18,
     paddingTop: 18,
     paddingBottom: 16,
@@ -2029,13 +2033,8 @@ const styles = StyleSheet.create({
   },
   assignRiderModalBody: {
     flex: 1,
-    flexGrow: 1,
-    flexShrink: 1,
     minHeight: 0,
-    marginTop: 12,
-  },
-  assignRiderModalBodyContent: {
-    paddingBottom: 4,
+    paddingTop: 12,
   },
   stopAssignmentList: {
     borderWidth: 1,
@@ -2045,6 +2044,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     minHeight: 120,
     maxHeight: 240,
+    backgroundColor: '#fff',
+    flexGrow: 0,
   },
   stopAssignmentListContent: {
     paddingVertical: 4,
@@ -2113,13 +2114,13 @@ const styles = StyleSheet.create({
   },
   assignRiderList: {
     flex: 1,
-    minHeight: 0,
+    minHeight: 180,
     marginTop: 10,
     borderWidth: 1,
     borderColor: '#e5e7eb',
     borderRadius: 12,
     overflow: 'hidden',
-    maxHeight: 320,
+    backgroundColor: '#fff',
   },
   assignRiderListContent: {
     flexGrow: 1,
