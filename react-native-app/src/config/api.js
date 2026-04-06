@@ -441,10 +441,38 @@ const updateOrderStatusDirect = async (id, status, options = {}) => {
 };
 
 const updateOrderPaymentStatusDirect = async (id, status) => {
+    const { data: currentOrder, error: fetchError } = await supabase
+        .from('orders')
+        .select('total, amount_received')
+        .eq('id', id)
+        .single();
+
+    if (fetchError) {
+        throw fetchError;
+    }
+
+    const normalizedStatus = String(status || '').trim().toLowerCase();
+    const orderTotal = parseMoney(currentOrder?.total);
+    const updatePayload = { payment_status: status };
+
+    if (normalizedStatus === 'paid' && orderTotal > 0) {
+        updatePayload.amount_received = orderTotal;
+    }
+
     const data = await updateOrderRecordAndReload(
         id,
-        { payment_status: status },
-        (order) => order?.payment_status === status
+        updatePayload,
+        (order) => {
+            if (order?.payment_status !== status) {
+                return false;
+            }
+
+            if (normalizedStatus === 'paid' && orderTotal > 0) {
+                return parseMoney(order?.amount_received) >= orderTotal;
+            }
+
+            return true;
+        }
     );
 
     return { success: true, order: data };
@@ -795,6 +823,16 @@ const getRequestTotalAmount = (request, options = {}) => {
 
 const getRemainingBalance = (totalAmount, amountReceived) => {
     return Math.max(0, parseMoney(totalAmount) - parseMoney(amountReceived));
+};
+
+const getOutstandingBalance = (totalAmount, amountReceived, paymentStatus) => {
+    const normalizedStatus = String(paymentStatus || '').trim().toLowerCase();
+
+    if (normalizedStatus === 'paid') {
+        return 0;
+    }
+
+    return getRemainingBalance(totalAmount, amountReceived);
 };
 
 const getCollectedCashAmount = (totalAmount, amountReceived, paymentStatus) => {
@@ -2385,8 +2423,8 @@ export const adminAPI = {
         (orders || []).forEach((order) => {
             const totalAmount = parseMoney(order?.total);
             const amountReceived = parseMoney(order?.amount_received);
-            const remainingBalance = getRemainingBalance(totalAmount, amountReceived);
             const paymentStatus = String(order?.payment_status || '').trim().toLowerCase();
+            const remainingBalance = getOutstandingBalance(totalAmount, amountReceived, paymentStatus);
             const status = String(order?.status || '').trim().toLowerCase();
             const isClosed = CLOSED_ORDER_STATUSES.has(status);
             const isUpcoming = UPCOMING_ORDER_STATUSES.has(status);
@@ -2449,8 +2487,8 @@ export const adminAPI = {
             const requestTotal = getRequestTotalAmount(request);
             const requestDisplayTotal = getRequestTotalAmount(request, { allowTentative: true });
             const amountReceived = parseMoney(request?.amount_received);
-            const remainingBalance = getRemainingBalance(requestTotal, amountReceived);
             const paymentStatus = String(request?.payment_status || '').trim().toLowerCase();
+            const remainingBalance = getOutstandingBalance(requestTotal, amountReceived, paymentStatus);
             const status = String(request?.status || '').trim().toLowerCase();
             const isClosed = CLOSED_REQUEST_STATUSES.has(status);
             const isUpcoming = UPCOMING_REQUEST_STATUSES.has(status);
