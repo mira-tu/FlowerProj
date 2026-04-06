@@ -21,6 +21,7 @@ import * as Sharing from 'expo-sharing';
 import { adminAPI } from '../../../config/api';
 import { supabase } from '../../../config/supabase';
 import styles from '../../AdminDashboard.styles';
+import { getStatusColor } from '../adminHelpers';
 
 const formatMonthKey = (date) => {
   const year = date.getFullYear();
