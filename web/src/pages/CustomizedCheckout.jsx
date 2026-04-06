@@ -81,6 +81,143 @@ const buildCustomizedRequestStockAllocations = (items = []) => {
     }));
 };
 
+const hasNumericStockId = (value) => /^[0-9]+$/.test(String(value ?? '').trim());
+
+const sanitizeStockSelection = (selectionItem, validStockIds) => {
+    if (!selectionItem || typeof selectionItem !== 'object') {
+        return { item: selectionItem, missing: false };
+    }
+
+    const rawId = selectionItem.id;
+    if (!hasNumericStockId(rawId)) {
+        return { item: selectionItem, missing: false };
+    }
+
+    if (validStockIds.has(String(rawId))) {
+        return { item: selectionItem, missing: false };
+    }
+
+    const { id: _removedId, ...rest } = selectionItem;
+    return {
+        item: {
+            ...rest,
+            stock_missing: true,
+        },
+        missing: true,
+    };
+};
+
+const sanitizeCustomizedRequestItems = (items = [], stockItems = []) => {
+    const validStockIds = new Set(
+        (Array.isArray(stockItems) ? stockItems : [])
+            .map((item) => String(item?.id || '').trim())
+            .filter(Boolean)
+    );
+
+    let hasMissingStockReferences = false;
+
+    const sanitizedItems = (Array.isArray(items) ? items : []).map((item) => {
+        const sanitizedFlowers = (Array.isArray(item?.flowers) ? item.flowers : []).map((flower) => {
+            const result = sanitizeStockSelection(flower, validStockIds);
+            hasMissingStockReferences = hasMissingStockReferences || result.missing;
+            return result.item;
+        });
+
+        const sanitizedWrapperResult = sanitizeStockSelection(item?.wrapper, validStockIds);
+        const sanitizedRibbonResult = sanitizeStockSelection(item?.ribbon, validStockIds);
+        hasMissingStockReferences = hasMissingStockReferences || sanitizedWrapperResult.missing || sanitizedRibbonResult.missing;
+
+        const sanitizedFlowerAllocations = (Array.isArray(item?.flowerAllocations) ? item.flowerAllocations : [])
+            .filter((allocation) => {
+                const stockId = allocation?.stock_product_id ?? allocation?.id ?? allocation?.flowerId;
+                const isValid = hasNumericStockId(stockId) && validStockIds.has(String(stockId));
+                if (!isValid && hasNumericStockId(stockId)) {
+                    hasMissingStockReferences = true;
+                }
+                return isValid;
+            });
+
+        return {
+            ...item,
+            flowers: sanitizedFlowers,
+            wrapper: sanitizedWrapperResult.item,
+            ribbon: sanitizedRibbonResult.item,
+            flowerAllocations: sanitizedFlowerAllocations,
+        };
+    });
+
+    return {
+        items: sanitizedItems,
+        hasMissingStockReferences,
+    };
+};
+
+const buildCustomizedRequestErrorMessage = (error) => {
+    const message = String(error?.message || '').toLowerCase();
+    const details = String(error?.details || '').toLowerCase();
+    const combined = `${message} ${details}`;
+
+    if (
+        combined.includes('stock_reservations')
+        || combined.includes('stock_products')
+        || combined.includes('foreign key')
+        || combined.includes('violates foreign key')
+    ) {
+        return 'Some flower, wrapper, or ribbon stock changed while you were checking out. Please review your Customizer Studio cart and try again.';
+    }
+
+    if (combined.includes('schema cache') || combined.includes('column')) {
+        return 'The customized request form is temporarily out of sync. Please refresh the page and try again.';
+    }
+
+    return 'There was an error placing your request. Please try again.';
+};
+
+const insertCustomizedRequestWithFallbacks = async (requestPayload) => {
+    const fallbackColumns = [
+        ['requests.image_url', 'image_url'],
+        ['requests.notes', 'notes'],
+        ['requests.delivery_method', 'delivery_method'],
+        ['requests.pickup_time', 'pickup_time'],
+        ['requests.shipping_fee', 'shipping_fee'],
+        ['requests.payment_status', 'payment_status'],
+        ['requests.contact_number', 'contact_number'],
+    ];
+
+    let payload = { ...requestPayload };
+
+    while (true) {
+        const result = await supabase
+            .from('requests')
+            .insert([payload])
+            .select('id')
+            .single();
+
+        if (!result.error) {
+            return result;
+        }
+
+        const errorMessage = String(result.error.message || '');
+        const matchingFallback = fallbackColumns.find(([needle, column]) => (
+            errorMessage.includes(needle)
+            || errorMessage.includes(`'${column}' column of 'requests'`)
+        ));
+
+        if (!matchingFallback) {
+            return result;
+        }
+
+        const [, column] = matchingFallback;
+        if (!(column in payload)) {
+            return result;
+        }
+
+        const nextPayload = { ...payload };
+        delete nextPayload[column];
+        payload = nextPayload;
+    }
+};
+
 const CustomizedCheckout = ({ user }) => {
     const navigate = useNavigate();
     const [checkoutItems, setCheckoutItems] = useState([]);
@@ -377,8 +514,23 @@ const CustomizedCheckout = ({ user }) => {
             uploadedReceiptUrl = urlData.publicUrl;
         }
 
+        const {
+            items: sanitizedCheckoutItems,
+            hasMissingStockReferences,
+        } = sanitizeCustomizedRequestItems(displayCheckoutItems, customizedPreviewStock);
+
+        if (hasMissingStockReferences) {
+            setInfoModal({
+                show: true,
+                title: 'Stock Changed',
+                message: 'Some flower, wrapper, or ribbon stock changed while you were checking out. Please review your Customizer Studio cart and try again.',
+            });
+            setIsProcessing(false);
+            return;
+        }
+
         // 2. Upload all images from the cart
-        const uploadedItems = await Promise.all(checkoutItems.map(async (item) => {
+        const uploadedItems = await Promise.all(sanitizedCheckoutItems.map(async (item) => {
             if (item.image && item.image.startsWith('data:image')) {
                 const base64WithoutPrefix = item.image.split(',')[1];
                 const imageBuffer = Uint8Array.from(atob(base64WithoutPrefix), (c) => c.charCodeAt(0));
@@ -405,46 +557,51 @@ const CustomizedCheckout = ({ user }) => {
         const request_number = `CUS-${user.id.substring(0, 4)}-${Date.now()}`;
         const payment_status = selectedPayment === 'gcash' ? 'waiting_for_confirmation' : 'to_pay';
         const primaryDestination = multiDeliveryDestinations[0] || null;
+        const firstItem = uploadedItems[0] || {};
+        const pickupDateTime = deliveryMethod === 'pickup'
+            ? `${selectedPickupDate} - ${selectedPickupTime}`
+            : null;
 
         const newRequest = {
-            request_number: request_number,
+            request_number,
             user_id: user.id,
             type: 'customized',
             status: 'pending',
-            contact_number: primaryDestination?.recipient_phone || address.phone,
-            final_price: total,
-            shipping_fee: shippingFee,
-            receipt_url: uploadedReceiptUrl,
+            contact_number: primaryDestination?.recipient_phone || address.phone || null,
             delivery_method: deliveryMethod,
-            pickup_time: deliveryMethod === 'pickup' ? `${selectedPickupDate} - ${selectedPickupTime}` : null,
-            payment_method: selectedPayment,
-            payment_status: payment_status,
+            pickup_time: pickupDateTime,
+            shipping_fee: shippingFee,
+            payment_status,
+            image_url: firstItem.image_url || null,
+            notes: null,
             data: {
                 items: uploadedItems,
                 address: deliveryMethod === 'delivery' ? address : null,
                 address_id: deliveryMethod === 'delivery' ? (primaryDestination?.address_id || selectedAddressId) : null,
                 multi_delivery_destinations: multiDeliveryDestinations,
                 delivery_method: deliveryMethod,
-                pickup_time: deliveryMethod === 'pickup' ? `${selectedPickupDate} - ${selectedPickupTime}` : null,
+                pickup_time: pickupDateTime,
                 payment_method: selectedPayment,
-                payment_status: payment_status,
-                subtotal: subtotal,
+                payment_status,
+                subtotal,
+                final_price: total,
                 shipping_fee: shippingFee,
                 receipt_url: uploadedReceiptUrl,
+                image_url: firstItem.image_url || null,
                 stock_allocations: stockAllocations,
             },
         };
 
         // 4. Insert into `requests` table
-        const { data, error } = await supabase
-            .from('requests')
-            .insert([newRequest])
-            .select('id, request_number')
-            .single();
+        const { data, error } = await insertCustomizedRequestWithFallbacks(newRequest);
 
         if (error) {
             console.error('Error creating request:', error);
-            setInfoModal({ show: true, title: 'Error', message: 'There was an error placing your request. Please try again.' });
+            setInfoModal({
+                show: true,
+                title: 'Error',
+                message: buildCustomizedRequestErrorMessage(error),
+            });
             setIsProcessing(false);
             return;
         }
