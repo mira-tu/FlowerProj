@@ -17,6 +17,7 @@ import qrCodeImage from '../assets/qr-code-1.jpg';
 import { insertUserNotification } from '../utils/notificationApi';
 import {
     applyRequestItemCancellation,
+    getCancellationItemDisplayLabel,
     normalizeCancellationItem,
     summarizeCancellationItems,
 } from '../utils/orderCancellation';
@@ -2169,7 +2170,7 @@ const Profile = ({ user, logout }) => {
                             >
                                 {cancellableItems.map((item) => (
                                     <option key={item.cancellationKey} value={item.cancellationKey}>
-                                        {item.name} ({item.remainingQuantity} left)
+                                        {getCancellationItemDisplayLabel(item)}
                                     </option>
                                 ))}
                             </select>
@@ -2199,7 +2200,7 @@ const Profile = ({ user, logout }) => {
                                     ))}
                                 </select>
                                 <div style={{ marginTop: '0.5rem', color: '#6b7280', fontSize: '0.9rem' }}>
-                                    Remaining after this cancellation: {Math.max(0, selectedCancelItem.remainingQuantity - cancelQuantity)}
+                                    Remaining after this cancellation: {Math.max(0, selectedCancelItem.remainingQuantity - cancelQuantity)} of {selectedCancelItem.originalQuantity}
                                 </div>
                             </div>
                         )}

@@ -199,6 +199,25 @@ export const normalizeCancellationItem = (item = {}, index = 0) => {
     };
 };
 
+export const getCancellationItemDisplayLabel = (item = {}) => {
+    const originalQuantity = getOriginalItemQuantity(item);
+    const remainingQuantity = getRemainingItemQuantity(item);
+    const cancelledQuantity = getCancelledItemQuantity(item);
+    const rawName = String(item?.name || item?.title || 'Item').trim();
+    const nameWithoutQuantitySuffix = rawName.replace(/\s+x\d+\s*$/i, '').trim();
+    const baseName = nameWithoutQuantitySuffix || rawName;
+
+    if (cancelledQuantity > 0 && remainingQuantity < originalQuantity) {
+        return `${baseName} - ${remainingQuantity} remaining of ${originalQuantity}`;
+    }
+
+    if (remainingQuantity > 1) {
+        return `${baseName} - ${remainingQuantity} available`;
+    }
+
+    return `${baseName} - ${remainingQuantity} available`;
+};
+
 export const summarizeCancellationItems = (items = []) => {
     const normalizedItems = Array.isArray(items)
         ? items.map((item, index) => normalizeCancellationItem(item, index))
