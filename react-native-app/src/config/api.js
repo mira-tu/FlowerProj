@@ -3021,6 +3021,28 @@ export const adminAPI = {
 
             return { data, error };
         };
+        const saveWithLegacyFallback = async (payload) => {
+            let nextPayload = { ...payload };
+            let result = await insertStockRecord(nextPayload);
+
+            while (result.error) {
+                const errorCode = String(result.error?.code || '').toUpperCase();
+                const errorMessage = String(result.error?.message || '');
+                const missingColumnMatch = errorMessage.match(/Could not find the '([^']+)' column of 'stock_products'/i);
+                const missingColumn = missingColumnMatch?.[1];
+
+                if (!missingColumn || !['PGRST204', '42703'].includes(errorCode) || !(missingColumn in nextPayload)) {
+                    break;
+                }
+
+                const fallbackPayload = { ...nextPayload };
+                delete fallbackPayload[missingColumn];
+                nextPayload = fallbackPayload;
+                result = await insertStockRecord(nextPayload);
+            }
+
+            return result;
+        };
 
         let imageUrl = null;
         const imageFile = formData.image;
@@ -3073,16 +3095,7 @@ export const adminAPI = {
             customization_config: formData.customization_config || null,
         };
 
-        let { data: newStock, error } = await insertStockRecord(stockToInsert);
-
-        const isMissingCustomizationConfig = String(error?.message || '').toLowerCase().includes('customization_config')
-            && ['PGRST204', '42703'].includes(String(error?.code || '').toUpperCase());
-
-        if (isMissingCustomizationConfig) {
-            const fallbackPayload = { ...stockToInsert };
-            delete fallbackPayload.customization_config;
-            ({ data: newStock, error } = await insertStockRecord(fallbackPayload));
-        }
+        const { data: newStock, error } = await saveWithLegacyFallback(stockToInsert);
 
         if (error) {
             console.error('Database insert error for stock:', error);
@@ -3102,6 +3115,28 @@ export const adminAPI = {
                 .single();
 
             return { data, error };
+        };
+        const saveWithLegacyFallback = async (payload) => {
+            let nextPayload = { ...payload };
+            let result = await updateStockRecord(nextPayload);
+
+            while (result.error) {
+                const errorCode = String(result.error?.code || '').toUpperCase();
+                const errorMessage = String(result.error?.message || '');
+                const missingColumnMatch = errorMessage.match(/Could not find the '([^']+)' column of 'stock_products'/i);
+                const missingColumn = missingColumnMatch?.[1];
+
+                if (!missingColumn || !['PGRST204', '42703'].includes(errorCode) || !(missingColumn in nextPayload)) {
+                    break;
+                }
+
+                const fallbackPayload = { ...nextPayload };
+                delete fallbackPayload[missingColumn];
+                nextPayload = fallbackPayload;
+                result = await updateStockRecord(nextPayload);
+            }
+
+            return result;
         };
 
         let imageUrl = formData.image_url_hidden; // This might be the existing image URL
@@ -3174,16 +3209,7 @@ export const adminAPI = {
             updated_at: new Date().toISOString(),
         };
 
-        let { data: updatedStock, error } = await updateStockRecord(stockToUpdate);
-
-        const isMissingCustomizationConfig = String(error?.message || '').toLowerCase().includes('customization_config')
-            && ['PGRST204', '42703'].includes(String(error?.code || '').toUpperCase());
-
-        if (isMissingCustomizationConfig) {
-            const fallbackPayload = { ...stockToUpdate };
-            delete fallbackPayload.customization_config;
-            ({ data: updatedStock, error } = await updateStockRecord(fallbackPayload));
-        }
+        const { data: updatedStock, error } = await saveWithLegacyFallback(stockToUpdate);
 
         if (error) {
             console.error('Error updating stock:', error);
