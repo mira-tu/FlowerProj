@@ -677,6 +677,75 @@ const Customized = ({ addToCart }) => {
     });
   }, [availableRibbonOptions, ribbonMode]);
 
+  useEffect(() => {
+    setSelection((previous) => {
+      if (!Array.isArray(previous.flowers) || previous.flowers.length === 0) {
+        return previous;
+      }
+
+      let changed = false;
+      const nextFlowers = previous.flowers
+        .map((selectedFlower) => {
+          const latestFlower = flowers.find((item) => String(item.id) === String(selectedFlower.id));
+          if (!latestFlower) {
+            changed = true;
+            return null;
+          }
+
+          if (latestFlower !== selectedFlower) {
+            changed = true;
+          }
+
+          return latestFlower;
+        })
+        .filter(Boolean);
+
+      if (!changed) {
+        return previous;
+      }
+
+      const nextBundleSize = nextFlowers.length === 0 ? 0 : previous.bundleSize;
+
+      return {
+        ...previous,
+        flowers: nextFlowers,
+        bundleSize: nextBundleSize,
+      };
+    });
+  }, [flowers]);
+
+  useEffect(() => {
+    setSelection((previous) => {
+      if (!previous.wrapper) {
+        return previous;
+      }
+
+      const latestWrapperGroup = wrappers.find((entry) => entry.id === previous.wrapper.groupId);
+      if (!latestWrapperGroup) {
+        return {
+          ...previous,
+          wrapper: null,
+        };
+      }
+
+      const latestWrapper = latestWrapperGroup.variants.find((entry) => String(entry.id) === String(previous.wrapper.id))
+        || latestWrapperGroup.variants.find(isOptionSelectable)
+        || latestWrapperGroup.variants[0]
+        || null;
+
+      if (!latestWrapper) {
+        return {
+          ...previous,
+          wrapper: null,
+        };
+      }
+
+      return latestWrapper === previous.wrapper
+        ? previous
+        : { ...previous, wrapper: latestWrapper };
+    });
+  }, [wrappers]);
+
   const getMaxAllowedBundleSize = (selectedFlowers) => {
     if (!selectedFlowers || selectedFlowers.length === 0) return MAX_STEM_COUNT;
     const tempCounts = selectedFlowers.map(() => 0);
