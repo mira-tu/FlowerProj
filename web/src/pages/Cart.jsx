@@ -2,12 +2,15 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import '../styles/Shop.css';
 import InfoModal from '../components/InfoModal';
+import CustomizedBouquetPreview from '../components/CustomizedBouquetPreview';
 import { formatCustomOrderV4Currency, getSelectedEstimateFromItem, isCustomOrderV4Item } from '../utils/customOrderV4';
 import { supabase } from '../config/supabase';
+import { stockAPI } from '../config/api';
 import {
     evaluateStandaloneFreeShippingPromo,
     fetchCustomizedStudioPromoSettings,
 } from '../utils/freeShipping';
+import { hydrateCustomizedBouquetItems } from '../utils/customizedBouquetPreview';
 
 const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
     const navigate = useNavigate();
@@ -22,6 +25,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
         minimumOrderAmount: 0,
         isConfigured: false,
     });
+    const [customizedPreviewStock, setCustomizedPreviewStock] = useState([]);
 
     useEffect(() => {
         let isMounted = true;
@@ -53,6 +57,27 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
         return () => {
             isMounted = false;
             supabase.removeChannel(channel);
+        };
+    }, []);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadPreviewStock = async () => {
+            try {
+                const { data } = await stockAPI.getAll();
+                if (isMounted) {
+                    setCustomizedPreviewStock(Array.isArray(data) ? data : []);
+                }
+            } catch (error) {
+                console.error('Error loading Customizer Studio preview stock:', error);
+            }
+        };
+
+        loadPreviewStock();
+
+        return () => {
+            isMounted = false;
         };
     }, []);
 
@@ -275,6 +300,10 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
     // ===== TOTALS =====
     const productTotal = cartItems.filter(item => item.selected).reduce((acc, item) => acc + (item.price * item.qty), 0);
     const customizedTotal = customizedItems.filter(item => item.selected).reduce((acc, item) => acc + (item.price || 0), 0);
+    const hydratedCustomizedItems = useMemo(
+        () => hydrateCustomizedBouquetItems(customizedItems, customizedPreviewStock),
+        [customizedItems, customizedPreviewStock]
+    );
     const customizedStudioFreeShippingPromo = useMemo(
         () => evaluateStandaloneFreeShippingPromo(customizedTotal, customizedStudioPromoSettings),
         [customizedTotal, customizedStudioPromoSettings]
@@ -300,7 +329,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
 
     const handleCustomizedCheckout = () => {
         // CustomizedCheckout.jsx reads from 'checkoutItems' in localStorage
-        const selectedBouquets = customizedItems.filter(item => item.selected).map(item => ({
+        const selectedBouquets = hydratedCustomizedItems.filter(item => item.selected).map(item => ({
             ...item,
             name: `Customizer Studio (${item.bundleSize || '?'} stems)`,
             qty: 1,
@@ -565,7 +594,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                             <span className="badge bg-light text-muted border small"><i className="fas fa-lock me-1"></i>Deselect current items first</span>
                                         )}
                                     </div>
-                                    {customizedItems.map(item => (
+                                    {hydratedCustomizedItems.map(item => (
                                         <div key={item.listId} className="card border-0 shadow-sm mb-3" style={{ cursor: isTypeDisabled('customized') ? 'not-allowed' : 'pointer', transition: 'box-shadow 0.2s', border: item.selected ? '2px solid var(--shop-pink)' : '1px solid transparent' }} onClick={() => !isTypeDisabled('customized') && toggleSelect(item.listId, 'customized')}>
                                             <div className="card-body position-relative">
                                                 <div className="position-absolute top-0 end-0 p-3" style={{ zIndex: 10 }}>
@@ -578,9 +607,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                                         <div className="form-check me-3 mb-0" onClick={(e) => e.stopPropagation()}>
                                                             <input className="form-check-input" type="checkbox" checked={item.selected} disabled={isTypeDisabled('customized')} onChange={() => toggleSelect(item.listId, 'customized')} style={{ borderColor: item.selected ? 'var(--shop-pink)' : '#dee2e6', backgroundColor: item.selected ? 'var(--shop-pink)' : 'white', cursor: isTypeDisabled('customized') ? 'not-allowed' : 'pointer', transform: 'scale(1.2)' }} />
                                                         </div>
-                                                        {item.image && (
-                                                            <img src={item.image} alt="Custom Bouquet" className="rounded border bg-light flex-shrink-0" style={{ width: '80px', height: '80px', objectFit: 'contain' }} />
-                                                        )}
+                                                        <CustomizedBouquetPreview item={item} size={80} />
                                                         <div className="ms-3 pe-4 flex-grow-1">
                                                             <h6 className="mb-1 fw-bold">Customizer Studio ({item.bundleSize || '?'} stems)</h6>
                                                             <div className="text-muted small">

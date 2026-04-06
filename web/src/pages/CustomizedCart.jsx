@@ -2,12 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import '../styles/Shop.css';
 import { supabase } from '../config/supabase';
+import { stockAPI } from '../config/api';
+import CustomizedBouquetPreview from '../components/CustomizedBouquetPreview';
+import { hydrateCustomizedBouquetItems } from '../utils/customizedBouquetPreview';
 
 const CustomizedCart = ({ user }) => {
     const navigate = useNavigate();
     const [cartItems, setCartItems] = useState([]);
     const [shippingFee, setShippingFee] = useState(0);
     const [address, setAddress] = useState(null);
+    const [customizedPreviewStock, setCustomizedPreviewStock] = useState([]);
 
     useEffect(() => {
         const cartKey = `customizedCart_${user?.id || 'guest'}`;
@@ -16,6 +20,29 @@ const CustomizedCart = ({ user }) => {
             setCartItems(JSON.parse(savedCart).map(item => ({ ...item, selected: true })));
         }
     }, [user]);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadPreviewStock = async () => {
+            try {
+                const { data } = await stockAPI.getAll();
+                if (isMounted) {
+                    setCustomizedPreviewStock(Array.isArray(data) ? data : []);
+                }
+            } catch (error) {
+                console.error('Error loading Customizer Studio preview stock:', error);
+            }
+        };
+
+        loadPreviewStock();
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
+
+    const displayCartItems = hydrateCustomizedBouquetItems(cartItems, customizedPreviewStock);
 
     useEffect(() => {
         const fetchDefaultAddress = async () => {
@@ -148,7 +175,7 @@ const CustomizedCart = ({ user }) => {
                         </div>
 
                         {/* Cart Items */}
-                        {cartItems.map(item => (
+                        {displayCartItems.map(item => (
                             <div key={item.id} className="card border-0 shadow-sm mb-3">
                                 <div className="card-body" style={{ overflowX: 'auto' }}>
                                     <div className="row align-items-center g-0">
@@ -165,13 +192,7 @@ const CustomizedCart = ({ user }) => {
                                                     }}
                                                 />
                                             </div>
-                                            <img
-                                                src={item.image}
-                                                alt={item.name}
-                                                className="rounded"
-                                                style={{ width: '80px', height: '80px', objectFit: 'cover' }}
-                                                onError={(e) => e.target.src = 'https://via.placeholder.com/80'}
-                                            />
+                                            <CustomizedBouquetPreview item={item} size={80} />
                                             <div className="ms-3">
                                                 <h6 className="mb-0 fw-bold">{item.name}</h6>
                                                 <small className="text-muted">{item.bundleSize} stems</small>
@@ -229,7 +250,7 @@ const CustomizedCart = ({ user }) => {
                                     className="btn btn-primary w-100 py-2 fw-bold rounded-pill shadow-sm"
                                     style={{ background: 'var(--shop-pink)', border: 'none' }}
                                     onClick={() => {
-                                        const selectedItems = cartItems.filter(item => item.selected);
+                                        const selectedItems = displayCartItems.filter(item => item.selected);
                                         localStorage.setItem('checkoutItems', JSON.stringify(selectedItems));
                                         navigate('/customized-checkout');
                                     }}

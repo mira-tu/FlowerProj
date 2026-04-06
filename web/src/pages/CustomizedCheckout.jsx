@@ -2,8 +2,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import '../styles/Shop.css';
 import { supabase } from '../config/supabase';
+import { stockAPI } from '../config/api';
 import InfoModal from '../components/InfoModal';
 import CheckoutAddressSelection from '../components/CheckoutAddressSelection';
+import CustomizedBouquetPreview from '../components/CustomizedBouquetPreview';
 import MultiAddressDeliverySection from '../components/MultiAddressDeliverySection';
 import qrCodeImage from '../assets/qr-code-1.jpg';
 import {
@@ -18,6 +20,7 @@ import {
     fetchCustomizedStudioPromoSettings,
 } from '../utils/freeShipping';
 import { PICKUP_TIME_OPTIONS } from '../utils/businessHours';
+import { hydrateCustomizedBouquetItems } from '../utils/customizedBouquetPreview';
 
 const paymentMethods = [
     { id: 'gcash', name: 'GCash', description: 'Pay via GCash e-wallet', icon: 'fa-wallet' },
@@ -110,6 +113,7 @@ const CustomizedCheckout = ({ user }) => {
         minimumOrderAmount: 0,
         isConfigured: false,
     });
+    const [customizedPreviewStock, setCustomizedPreviewStock] = useState([]);
 
     useEffect(() => {
         const fetchBarangayFees = async () => {
@@ -205,6 +209,27 @@ const CustomizedCheckout = ({ user }) => {
     }, []);
 
     useEffect(() => {
+        let isMounted = true;
+
+        const loadPreviewStock = async () => {
+            try {
+                const { data } = await stockAPI.getAll();
+                if (isMounted) {
+                    setCustomizedPreviewStock(Array.isArray(data) ? data : []);
+                }
+            } catch (error) {
+                console.error('Error loading Customizer Studio preview stock:', error);
+            }
+        };
+
+        loadPreviewStock();
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
+
+    useEffect(() => {
         if (deliveryMethod !== 'delivery') {
             setMultiAddressEnabled(false);
             return;
@@ -222,6 +247,11 @@ const CustomizedCheckout = ({ user }) => {
     const addressFeeMap = useMemo(
         () => buildAddressFeeMap(savedAddresses, barangayFees),
         [savedAddresses, barangayFees]
+    );
+
+    const displayCheckoutItems = useMemo(
+        () => hydrateCustomizedBouquetItems(checkoutItems, customizedPreviewStock),
+        [checkoutItems, customizedPreviewStock]
     );
 
     const subtotal = checkoutItems.reduce((acc, item) => acc + (item.price * (item.qty || 1)), 0);
@@ -385,7 +415,7 @@ const CustomizedCheckout = ({ user }) => {
         const { data, error } = await supabase
             .from('requests')
             .insert([newRequest])
-            .select()
+            .select('id, request_number')
             .single();
 
         if (error) {
@@ -592,17 +622,17 @@ const CustomizedCheckout = ({ user }) => {
                                 Order Items ({checkoutItems.length})
                             </h5>
 
-                            {checkoutItems.map((item, index) => (
+                            {displayCheckoutItems.map((item, index) => (
                                 <div key={index} className="checkout-item">
-                                    <img
-                                        src={item.image}
-                                        alt={item.name}
-                                        className="checkout-item-img"
-                                        onError={(e) => e.target.src = 'https://via.placeholder.com/80'}
-                                    />
+                                    <CustomizedBouquetPreview item={item} size={80} />
                                     <div className="checkout-item-info">
                                         <div className="checkout-item-name">{item.name}</div>
                                         <div className="checkout-item-qty">Qty: {item.qty || 1}</div>
+                                        <div className="small text-muted">
+                                            {(item.flowers || []).map((flower) => flower.name).join(', ')}
+                                            {item.wrapper?.name ? ` • ${item.wrapper.name}` : ''}
+                                            {item.ribbon?.name ? ` • ${item.ribbon.name}` : ''}
+                                        </div>
                                     </div>
                                     <div className="checkout-item-price">
                                         ₱{((item.price) * (item.qty || 1)).toLocaleString()}

@@ -75,7 +75,7 @@ const getPalmHaloPreviewKey = (item = {}) => (
 );
 const decoratePalmHaloRibbonOptions = (stockOptions = [], generatedOptions = []) => {
   if (!Array.isArray(stockOptions) || stockOptions.length === 0) {
-    return [];
+    return Array.isArray(generatedOptions) ? generatedOptions : [];
   }
 
   if (!Array.isArray(generatedOptions) || generatedOptions.length === 0) {
@@ -851,10 +851,6 @@ const Customized = ({ addToCart }) => {
     setActiveStep(1);
   };
 
-  useEffect(() => {
-    console.log('Current selection state:', selection);
-  }, [selection]);
-
   const totalPrice = useMemo(() => {
     let total = 0;
     if (selection.flowers.length > 0 && selection.bundleSize) {
@@ -1008,6 +1004,15 @@ const Customized = ({ addToCart }) => {
       return;
     }
 
+    if (ribbonMode !== 'none' && !selection.ribbon) {
+      setInfoModal({
+        show: true,
+        title: 'Ribbon Needed',
+        message: 'Please select a ribbon before adding this bouquet to your cart.',
+      });
+      return;
+    }
+
     const maxAllowed = getMaxAllowedBundleSize(selection.flowers);
     if (selection.bundleSize > maxAllowed) {
       setInfoModal({ show: true, title: 'Check Stock', message: `Not enough flowers for a bundle of ${selection.bundleSize}. Max allowed stems based on current stock is ${maxAllowed}.` });
@@ -1044,17 +1049,45 @@ const Customized = ({ addToCart }) => {
         id: `custom-${Date.now()}`,
         name: 'Customizer Studio',
         image: photoBase64,
-        flowers: selection.flowers.map(f => ({ id: f.id, name: f.name, price: f.price })),
+        flowers: selection.flowers.map((flower) => ({
+          id: flower.id,
+          name: flower.name,
+          price: flower.price,
+          img: flower.img || null,
+          layerImg: flower.layerImg || null,
+          stemImg: flower.stemImg || null,
+          quantity: flower.quantity || 0,
+          is_available: flower.is_available !== false,
+        })),
         flowerAllocations: buildFlowerAllocations(selection.flowers, selection.bundleSize),
         bundleSize: selection.bundleSize,
         wrapper: selection.wrapper ? {
           id: selection.wrapper.id,
           name: selection.wrapper.name,
           price: selection.wrapper.price,
+          img: selection.wrapper.img || null,
+          layerImg: selection.wrapper.layerImg || null,
           groupName: selection.wrapper.groupName,
+          wrapper_group_name: selection.wrapper.wrapper_group_name || selection.wrapper.groupName || null,
           colorName: selection.wrapper.colorName || null,
+          wrapper_color: selection.wrapper.wrapper_color || selection.wrapper.colorName || null,
+          customization_config: selection.wrapper.customization_config || null,
+          quantity: selection.wrapper.quantity || 0,
+          is_available: selection.wrapper.is_available !== false,
         } : null,
-        ribbon: selection.ribbon ? { id: selection.ribbon.id, name: selection.ribbon.name, price: selection.ribbon.price } : null,
+        ribbon: selection.ribbon ? {
+          id: selection.ribbon.id,
+          name: selection.ribbon.name,
+          price: selection.ribbon.price,
+          img: selection.ribbon.img || null,
+          layerImg: selection.ribbon.layerImg || null,
+          previewStyle: selection.ribbon.previewStyle || null,
+          ribbon_scope: selection.ribbon.ribbon_scope || null,
+          colorName: selection.ribbon.colorName || null,
+          stockLabel: selection.ribbon.stockLabel || null,
+          quantity: selection.ribbon.quantity || 0,
+          is_available: selection.ribbon.is_available !== false,
+        } : null,
         price: totalPrice,
         qty: 1
       };
