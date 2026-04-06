@@ -7,6 +7,14 @@ import InfoModal from '../components/InfoModal';
 import { buildTimelineTimestampMap, formatTimelineTimestamp } from '../utils/timelineTimestamps';
 import { formatCustomOrderV4Currency, getSelectedEstimateFromItem, isCustomOrderV4Item } from '../utils/customOrderV4';
 import { summarizeCancellationItems } from '../utils/orderCancellation';
+import {
+    canRequestRefund,
+    createRefundRequest,
+    getRefundRequestForEntity,
+    getRefundStatusLabel,
+    maskGcashNumber,
+    submitRefundGcashDetails,
+} from '../utils/refundWorkflows';
 import '../styles/Shop.css';
 
 // Timeline steps for Delivery Requests
@@ -269,6 +277,12 @@ const OrderBookingTracking = () => {
     const [additionalFile, setAdditionalFile] = useState(null);
     const [uploadingReceipt, setUploadingReceipt] = useState(false);
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
+    const [refundRequest, setRefundRequest] = useState(null);
+    const [refundReason, setRefundReason] = useState('');
+    const [submittingRefundRequest, setSubmittingRefundRequest] = useState(false);
+    const [gcashName, setGcashName] = useState('');
+    const [gcashNumber, setGcashNumber] = useState('');
+    const [submittingRefundDetails, setSubmittingRefundDetails] = useState(false);
     const [feedbackMessage, setFeedbackMessage] = useState('');
     const [submittingFeedback, setSubmittingFeedback] = useState(false);
 
@@ -366,6 +380,19 @@ const OrderBookingTracking = () => {
             };
             setRequest(transformedRequest);
 
+            try {
+                const existingRefund = await getRefundRequestForEntity({
+                    entityType: 'request',
+                    entityId: foundRequest.id,
+                });
+                setRefundRequest(existingRefund);
+                setGcashName(existingRefund?.gcash_name || '');
+                setGcashNumber(existingRefund?.gcash_number || '');
+            } catch (refundError) {
+                console.error('Error fetching refund request:', refundError);
+                setRefundRequest(null);
+            }
+
             const steps = transformedRequest.deliveryMethod === 'pickup' ? requestPickupSteps : requestDeliverySteps;
             const finalRequestStatuses = ['completed', 'claimed', 'declined', 'cancelled'];
 
@@ -424,6 +451,42 @@ const OrderBookingTracking = () => {
             supabase.removeChannel(channel);
         };
     }, [requestNumber]);
+
+    useEffect(() => {
+        if (!request?.id) {
+            return undefined;
+        }
+
+        const refundChannel = supabase
+            .channel(`refund_requests:request:${request.id}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'refund_requests',
+                    filter: `request_id=eq.${request.id}`,
+                },
+                async () => {
+                    try {
+                        const latestRefund = await getRefundRequestForEntity({
+                            entityType: 'request',
+                            entityId: request.id,
+                        });
+                        setRefundRequest(latestRefund);
+                        setGcashName(latestRefund?.gcash_name || '');
+                        setGcashNumber(latestRefund?.gcash_number || '');
+                    } catch (error) {
+                        console.error('Error refreshing refund request:', error);
+                    }
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(refundChannel);
+        };
+    }, [request?.id]);
 
     const handleUploadReceipt = async () => {
         if (!additionalFile || !request) return;
@@ -613,6 +676,98 @@ const OrderBookingTracking = () => {
         }
     };
 
+    const handleRequestRefund = async () => {
+        if (!request) {
+            setInfoModal({ show: true, title: 'Request Not Ready', message: 'This request is not ready for refund processing yet.' });
+            return;
+        }
+
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user?.id) {
+            setInfoModal({ show: true, title: 'Login Required', message: 'Please sign in to request a refund.' });
+            return;
+        }
+
+        const trimmedReason = refundReason.trim();
+        if (!trimmedReason) {
+            setInfoModal({ show: true, title: 'Refund Reason Needed', message: 'Please tell us why you are requesting a refund.' });
+            return;
+        }
+
+        setSubmittingRefundRequest(true);
+        try {
+            const result = await createRefundRequest({
+                entityType: 'request',
+                entityId: request.id,
+                customerId: session.user.id,
+                reason: trimmedReason,
+                refundAmount: Number(request.amount_received || 0) > 0
+                    ? Number(request.amount_received || 0)
+                    : Number(request.finalPrice || 0),
+            });
+
+            setRefundRequest(result.refundRequest);
+            setRefundReason('');
+            setInfoModal({
+                show: true,
+                title: 'Refund Request Sent',
+                message: 'Your refund request was submitted. An admin will review it before any GCash details are collected.',
+            });
+        } catch (error) {
+            console.error('Error creating refund request:', error);
+            setInfoModal({
+                show: true,
+                title: 'Refund Request Failed',
+                message: error.message || 'We could not submit your refund request right now.',
+            });
+        } finally {
+            setSubmittingRefundRequest(false);
+        }
+    };
+
+    const handleSubmitRefundDetails = async () => {
+        if (!refundRequest?.id) {
+            return;
+        }
+
+        const trimmedName = gcashName.trim();
+        const normalizedNumber = gcashNumber.replace(/\D/g, '');
+
+        if (!trimmedName || normalizedNumber.length < 10) {
+            setInfoModal({
+                show: true,
+                title: 'GCash Details Required',
+                message: 'Please provide the GCash account name and a valid GCash number.',
+            });
+            return;
+        }
+
+        setSubmittingRefundDetails(true);
+        try {
+            const result = await submitRefundGcashDetails({
+                refundId: refundRequest.id,
+                gcashName: trimmedName,
+                gcashNumber: normalizedNumber,
+            });
+
+            setRefundRequest(result.refundRequest);
+            setInfoModal({
+                show: true,
+                title: 'GCash Details Sent',
+                message: 'Your GCash details were submitted. A staff member can now process the refund.',
+            });
+        } catch (error) {
+            console.error('Error submitting refund GCash details:', error);
+            setInfoModal({
+                show: true,
+                title: 'Submission Failed',
+                message: error.message || 'We could not submit your GCash details right now.',
+            });
+        } finally {
+            setSubmittingRefundDetails(false);
+        }
+    };
+
     const trackingSteps = getTrackingSteps();
     const timelineTimestampMap = buildTimelineTimestampMap({
         steps: trackingSteps,
@@ -638,6 +793,13 @@ const OrderBookingTracking = () => {
     const bookingDestinations = Array.isArray(request?.requestData?.multi_delivery_destinations)
         ? request.requestData.multi_delivery_destinations
         : [];
+    const canShowRefundRequest = Boolean(request) && canRequestRefund({
+        paymentStatus: request?.payment_status,
+        amountPaid: request?.amount_received,
+        fallbackAmount: request?.finalPrice,
+        refundRequest,
+    }) && ['completed', 'cancelled'].includes(String(request?.status || '').toLowerCase());
+    const showRefundGcashForm = String(refundRequest?.status || '').toLowerCase() === 'approved';
 
     if (loading) {
         return (
@@ -768,6 +930,132 @@ const OrderBookingTracking = () => {
                                 setAdditionalFile={setAdditionalFile}
                                 shippingFee={request.shipping_fee}
                             />
+                        )}
+
+                        {(refundRequest || canShowRefundRequest) && (
+                            <div className="tracking-items p-4 rounded-4 shadow-sm bg-white mb-4">
+                                <div className="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+                                    <div>
+                                        <h5 className="fw-bold mb-1">
+                                            <i className="fas fa-rotate-left me-2" style={{ color: 'var(--shop-pink)' }}></i>
+                                            Refund Request
+                                        </h5>
+                                        <p className="text-muted mb-0">
+                                            Admin approval is required first. Once approved, you can submit your GCash details here for the refund.
+                                        </p>
+                                    </div>
+                                    {refundRequest && (
+                                        <span className="badge rounded-pill px-3 py-2" style={{ backgroundColor: '#FCE7F3', color: '#BE185D' }}>
+                                            {getRefundStatusLabel(refundRequest.status)}
+                                        </span>
+                                    )}
+                                </div>
+
+                                {refundRequest ? (
+                                    <>
+                                        <div className="row g-3 mb-3">
+                                            <div className="col-md-6">
+                                                <div className="small text-muted">Requested Amount</div>
+                                                <div className="fw-semibold">PHP {Number(refundRequest.refund_amount || 0).toLocaleString()}</div>
+                                            </div>
+                                            <div className="col-md-6">
+                                                <div className="small text-muted">Reason</div>
+                                                <div className="fw-semibold">{refundRequest.customer_reason}</div>
+                                            </div>
+                                            {refundRequest.admin_note && (
+                                                <div className="col-12">
+                                                    <div className="small text-muted">Admin Note</div>
+                                                    <div className="fw-semibold">{refundRequest.admin_note}</div>
+                                                </div>
+                                            )}
+                                            {refundRequest.rejection_reason && (
+                                                <div className="col-12">
+                                                    <div className="small text-muted">Decision</div>
+                                                    <div className="text-danger fw-semibold">{refundRequest.rejection_reason}</div>
+                                                </div>
+                                            )}
+                                            {(refundRequest.gcash_name || refundRequest.gcash_number) && (
+                                                <>
+                                                    <div className="col-md-6">
+                                                        <div className="small text-muted">GCash Account Name</div>
+                                                        <div className="fw-semibold">{refundRequest.gcash_name || 'Not submitted'}</div>
+                                                    </div>
+                                                    <div className="col-md-6">
+                                                        <div className="small text-muted">GCash Number</div>
+                                                        <div className="fw-semibold">{maskGcashNumber(refundRequest.gcash_number)}</div>
+                                                    </div>
+                                                </>
+                                            )}
+                                            {refundRequest.refund_reference && (
+                                                <div className="col-12">
+                                                    <div className="small text-muted">Refund Reference</div>
+                                                    <div className="fw-semibold">{refundRequest.refund_reference}</div>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {showRefundGcashForm && (
+                                            <div className="border rounded-4 p-3" style={{ backgroundColor: '#FFF7FB', borderColor: '#FBCFE8' }}>
+                                                <h6 className="fw-bold mb-2">Submit Your GCash Details</h6>
+                                                <p className="text-muted small mb-3">
+                                                    Your refund was approved. Submit the account details where you want the refund sent.
+                                                </p>
+                                                <div className="mb-3">
+                                                    <label className="form-label">GCash Account Name</label>
+                                                    <input
+                                                        type="text"
+                                                        className="form-control"
+                                                        value={gcashName}
+                                                        onChange={(event) => setGcashName(event.target.value)}
+                                                        placeholder="Enter your full GCash account name"
+                                                    />
+                                                </div>
+                                                <div className="mb-3">
+                                                    <label className="form-label">GCash Number</label>
+                                                    <input
+                                                        type="tel"
+                                                        className="form-control"
+                                                        value={gcashNumber}
+                                                        onChange={(event) => setGcashNumber(event.target.value)}
+                                                        placeholder="09XXXXXXXXX"
+                                                    />
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    className="btn"
+                                                    style={{ background: 'var(--shop-pink)', color: '#fff' }}
+                                                    onClick={handleSubmitRefundDetails}
+                                                    disabled={submittingRefundDetails}
+                                                >
+                                                    {submittingRefundDetails ? 'Submitting...' : 'Submit GCash Details'}
+                                                </button>
+                                            </div>
+                                        )}
+                                    </>
+                                ) : (
+                                    <div>
+                                        <div className="mb-3">
+                                            <label className="form-label">Why are you requesting a refund?</label>
+                                            <textarea
+                                                className="form-control"
+                                                rows="4"
+                                                value={refundReason}
+                                                onChange={(event) => setRefundReason(event.target.value)}
+                                                placeholder="Tell us what happened so the admin can review your request."
+                                            />
+                                        </div>
+                                        <button
+                                            type="button"
+                                            className="btn"
+                                            style={{ background: 'var(--shop-pink)', color: '#fff' }}
+                                            onClick={handleRequestRefund}
+                                            disabled={submittingRefundRequest}
+                                        >
+                                            {submittingRefundRequest ? 'Submitting...' : 'Request Refund'}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
                         )}
 
                         <div className="tracking-timeline">
