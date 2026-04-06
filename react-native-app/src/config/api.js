@@ -149,6 +149,12 @@ const parseJsonObject = (value) => {
     return typeof value === 'object' ? value : {};
 };
 
+const formatMonthKey = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+};
+
 const isEmptySingleResultError = (error) => {
     const code = String(error?.code || '').trim().toUpperCase();
     const message = String(error?.message || '').toLowerCase();
@@ -655,6 +661,54 @@ const getMonthRange = (monthKey) => {
     };
 };
 
+const getTodayRange = () => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+
+    return {
+        key: 'today',
+        start,
+        end,
+        startIso: start.toISOString(),
+        endIso: end.toISOString(),
+        label: 'Today',
+    };
+};
+
+const getWeekRange = () => {
+    const now = new Date();
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const start = new Date(end);
+    start.setDate(end.getDate() - 7);
+
+    return {
+        key: 'week',
+        start,
+        end,
+        startIso: start.toISOString(),
+        endIso: end.toISOString(),
+        label: 'This Week',
+    };
+};
+
+const getPeriodRange = (period = 'all', monthKey = null) => {
+    if (period === 'today') {
+        return getTodayRange();
+    }
+
+    if (period === 'week') {
+        return getWeekRange();
+    }
+
+    if (period === 'month') {
+        return getMonthRange(monthKey);
+    }
+
+    return null;
+};
+
 const applyDateRangeToQuery = (query, column, range) => {
     if (!range) {
         return query;
@@ -663,6 +717,83 @@ const applyDateRangeToQuery = (query, column, range) => {
     return query
         .gte(column, range.startIso)
         .lt(column, range.endIso);
+};
+
+const CREDIT_PAYMENT_STATUSES = new Set(['partial', 'to_pay', 'waiting_for_confirmation', 'failed']);
+const UPCOMING_ORDER_STATUSES = new Set(['pending', 'processing', 'ready_for_pickup', 'out_for_delivery']);
+const UPCOMING_REQUEST_STATUSES = new Set(['pending', 'quoted', 'accepted', 'processing', 'ready_for_pickup', 'out_for_delivery']);
+const CLOSED_ORDER_STATUSES = new Set(['cancelled']);
+const CLOSED_REQUEST_STATUSES = new Set(['cancelled', 'declined']);
+
+const parseMoney = (value) => {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const getRequestTentativeAmount = (request) => {
+    const requestData = parseJsonObject(request?.data);
+    const breakdown = requestData?.tentativeBreakdown || requestData?.tentative_breakdown || {};
+
+    const candidates = [
+        breakdown?.subtotalMax,
+        breakdown?.subtotal_max,
+        breakdown?.subtotalMin,
+        breakdown?.subtotal_min,
+        requestData?.tentativeTotalMax,
+        requestData?.tentative_total_max,
+        requestData?.tentativeTotalMin,
+        requestData?.tentative_total_min,
+        requestData?.estimatedTotal,
+        requestData?.estimated_total,
+    ].map(parseMoney).filter((value) => value > 0);
+
+    return candidates.length ? Math.max(...candidates) : 0;
+};
+
+const getRequestTotalAmount = (request, options = {}) => {
+    const finalPrice = parseMoney(request?.final_price);
+    if (finalPrice > 0) {
+        return finalPrice;
+    }
+
+    const estimatedPrice = parseMoney(request?.estimated_price);
+    if (estimatedPrice > 0) {
+        return estimatedPrice;
+    }
+
+    return options.allowTentative ? getRequestTentativeAmount(request) : 0;
+};
+
+const getRemainingBalance = (totalAmount, amountReceived) => {
+    return Math.max(0, parseMoney(totalAmount) - parseMoney(amountReceived));
+};
+
+const getCollectedCashAmount = (totalAmount, amountReceived, paymentStatus) => {
+    const safeTotal = parseMoney(totalAmount);
+    const safeReceived = parseMoney(amountReceived);
+    const normalizedStatus = String(paymentStatus || '').trim().toLowerCase();
+
+    if (normalizedStatus === 'paid') {
+        return safeTotal > 0 ? safeTotal : safeReceived;
+    }
+
+    return Math.min(safeTotal, safeReceived);
+};
+
+const getRequestScheduleDate = (request) => {
+    const requestData = parseJsonObject(request?.data);
+    const dateValue = requestData?.dateNeeded
+        || requestData?.date_needed
+        || requestData?.eventDate
+        || requestData?.event_date
+        || null;
+
+    if (!dateValue) {
+        return null;
+    }
+
+    const parsed = new Date(dateValue);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
 const updateRequestStatusDirect = async (id, status, options = {}) => {
@@ -2087,91 +2218,246 @@ export const adminAPI = {
 
 
     getSalesSummary: async (filters = {}) => {
-        const monthRange = getMonthRange(filters?.monthKey);
+        const period = filters?.period || 'all';
+        const periodRange = getPeriodRange(period, filters?.monthKey);
+        const todayRange = getTodayRange();
+        const weekRange = getWeekRange();
+        const currentMonthRange = getMonthRange(formatMonthKey(new Date()));
+
         let salesQuery = supabase.from('sales').select('total_amount, sale_date');
-        salesQuery = applyDateRangeToQuery(salesQuery, 'sale_date', monthRange);
+        salesQuery = applyDateRangeToQuery(salesQuery, 'sale_date', periodRange);
 
-        const { data: sales, error: salesError } = await salesQuery;
+        let ordersQuery = supabase
+            .from('orders')
+            .select(`
+                id,
+                created_at,
+                order_number,
+                status,
+                payment_status,
+                amount_received,
+                total,
+                delivery_method,
+                pickup_time,
+                users (
+                    name,
+                    email
+                )
+            `)
+            .order('created_at', { ascending: false });
 
-        if (salesError) {
-            console.error('Error fetching sales:', salesError);
-            throw salesError;
+        let requestsQuery = supabase
+            .from('requests')
+            .select(`
+                id,
+                request_number,
+                type,
+                created_at,
+                status,
+                payment_status,
+                amount_received,
+                final_price,
+                estimated_price,
+                delivery_method,
+                pickup_time,
+                data,
+                users (
+                    name,
+                    email
+                )
+            `)
+            .order('created_at', { ascending: false });
+
+        ordersQuery = applyDateRangeToQuery(ordersQuery, 'created_at', periodRange);
+        requestsQuery = applyDateRangeToQuery(requestsQuery, 'created_at', periodRange);
+
+        const [
+            { data: sales, error: salesError },
+            { data: orders, error: ordersError },
+            { data: requests, error: requestsError },
+        ] = await Promise.all([salesQuery, ordersQuery, requestsQuery]);
+
+        if (salesError || ordersError || requestsError) {
+            console.error('Error fetching sales summary sources:', { salesError, ordersError, requestsError });
+            throw salesError || ordersError || requestsError;
         }
 
-        const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-
-        let totalSales = 0;
-        let todaySales = 0;
-        let weekSales = 0;
-        let monthSales = 0;
-
-        (sales || []).forEach((sale) => {
+        const addSalesInRange = (range) => (sales || []).reduce((sum, sale) => {
             const saleDate = new Date(sale.sale_date);
-            const saleAmount = parseFloat(sale.total_amount || 0);
+            const saleAmount = parseMoney(sale.total_amount);
 
-            if (!Number.isFinite(saleAmount) || Number.isNaN(saleDate.getTime())) {
-                return;
+            if (Number.isNaN(saleDate.getTime()) || saleAmount <= 0) {
+                return sum;
             }
 
-            totalSales += saleAmount;
-            if (saleDate >= today) todaySales += saleAmount;
-            if (saleDate >= weekAgo) weekSales += saleAmount;
-            if (monthRange) {
-                monthSales += saleAmount;
-            } else if (saleDate >= currentMonthStart) {
-                monthSales += saleAmount;
+            if (!range) {
+                return sum + saleAmount;
+            }
+
+            return saleDate >= range.start && saleDate < range.end ? sum + saleAmount : sum;
+        }, 0);
+
+        const summary = {
+            totalSales: addSalesInRange(periodRange),
+            todaySales: addSalesInRange(todayRange),
+            weekSales: addSalesInRange(weekRange),
+            monthSales: addSalesInRange(currentMonthRange),
+            totalOrders: 0,
+            completedOrders: 0,
+            pendingOrders: 0,
+            cashSales: 0,
+            creditSales: 0,
+            receivable: 0,
+            upcomingSales: 0,
+            unpaidCount: 0,
+            upcomingCount: 0,
+            outstandingItems: [],
+            upcomingItems: [],
+            monthLabel: periodRange?.label || null,
+        };
+
+        (orders || []).forEach((order) => {
+            const totalAmount = parseMoney(order?.total);
+            const amountReceived = parseMoney(order?.amount_received);
+            const remainingBalance = getRemainingBalance(totalAmount, amountReceived);
+            const paymentStatus = String(order?.payment_status || '').trim().toLowerCase();
+            const status = String(order?.status || '').trim().toLowerCase();
+            const isClosed = CLOSED_ORDER_STATUSES.has(status);
+            const isUpcoming = UPCOMING_ORDER_STATUSES.has(status);
+            const collectedCash = getCollectedCashAmount(totalAmount, amountReceived, paymentStatus);
+
+            summary.totalOrders += 1;
+            summary.cashSales += collectedCash;
+
+            if (status === 'completed' || status === 'claimed') {
+                summary.completedOrders += 1;
+            } else if (!isClosed) {
+                summary.pendingOrders += 1;
+            }
+
+            if (!isClosed && (CREDIT_PAYMENT_STATUSES.has(paymentStatus) || remainingBalance > 0) && totalAmount > 0) {
+                summary.creditSales += totalAmount;
+                summary.receivable += remainingBalance;
+                summary.unpaidCount += 1;
+                summary.outstandingItems.push({
+                    id: `order-${order.id}`,
+                    entityType: 'order',
+                    refNumber: order?.order_number || `Order #${order.id}`,
+                    customerName: order?.users?.name || 'N/A',
+                    customerEmail: order?.users?.email || '',
+                    status,
+                    paymentStatus,
+                    totalAmount,
+                    amountReceived,
+                    remainingBalance,
+                    scheduleDate: order?.created_at || null,
+                    scheduleText: order?.delivery_method === 'pickup' && order?.pickup_time
+                        ? `Pickup ${order.pickup_time}`
+                        : 'Awaiting payment',
+                });
+            }
+
+            if (!isClosed && isUpcoming && totalAmount > 0) {
+                summary.upcomingSales += totalAmount;
+                summary.upcomingCount += 1;
+                summary.upcomingItems.push({
+                    id: `order-upcoming-${order.id}`,
+                    entityType: 'order',
+                    refNumber: order?.order_number || `Order #${order.id}`,
+                    sourceType: 'Order',
+                    customerName: order?.users?.name || 'N/A',
+                    customerEmail: order?.users?.email || '',
+                    status,
+                    paymentStatus,
+                    totalAmount,
+                    remainingBalance,
+                    scheduleDate: order?.created_at || null,
+                    scheduleText: order?.delivery_method === 'pickup' && order?.pickup_time
+                        ? `Pickup ${order.pickup_time}`
+                        : 'Active order',
+                });
             }
         });
 
-        const { data: stats } = await adminAPI.getStats({ monthKey: monthRange?.key || null });
+        (requests || []).forEach((request) => {
+            const requestTotal = getRequestTotalAmount(request);
+            const requestDisplayTotal = getRequestTotalAmount(request, { allowTentative: true });
+            const amountReceived = parseMoney(request?.amount_received);
+            const remainingBalance = getRemainingBalance(requestTotal, amountReceived);
+            const paymentStatus = String(request?.payment_status || '').trim().toLowerCase();
+            const status = String(request?.status || '').trim().toLowerCase();
+            const isClosed = CLOSED_REQUEST_STATUSES.has(status);
+            const isUpcoming = UPCOMING_REQUEST_STATUSES.has(status);
+            const scheduleDate = getRequestScheduleDate(request) || request?.created_at || null;
+            const scheduleText = request?.pickup_time
+                ? `Pickup ${request.pickup_time}`
+                : (getRequestScheduleDate(request) ? 'Scheduled request' : 'Active request');
+            const collectedCash = getCollectedCashAmount(requestTotal, amountReceived, paymentStatus);
 
-        let totalOrdersQuery = supabase
-            .from('orders')
-            .select('*', { count: 'exact', head: true });
-        let totalRequestsQuery = supabase
-            .from('requests')
-            .select('*', { count: 'exact', head: true });
+            summary.totalOrders += 1;
+            summary.cashSales += collectedCash;
 
-        totalOrdersQuery = applyDateRangeToQuery(totalOrdersQuery, 'created_at', monthRange);
-        totalRequestsQuery = applyDateRangeToQuery(totalRequestsQuery, 'created_at', monthRange);
-
-        const { count: totalOrders, error: totalOrdersError } = await totalOrdersQuery;
-        if (totalOrdersError) {
-            console.error('Error fetching total orders:', totalOrdersError);
-            throw totalOrdersError;
-        }
-
-        const { count: totalRequests, error: totalRequestsError } = await totalRequestsQuery;
-        if (totalRequestsError) {
-            console.error('Error fetching total requests:', totalRequestsError);
-            throw totalRequestsError;
-        }
-
-        return {
-            data: {
-                totalSales,
-                todaySales,
-                weekSales,
-                monthSales,
-                totalOrders: (totalOrders || 0) + (totalRequests || 0),
-                completedOrders: (stats?.completedOrders || 0) + (stats?.completedRequests || 0),
-                pendingOrders: (stats?.pendingOrders || 0) + (stats?.pendingRequests || 0),
-                monthLabel: monthRange?.label || null,
+            if (status === 'completed' || status === 'claimed') {
+                summary.completedOrders += 1;
+            } else if (!isClosed) {
+                summary.pendingOrders += 1;
             }
-        };
+
+            if (!isClosed && (CREDIT_PAYMENT_STATUSES.has(paymentStatus) || remainingBalance > 0) && requestTotal > 0) {
+                summary.creditSales += requestTotal;
+                summary.receivable += remainingBalance;
+                summary.unpaidCount += 1;
+                summary.outstandingItems.push({
+                    id: `request-${request.id}`,
+                    entityType: 'request',
+                    refNumber: request?.request_number || `Request #${request.id}`,
+                    customerName: request?.users?.name || 'N/A',
+                    customerEmail: request?.users?.email || '',
+                    status,
+                    paymentStatus,
+                    totalAmount: requestTotal,
+                    amountReceived,
+                    remainingBalance,
+                    scheduleDate,
+                    scheduleText,
+                    sourceType: request?.type || 'Request',
+                });
+            }
+
+            if (!isClosed && isUpcoming && requestDisplayTotal > 0) {
+                summary.upcomingSales += requestDisplayTotal;
+                summary.upcomingCount += 1;
+                summary.upcomingItems.push({
+                    id: `request-upcoming-${request.id}`,
+                    entityType: 'request',
+                    refNumber: request?.request_number || `Request #${request.id}`,
+                    sourceType: request?.type || 'Request',
+                    customerName: request?.users?.name || 'N/A',
+                    customerEmail: request?.users?.email || '',
+                    status,
+                    paymentStatus,
+                    totalAmount: requestDisplayTotal,
+                    remainingBalance,
+                    scheduleDate,
+                    scheduleText,
+                });
+            }
+        });
+
+        summary.outstandingItems.sort((a, b) => new Date(b.scheduleDate || 0) - new Date(a.scheduleDate || 0));
+        summary.upcomingItems.sort((a, b) => new Date(a.scheduleDate || 0) - new Date(b.scheduleDate || 0));
+
+        return { data: summary };
     },
 
     getSalesChartData: async (period = 'week', monthKey = null) => {
-        const monthRange = getMonthRange(monthKey);
+        const periodRange = getPeriodRange(period, monthKey);
         let query = supabase
             .from('sales')
             .select('sale_date, total_amount')
             .order('sale_date', { ascending: true });
 
-        query = applyDateRangeToQuery(query, 'sale_date', period === 'month' ? monthRange : null);
+        query = applyDateRangeToQuery(query, 'sale_date', periodRange);
 
         const { data, error } = await query;
 
@@ -2182,8 +2468,8 @@ export const adminAPI = {
         return { data };
     },
 
-    getBestSellingProducts: async (monthKey = null) => {
-        const monthRange = getMonthRange(monthKey);
+    getBestSellingProducts: async (period = 'all', monthKey = null) => {
+        const periodRange = getPeriodRange(period, monthKey);
         let query = supabase
             .from('sales')
             .select(`
@@ -2203,7 +2489,7 @@ export const adminAPI = {
             `)
             .not('order_id', 'is', null);
 
-        query = applyDateRangeToQuery(query, 'sale_date', monthRange);
+        query = applyDateRangeToQuery(query, 'sale_date', periodRange);
 
         const { data, error } = await query;
 
@@ -2274,14 +2560,8 @@ export const adminAPI = {
             `)
             .order('sale_date', { ascending: false });
 
-        const now = new Date();
-        const monthRange = getMonthRange(monthKey);
-        if (period === 'week') {
-            const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-            query = query.gte('sale_date', weekAgo.toISOString());
-        } else if (period === 'month') {
-            query = applyDateRangeToQuery(query, 'sale_date', monthRange);
-        }
+        const periodRange = getPeriodRange(period, monthKey);
+        query = applyDateRangeToQuery(query, 'sale_date', periodRange);
 
         const { data, error } = await query;
 

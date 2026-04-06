@@ -63,9 +63,17 @@ const SalesTab = () => {
     todaySales: 0,
     weekSales: 0,
     monthSales: 0,
+    cashSales: 0,
+    creditSales: 0,
+    receivable: 0,
+    upcomingSales: 0,
     totalOrders: 0,
     completedOrders: 0,
     pendingOrders: 0,
+    unpaidCount: 0,
+    upcomingCount: 0,
+    outstandingItems: [],
+    upcomingItems: [],
   });
   const [chartData, setChartData] = useState({
     labels: [],
@@ -73,7 +81,7 @@ const SalesTab = () => {
   });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedPeriod, setSelectedPeriod] = useState('week');
+  const [selectedPeriod, setSelectedPeriod] = useState('today');
   const [selectedMonthKey, setSelectedMonthKey] = useState(formatMonthKey(new Date()));
   const [bestSellers, setBestSellers] = useState([]);
   const [transactions, setTransactions] = useState([]);
@@ -94,9 +102,9 @@ const SalesTab = () => {
 
     const subscription = supabase
       .channel('sales-tab-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' },
-        () => { loadAllData(); }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => { loadAllData(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => { loadAllData(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'requests' }, () => { loadAllData(); })
       .subscribe();
 
     return () => {
@@ -123,7 +131,7 @@ const SalesTab = () => {
     try {
       const activeMonthKey = selectedPeriod === 'month' ? selectedMonthKey : null;
       const selectedMonthRange = selectedPeriod === 'month' ? getMonthRange(selectedMonthKey) : null;
-      const summaryRes = await adminAPI.getSalesSummary({ monthKey: activeMonthKey });
+      const summaryRes = await adminAPI.getSalesSummary({ period: selectedPeriod, monthKey: activeMonthKey });
       if (summaryRes.error) throw summaryRes.error;
       const summary = summaryRes.data;
 
@@ -132,9 +140,17 @@ const SalesTab = () => {
         todaySales: summary.todaySales,
         weekSales: summary.weekSales,
         monthSales: summary.monthSales,
+        cashSales: summary.cashSales,
+        creditSales: summary.creditSales,
+        receivable: summary.receivable,
+        upcomingSales: summary.upcomingSales,
         totalOrders: summary.totalOrders,
         completedOrders: summary.completedOrders,
         pendingOrders: summary.pendingOrders,
+        unpaidCount: summary.unpaidCount,
+        upcomingCount: summary.upcomingCount,
+        outstandingItems: summary.outstandingItems || [],
+        upcomingItems: summary.upcomingItems || [],
       });
 
       // Process data for chart
@@ -145,7 +161,17 @@ const SalesTab = () => {
       let labels = [];
       let data = [];
 
-      if (selectedPeriod === 'week') {
+      if (selectedPeriod === 'today') {
+        labels = ['12AM', '4AM', '8AM', '12PM', '4PM', '8PM'];
+        data = Array(6).fill(0);
+
+        allSales.forEach((sale) => {
+          const saleDate = new Date(sale.sale_date);
+          const hour = saleDate.getHours();
+          const bucketIndex = Math.min(5, Math.max(0, Math.floor(hour / 4)));
+          data[bucketIndex] += parseFloat(sale.total_amount || 0);
+        });
+      } else if (selectedPeriod === 'week') {
         const toDateString = (date) => {
           const y = date.getFullYear();
           const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -220,7 +246,9 @@ const SalesTab = () => {
       console.error('Error loading sales data:', error);
       setSalesData({
         totalSales: 0, todaySales: 0, weekSales: 0, monthSales: 0,
+        cashSales: 0, creditSales: 0, receivable: 0, upcomingSales: 0,
         totalOrders: 0, completedOrders: 0, pendingOrders: 0,
+        unpaidCount: 0, upcomingCount: 0, outstandingItems: [], upcomingItems: [],
       });
       setChartData({
         labels: ['N/A'],
@@ -231,7 +259,10 @@ const SalesTab = () => {
 
   const loadBestSellers = async () => {
     try {
-      const res = await adminAPI.getBestSellingProducts(selectedPeriod === 'month' ? selectedMonthKey : null);
+      const res = await adminAPI.getBestSellingProducts(
+        selectedPeriod,
+        selectedPeriod === 'month' ? selectedMonthKey : null
+      );
       setBestSellers(res.data || []);
     } catch (error) {
       console.error('Error loading best sellers:', error);
@@ -289,6 +320,106 @@ const SalesTab = () => {
     return 'Request';
   };
 
+  const getStatusBadgeColor = (status) => {
+    switch (String(status || '').trim().toLowerCase()) {
+      case 'paid':
+        return '#16A34A';
+      case 'partial':
+        return '#D97706';
+      case 'to_pay':
+      case 'waiting_for_confirmation':
+        return '#DC2626';
+      default:
+        return getStatusColor(String(status || '').trim().toLowerCase());
+    }
+  };
+
+  const renderPipelineItem = (item, section = 'unpaid') => {
+    const sourceType = item.sourceType || (item.entityType === 'order' ? 'Order' : 'Request');
+    const amountLabel = section === 'unpaid' ? 'Remaining' : 'Amount';
+    const amountValue = section === 'unpaid' ? item.remainingBalance : item.totalAmount;
+
+    return (
+      <View
+        key={item.id}
+        style={{
+          backgroundColor: '#fff',
+          borderRadius: 12,
+          padding: 14,
+          marginBottom: 10,
+          elevation: 1,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.05,
+          shadowRadius: 2,
+        }}
+      >
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+              <Text style={{ fontSize: 15, fontWeight: '700', color: '#333' }} numberOfLines={1}>
+                #{item.refNumber}
+              </Text>
+              <View style={{
+                backgroundColor: getSourceBadgeColor(sourceType),
+                borderRadius: 999,
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+              }}>
+                <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>
+                  {getSourceLabel(sourceType)}
+                </Text>
+              </View>
+            </View>
+            <Text style={{ fontSize: 13, color: '#374151', fontWeight: '600' }}>{item.customerName}</Text>
+            <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 3 }}>
+              {item.scheduleText || 'Active record'}
+            </Text>
+            <Text style={{ fontSize: 12, color: '#9CA3AF', marginTop: 2 }}>
+              {formatDate(item.scheduleDate || new Date())}
+            </Text>
+          </View>
+
+          <View style={{ alignItems: 'flex-end', minWidth: 120 }}>
+            <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 2 }}>{amountLabel}</Text>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: section === 'unpaid' ? '#DC2626' : '#16A34A' }}>
+              {formatCurrency(amountValue)}
+            </Text>
+            {section === 'unpaid' && (
+              <Text style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>
+                Due {formatCurrency(item.totalAmount)}
+              </Text>
+            )}
+          </View>
+        </View>
+
+        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+          <View style={{
+            backgroundColor: `${getStatusBadgeColor(item.status)}18`,
+            borderRadius: 999,
+            paddingHorizontal: 10,
+            paddingVertical: 5,
+          }}>
+            <Text style={{ fontSize: 11, fontWeight: '700', color: getStatusBadgeColor(item.status) }}>
+              {getStatusLabel(item.status)}
+            </Text>
+          </View>
+
+          <View style={{
+            backgroundColor: `${getStatusBadgeColor(item.paymentStatus)}18`,
+            borderRadius: 999,
+            paddingHorizontal: 10,
+            paddingVertical: 5,
+          }}>
+            <Text style={{ fontSize: 11, fontWeight: '700', color: getStatusBadgeColor(item.paymentStatus) }}>
+              {getPaymentStatusDisplay(item.paymentStatus)}
+            </Text>
+          </View>
+        </View>
+      </View>
+    );
+  };
+
   const openExportModal = () => {
     setExportOptions(prev => ({ ...prev, period: selectedPeriod }));
     setExportModalVisible(true);
@@ -302,10 +433,7 @@ const SalesTab = () => {
     const period = selectedPeriod;
 
     try {
-      const currentSales = period === 'today' ? salesData.todaySales :
-        period === 'week' ? salesData.weekSales :
-          period === 'month' ? salesData.monthSales :
-            salesData.totalSales;
+      const currentSales = salesData.cashSales;
 
       const periodLabel = period === 'month' && selectedMonthOption
         ? selectedMonthOption.fullLabel
@@ -366,19 +494,27 @@ const SalesTab = () => {
           <div class="summary-grid">
             <div class="summary-card">
               <div class="value">₱${currentSales.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
-              <div class="label">${periodLabel} Sales</div>
+              <div class="label">${periodLabel} Cash Sales</div>
             </div>
             <div class="summary-card">
-              <div class="value">${salesData.totalOrders}</div>
-              <div class="label">Total Orders</div>
+              <div class="value">â‚±${salesData.creditSales.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
+              <div class="label">Credit Sales</div>
             </div>
             <div class="summary-card">
-              <div class="value">${salesData.completedOrders}</div>
-              <div class="label">Completed</div>
+              <div class="value">â‚±${salesData.receivable.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
+              <div class="label">Receivable</div>
             </div>
             <div class="summary-card">
-              <div class="value">${salesData.pendingOrders}</div>
-              <div class="label">Pending</div>
+              <div class="value">â‚±${salesData.upcomingSales.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
+              <div class="label">Upcoming Sales</div>
+            </div>
+            <div class="summary-card">
+              <div class="value">${salesData.unpaidCount}</div>
+              <div class="label">Orders Not Yet Paid</div>
+            </div>
+            <div class="summary-card">
+              <div class="value">${salesData.upcomingCount}</div>
+              <div class="label">Upcoming Orders</div>
             </div>
           </div>
           ` : ''}
@@ -451,15 +587,12 @@ const SalesTab = () => {
     );
   }
 
-  const currentSales = selectedPeriod === 'today' ? salesData.todaySales :
-    selectedPeriod === 'week' ? salesData.weekSales :
-      selectedPeriod === 'month' ? salesData.monthSales :
-        salesData.totalSales;
+  const currentSales = salesData.cashSales;
   const currentSalesLabel = selectedPeriod === 'all'
-    ? 'Total Sales'
+    ? 'Cash Sales'
     : selectedPeriod === 'month' && selectedMonthOption
-      ? `Sales (${selectedMonthOption.fullLabel})`
-      : `Sales (${selectedPeriod.charAt(0).toUpperCase() + selectedPeriod.slice(1)})`;
+      ? `Cash Sales (${selectedMonthOption.fullLabel})`
+      : `Cash Sales (${selectedPeriod.charAt(0).toUpperCase() + selectedPeriod.slice(1)})`;
 
   return (
     <>
@@ -501,7 +634,7 @@ const SalesTab = () => {
         <View style={styles.filterContainer}>
           <Text style={styles.filterLabel}>Period:</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
-            {['week', 'month', 'all'].map((period) => (
+            {['today', 'week', 'month', 'all'].map((period) => (
               <TouchableOpacity
                 key={period}
                 style={[
@@ -582,6 +715,9 @@ const SalesTab = () => {
             withDots={!isWeb}
           />
         </View>
+        <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 14 }}>
+          Chart and transaction history show recorded completed sales. The cards below show live cash, credit, receivable, and upcoming amounts.
+        </Text>
 
         {/* Sales Summary Cards */}
         <View style={styles.salesSummaryContainer}>
@@ -592,24 +728,132 @@ const SalesTab = () => {
           </View>
 
           <View style={styles.salesCard}>
-            <Ionicons name="cart" size={32} color="#2196F3" />
-            <Text style={styles.salesCardValue}>{salesData.totalOrders}</Text>
-            <Text style={styles.salesCardLabel}>Total Orders</Text>
+            <Ionicons name="card" size={32} color="#2563EB" />
+            <Text style={styles.salesCardValue}>{formatCurrency(salesData.creditSales)}</Text>
+            <Text style={styles.salesCardLabel}>Credit Sales</Text>
           </View>
         </View>
 
         <View style={styles.salesSummaryContainer}>
           <View style={styles.salesCard}>
-            <Ionicons name="checkmark-circle" size={32} color="#4CAF50" />
-            <Text style={styles.salesCardValue}>{salesData.completedOrders}</Text>
-            <Text style={styles.salesCardLabel}>Completed</Text>
+            <Ionicons name="wallet" size={32} color="#DC2626" />
+            <Text style={styles.salesCardValue}>{formatCurrency(salesData.receivable)}</Text>
+            <Text style={styles.salesCardLabel}>Receivable</Text>
           </View>
 
           <View style={styles.salesCard}>
-            <Ionicons name="time" size={32} color="#FF9800" />
-            <Text style={styles.salesCardValue}>{salesData.pendingOrders}</Text>
-            <Text style={styles.salesCardLabel}>Pending</Text>
+            <Ionicons name="calendar" size={32} color="#F59E0B" />
+            <Text style={styles.salesCardValue}>{formatCurrency(salesData.upcomingSales)}</Text>
+            <Text style={styles.salesCardLabel}>Upcoming Sales</Text>
           </View>
+        </View>
+
+        <View style={styles.salesSummaryContainer}>
+          <View style={styles.salesCard}>
+            <Ionicons name="alert-circle" size={32} color="#DC2626" />
+            <Text style={styles.salesCardValue}>{salesData.unpaidCount}</Text>
+            <Text style={styles.salesCardLabel}>Orders Not Yet Paid</Text>
+          </View>
+
+          <View style={styles.salesCard}>
+            <Ionicons name="time" size={32} color="#0891B2" />
+            <Text style={styles.salesCardValue}>{salesData.upcomingCount}</Text>
+            <Text style={styles.salesCardLabel}>Upcoming Orders</Text>
+          </View>
+        </View>
+
+        <View style={{
+          backgroundColor: '#fff',
+          borderRadius: 14,
+          padding: 15,
+          marginBottom: 16,
+          elevation: 1,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.05,
+          shadowRadius: 2,
+        }}>
+          <Text style={{ fontSize: 17, fontWeight: '700', color: '#333', marginBottom: 14 }}>
+            Sales Snapshot
+          </Text>
+          <View style={styles.statRow}>
+            <Text style={styles.statLabel}>Total records</Text>
+            <Text style={styles.statValue}>{salesData.totalOrders}</Text>
+          </View>
+          <View style={styles.statRow}>
+            <Text style={styles.statLabel}>Completed</Text>
+            <Text style={styles.statValue}>{salesData.completedOrders}</Text>
+          </View>
+          <View style={styles.statRow}>
+            <Text style={styles.statLabel}>Active / pending</Text>
+            <Text style={styles.statValue}>{salesData.pendingOrders}</Text>
+          </View>
+          <View style={styles.statRowTotal}>
+            <Text style={styles.statLabelTotal}>Receivable vs cash</Text>
+            <Text style={styles.statValueTotal}>
+              {formatCurrency(salesData.receivable)} / {formatCurrency(currentSales)}
+            </Text>
+          </View>
+        </View>
+
+        <View style={{ marginTop: 4, marginBottom: 16 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
+            <Ionicons name="wallet-outline" size={22} color="#DC2626" />
+            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#333' }}>Orders Not Yet Paid</Text>
+            <View style={{
+              backgroundColor: '#FEE2E2',
+              borderRadius: 10,
+              paddingHorizontal: 8,
+              paddingVertical: 2,
+              marginLeft: 'auto',
+            }}>
+              <Text style={{ fontSize: 12, color: '#DC2626', fontWeight: '700' }}>
+                {salesData.unpaidCount}
+              </Text>
+            </View>
+          </View>
+
+          {salesData.outstandingItems.length === 0 ? (
+            <View style={{
+              backgroundColor: '#fff', borderRadius: 12, padding: 25,
+              alignItems: 'center', elevation: 1,
+            }}>
+              <Ionicons name="checkmark-done-circle-outline" size={40} color="#ddd" />
+              <Text style={{ color: '#999', marginTop: 8 }}>No unpaid orders for this filter</Text>
+            </View>
+          ) : (
+            salesData.outstandingItems.map((item) => renderPipelineItem(item, 'unpaid'))
+          )}
+        </View>
+
+        <View style={{ marginTop: 4, marginBottom: 16 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
+            <Ionicons name="calendar-outline" size={22} color="#F59E0B" />
+            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#333' }}>Upcoming Sales</Text>
+            <View style={{
+              backgroundColor: '#FEF3C7',
+              borderRadius: 10,
+              paddingHorizontal: 8,
+              paddingVertical: 2,
+              marginLeft: 'auto',
+            }}>
+              <Text style={{ fontSize: 12, color: '#B45309', fontWeight: '700' }}>
+                {salesData.upcomingCount}
+              </Text>
+            </View>
+          </View>
+
+          {salesData.upcomingItems.length === 0 ? (
+            <View style={{
+              backgroundColor: '#fff', borderRadius: 12, padding: 25,
+              alignItems: 'center', elevation: 1,
+            }}>
+              <Ionicons name="calendar-clear-outline" size={40} color="#ddd" />
+              <Text style={{ color: '#999', marginTop: 8 }}>No upcoming sales for this filter</Text>
+            </View>
+          ) : (
+            salesData.upcomingItems.map((item) => renderPipelineItem(item, 'upcoming'))
+          )}
         </View>
 
         {/* ========== Best Selling Products ========== */}
