@@ -345,11 +345,6 @@ const Signup = () => {
                     ...prev,
                     email: emailAvailability.message || 'This email is already registered.',
                 }));
-                setNotice({
-                    type: 'danger',
-                    message: emailAvailability.message || 'An account with this email address already exists. Please use a different email address or log in instead.',
-                });
-                scrollNoticeIntoView();
                 return;
             }
 
@@ -377,11 +372,10 @@ const Signup = () => {
                 data.user.identities.length === 0;
 
             if (isExistingUserResponse) {
-                setNotice({
-                    type: 'danger',
-                    message: 'An account with this email address already exists. Please use a different email address or log in instead.',
-                });
-                scrollNoticeIntoView();
+                setFieldErrors((prev) => ({
+                    ...prev,
+                    email: 'An account with this email address already exists. Please use a different email address or log in instead.',
+                }));
                 return;
             }
 
