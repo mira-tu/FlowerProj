@@ -436,6 +436,48 @@ export const secureSignIn = async (email, password) => {
     };
 };
 
+export const checkSignupEmailAvailability = async (email) => {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+
+    if (!normalizedEmail) {
+        return {
+            data: null,
+            error: new Error('Email is required to create an account.'),
+        };
+    }
+
+    const { data, error } = await supabase.functions.invoke('check-signup-email', {
+        body: {
+            email: normalizedEmail,
+        },
+    });
+
+    if (!error) {
+        return { data, error: null };
+    }
+
+    if (error?.context && typeof error.context.json === 'function') {
+        try {
+            const errorPayload = await error.context.json();
+            const nextError = new Error(errorPayload?.message || error.message || 'Unable to check this email right now.');
+            nextError.status = error.context.status;
+            nextError.code = errorPayload?.status;
+
+            return {
+                data: null,
+                error: nextError,
+            };
+        } catch {
+            // Fall through to the original error below.
+        }
+    }
+
+    return {
+        data: null,
+        error,
+    };
+};
+
 export const requestPasswordReset = async (email) => {
     const normalizedEmail = String(email || '').trim().toLowerCase();
 

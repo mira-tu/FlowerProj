@@ -13,7 +13,10 @@ import {
     hasCompleteAddress,
     isValidContactNumber,
 } from '../utils/customerProfile';
-import { getEmailVerificationRedirectUrl } from '../utils/emailVerification';
+import {
+    checkSignupEmailAvailability,
+    getEmailVerificationRedirectUrl,
+} from '../utils/emailVerification';
 import {
     getPasswordStrength,
     getWeakPasswordMessage,
@@ -306,12 +309,13 @@ const Signup = () => {
 
         setLoading(true);
         let createdSession = false;
+        const normalizedEmail = String(formData.email || '').trim().toLowerCase();
 
         const profilePayload = buildCustomerProfilePayload({
             firstName: formData.firstName,
             middleName: formData.middleName,
             lastName: formData.lastName,
-            email: formData.email,
+            email: normalizedEmail,
             contactNumber: formData.contactNumber,
             birthday: formData.birthday,
             gender: formData.gender,
@@ -330,6 +334,25 @@ const Signup = () => {
         };
 
         try {
+            const { data: emailAvailability, error: emailAvailabilityError } = await checkSignupEmailAvailability(normalizedEmail);
+
+            if (emailAvailabilityError) {
+                throw emailAvailabilityError;
+            }
+
+            if (emailAvailability?.available === false) {
+                setFieldErrors((prev) => ({
+                    ...prev,
+                    email: emailAvailability.message || 'This email is already registered.',
+                }));
+                setNotice({
+                    type: 'danger',
+                    message: emailAvailability.message || 'An account with this email address already exists. Please use a different email address or log in instead.',
+                });
+                scrollNoticeIntoView();
+                return;
+            }
+
             const { data, error: signupError } = await supabase.auth.signUp({
                 email: profilePayload.email,
                 password: formData.password,

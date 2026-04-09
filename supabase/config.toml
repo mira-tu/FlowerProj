@@ -31,6 +31,9 @@ verify_jwt = false
 [functions.request-password-reset]
 verify_jwt = false
 
+[functions.check-signup-email]
+verify_jwt = false
+
 [functions.secure-login]
 verify_jwt = false
 
