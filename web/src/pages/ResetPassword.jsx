@@ -388,18 +388,24 @@ const ResetPassword = () => {
                                         <div className="auth-verification-checklist-item">This page only works after a valid reset email has created a secure recovery session.</div>
                                     </div>
 
-                                    <form onSubmit={handleSubmit}>
+                                    <form onSubmit={handleSubmit} autoComplete="off">
                                         <div className="form-floating mb-3">
                                             <input
                                                 type="password"
                                                 className="form-control"
                                                 id="newPassword"
+                                                name="resetPassword"
                                                 placeholder="New password"
                                                 value={password}
                                                 onChange={(event) => setPassword(event.target.value)}
                                                 required
                                                 disabled={loading}
-                                                autoComplete="new-password"
+                                                autoComplete="off"
+                                                autoCorrect="off"
+                                                autoCapitalize="none"
+                                                spellCheck={false}
+                                                data-lpignore="true"
+                                                data-1p-ignore="true"
                                             />
                                             <label htmlFor="newPassword">New password</label>
                                         </div>
@@ -408,12 +414,18 @@ const ResetPassword = () => {
                                                 type="password"
                                                 className="form-control"
                                                 id="confirmPassword"
+                                                name="resetPasswordConfirm"
                                                 placeholder="Confirm password"
                                                 value={confirmPassword}
                                                 onChange={(event) => setConfirmPassword(event.target.value)}
                                                 required
                                                 disabled={loading}
-                                                autoComplete="new-password"
+                                                autoComplete="off"
+                                                autoCorrect="off"
+                                                autoCapitalize="none"
+                                                spellCheck={false}
+                                                data-lpignore="true"
+                                                data-1p-ignore="true"
                                             />
                                             <label htmlFor="confirmPassword">Confirm password</label>
                                         </div>
