@@ -380,6 +380,62 @@ export const resendEmailVerification = async (email) => {
     };
 };
 
+export const secureSignIn = async (email, password) => {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const normalizedPassword = String(password || '');
+
+    if (!normalizedEmail || !normalizedPassword) {
+        return {
+            data: null,
+            error: new Error('Email and password are required to sign in.'),
+        };
+    }
+
+    const { data, error } = await supabase.functions.invoke('secure-login', {
+        body: {
+            email: normalizedEmail,
+            password: normalizedPassword,
+        },
+    });
+
+    if (!error) {
+        return { data, error: null };
+    }
+
+    if (error?.context && typeof error.context.json === 'function') {
+        try {
+            const errorPayload = await error.context.json();
+            const nextError = new Error(
+                errorPayload?.message || error.message || 'Unable to sign in right now.',
+            );
+            nextError.status = error.context.status;
+            nextError.code = errorPayload?.status;
+
+            const retryAfterSeconds = Number(errorPayload?.retry_after_seconds);
+
+            if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+                nextError.retryAfterSeconds = Math.ceil(retryAfterSeconds);
+            }
+
+            if (errorPayload?.blocked_until) {
+                nextError.blockedUntil = errorPayload.blocked_until;
+            }
+
+            return {
+                data: null,
+                error: nextError,
+            };
+        } catch {
+            // Fall through to the original error below.
+        }
+    }
+
+    return {
+        data: null,
+        error,
+    };
+};
+
 export const requestPasswordReset = async (email) => {
     const normalizedEmail = String(email || '').trim().toLowerCase();
 
@@ -406,6 +462,17 @@ export const requestPasswordReset = async (email) => {
             const errorPayload = await error.context.json();
             const nextError = new Error(errorPayload?.message || error.message || 'Unable to send a reset link right now.');
             nextError.status = error.context.status;
+            nextError.code = errorPayload?.status;
+
+            const retryAfterSeconds = Number(errorPayload?.retry_after_seconds);
+
+            if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+                nextError.retryAfterSeconds = Math.ceil(retryAfterSeconds);
+            }
+
+            if (errorPayload?.blocked_until) {
+                nextError.blockedUntil = errorPayload.blocked_until;
+            }
 
             return {
                 data: null,

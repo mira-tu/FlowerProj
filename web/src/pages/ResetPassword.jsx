@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabase';
 import {
@@ -11,9 +11,13 @@ import {
     isPasswordRecoveryInProgress,
     markPasswordRecoveryInProgress,
 } from '../utils/emailVerification';
+import {
+    getPasswordStrength,
+    getWeakPasswordMessage,
+    MIN_PASSWORD_LENGTH,
+} from '../utils/signupValidation';
 import '../styles/Auth.css';
 
-const MIN_PASSWORD_LENGTH = 6;
 const RESET_LINK_TIMEOUT_MS = 10000;
 
 const STATUS_COPY = {
@@ -93,6 +97,10 @@ const ResetPassword = () => {
     const [status, setStatus] = useState('checking');
     const [message, setMessage] = useState(STATUS_COPY.checking.message);
     const [error, setError] = useState('');
+    const passwordStrength = useMemo(
+        () => getPasswordStrength(password),
+        [password],
+    );
 
     useEffect(() => {
         let isMounted = true;
@@ -293,6 +301,11 @@ const ResetPassword = () => {
             return;
         }
 
+        if (passwordStrength.isWeak) {
+            setError(getWeakPasswordMessage());
+            return;
+        }
+
         setLoading(true);
 
         try {
@@ -366,7 +379,12 @@ const ResetPassword = () => {
                             {isReady ? (
                                 <>
                                     <div className="auth-verification-checklist">
-                                        <div className="auth-verification-checklist-item">Choose a password that is at least six characters long.</div>
+                                        <div className="auth-verification-checklist-item">
+                                            Choose a password with at least {MIN_PASSWORD_LENGTH} characters.
+                                        </div>
+                                        <div className="auth-verification-checklist-item">
+                                            Combine at least 3 of these: uppercase, lowercase, number, and symbol.
+                                        </div>
                                         <div className="auth-verification-checklist-item">This page only works after a valid reset email has created a secure recovery session.</div>
                                     </div>
 
@@ -399,6 +417,33 @@ const ResetPassword = () => {
                                             />
                                             <label htmlFor="confirmPassword">Confirm password</label>
                                         </div>
+
+                                        {password && (
+                                            <div className="signup-password-strength mb-3" aria-live="polite">
+                                                <div className="signup-password-strength-header">
+                                                    <span className="signup-password-strength-title">Password strength</span>
+                                                    <span className={`signup-password-strength-label signup-password-strength-label-${passwordStrength.tone}`}>
+                                                        {passwordStrength.label}
+                                                    </span>
+                                                </div>
+                                                <div className="signup-password-strength-bars" role="presentation" aria-hidden="true">
+                                                    {[1, 2, 3].map((step) => (
+                                                        <span
+                                                            key={step}
+                                                            className={`signup-password-strength-bar ${
+                                                                passwordStrength.score >= step
+                                                                    ? `signup-password-strength-bar-${passwordStrength.tone}`
+                                                                    : ''
+                                                            }`}
+                                                        />
+                                                    ))}
+                                                </div>
+                                                <p className="signup-password-strength-note mb-0">
+                                                    Use at least {MIN_PASSWORD_LENGTH} characters and combine at least 3 of these:
+                                                    uppercase, lowercase, number, and symbol.
+                                                </p>
+                                            </div>
+                                        )}
 
                                         <button type="submit" className="btn btn-auth" disabled={loading}>
                                             {loading ? 'Updating...' : 'Update password'}

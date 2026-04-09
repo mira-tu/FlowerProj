@@ -10,8 +10,13 @@ import {
     ensureVerifiedUserSession,
     requestPasswordReset,
     resendEmailVerification,
+    secureSignIn,
 } from '../utils/emailVerification';
 import '../styles/Auth.css';
+
+const DEFAULT_LOGIN_RETRY_SECONDS = 30;
+const DEFAULT_RESET_RETRY_SECONDS = 60;
+const DEFAULT_RESET_DAILY_LIMIT_SECONDS = 24 * 60 * 60;
 
 const getFriendlyVerificationError = (error) => {
     const message = String(error?.message || '').toLowerCase();
@@ -24,10 +29,6 @@ const getFriendlyVerificationError = (error) => {
         return 'Please wait a moment before requesting another verification email.';
     }
 
-    if (message.includes('already') && (message.includes('confirmed') || message.includes('verified'))) {
-        return 'Your email is already verified. You may now log in.';
-    }
-
     return error.message || 'Unable to resend the verification email. Please try again.';
 };
 
@@ -38,15 +39,33 @@ const getFriendlyResetRequestError = (error) => {
         return 'Unable to send a reset link right now. Please try again later.';
     }
 
-    if (message.includes('verify your email')) {
-        return 'Please verify your email before requesting a password reset link.';
-    }
-
     if (message.includes('rate limit') || message.includes('too many requests')) {
         return 'Please wait a moment before requesting another reset email.';
     }
 
     return 'Unable to send a reset link right now. Please try again later.';
+};
+
+const formatLoginRetryMessage = (secondsRemaining) => (
+    `Too many login attempts. Try again in ${secondsRemaining} second${secondsRemaining === 1 ? '' : 's'}.`
+);
+
+const formatCompactRetryDuration = (secondsRemaining) => {
+    if (secondsRemaining < 60) {
+        return `${secondsRemaining}s`;
+    }
+
+    if (secondsRemaining < 3600) {
+        const minutes = Math.floor(secondsRemaining / 60);
+        const seconds = secondsRemaining % 60;
+
+        return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+    }
+
+    const hours = Math.floor(secondsRemaining / 3600);
+    const minutes = Math.floor((secondsRemaining % 3600) / 60);
+
+    return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
 };
 
 const Login = ({ onLogin }) => {
@@ -55,17 +74,30 @@ const Login = ({ onLogin }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
+    const [loginRetryAfter, setLoginRetryAfter] = useState(0);
     const [loading, setLoading] = useState(false);
     const [showReset, setShowReset] = useState(false);
     const [resetEmail, setResetEmail] = useState('');
     const [resetLoading, setResetLoading] = useState(false);
     const [resetMessage, setResetMessage] = useState('');
     const [resetError, setResetError] = useState('');
+    const [resetRetryAfter, setResetRetryAfter] = useState(0);
+    const [resetRetryMode, setResetRetryMode] = useState('');
+    const [resetRetryEmail, setResetRetryEmail] = useState('');
     const [verificationEmail, setVerificationEmail] = useState('');
     const [verificationMessage, setVerificationMessage] = useState('');
     const [verificationError, setVerificationError] = useState('');
     const [verificationLoading, setVerificationLoading] = useState(false);
     const [showVerificationHelp, setShowVerificationHelp] = useState(false);
+    const isLoginLocked = loginRetryAfter > 0;
+    const hasResetRetryTimer = resetRetryAfter > 0;
+    const normalizedResetEmail = String(resetEmail || '').trim().toLowerCase();
+    const isResetLocked = resetRetryAfter > 0
+        && Boolean(normalizedResetEmail)
+        && normalizedResetEmail === resetRetryEmail;
+    const loginErrorMessage = isLoginLocked
+        ? formatLoginRetryMessage(loginRetryAfter)
+        : error;
     useEffect(() => {
         const params = new URLSearchParams(location.search);
         const verificationState = params.get('verification');
@@ -141,6 +173,62 @@ const Login = ({ onLogin }) => {
         };
     }, [resetError]);
 
+    useEffect(() => {
+        if (!isLoginLocked) {
+            return undefined;
+        }
+
+        const intervalId = window.setInterval(() => {
+            setLoginRetryAfter((previousSeconds) => {
+                if (previousSeconds <= 1) {
+                    window.clearInterval(intervalId);
+                    return 0;
+                }
+
+                return previousSeconds - 1;
+            });
+        }, 1000);
+
+        return () => {
+            window.clearInterval(intervalId);
+        };
+    }, [isLoginLocked]);
+
+    useEffect(() => {
+        if (!hasResetRetryTimer) {
+            return undefined;
+        }
+
+        const intervalId = window.setInterval(() => {
+            setResetRetryAfter((previousSeconds) => {
+                if (previousSeconds <= 1) {
+                    window.clearInterval(intervalId);
+                    return 0;
+                }
+
+                return previousSeconds - 1;
+            });
+        }, 1000);
+
+        return () => {
+            window.clearInterval(intervalId);
+        };
+    }, [hasResetRetryTimer]);
+
+    useEffect(() => {
+        if (resetRetryAfter > 0) {
+            return;
+        }
+
+        if (resetRetryMode) {
+            setResetRetryMode('');
+        }
+
+        if (resetRetryEmail) {
+            setResetRetryEmail('');
+        }
+    }, [resetRetryAfter, resetRetryMode, resetRetryEmail]);
+
     const handleResendVerification = async () => {
         const targetEmail = (verificationEmail || email).trim().toLowerCase();
 
@@ -156,23 +244,17 @@ const Login = ({ onLogin }) => {
         setVerificationLoading(true);
 
         try {
-            const { data, error: resendError } = await resendEmailVerification(targetEmail);
+            const { error: resendError } = await resendEmailVerification(targetEmail);
 
             if (resendError) {
                 throw resendError;
             }
 
-            setVerificationMessage(data?.message || 'We sent a verification link to your email address.');
+            setVerificationMessage('If an eligible account exists for that email, a verification link has been sent.');
             setShowVerificationHelp(true);
         } catch (resendError) {
             console.error('Verification resend error:', resendError);
             const friendlyMessage = getFriendlyVerificationError(resendError);
-
-            if (friendlyMessage.toLowerCase().includes('already verified')) {
-                setVerificationMessage(friendlyMessage);
-                setShowVerificationHelp(true);
-                return;
-            }
 
             setVerificationError(friendlyMessage);
         } finally {
@@ -182,63 +264,90 @@ const Login = ({ onLogin }) => {
 
     const handleLogin = async (event) => {
         event.preventDefault();
+
+        if (isLoginLocked) {
+            return;
+        }
+
         setError('');
         setVerificationMessage('');
         setVerificationError('');
         setLoading(true);
 
         try {
-            const { data, error: signInError } = await supabase.auth.signInWithPassword({
+            const { data: loginData, error: signInError } = await secureSignIn(
                 email,
                 password,
-            });
+            );
 
-            if (signInError || !data?.user) {
+            if (signInError) {
                 console.error('Login error:', signInError || 'Unknown authentication error');
+                const message = String(signInError?.message || '').toLowerCase();
 
-                if (signInError?.message?.toLowerCase().includes('email not confirmed')) {
-                    setShowVerificationHelp(true);
-                    setVerificationEmail(email.trim().toLowerCase());
-                    setError('Please verify your email before logging in.');
+                if (signInError?.status === 429 || message.includes('too many login attempts')) {
+                    const retryAfterSeconds = Number(signInError?.retryAfterSeconds);
+
+                    setLoginRetryAfter(
+                        Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+                            ? Math.ceil(retryAfterSeconds)
+                            : DEFAULT_LOGIN_RETRY_SECONDS,
+                    );
+                    setError('');
                 } else {
+                    setLoginRetryAfter(0);
                     setError('Invalid email or password');
                 }
 
                 return;
             }
 
-            const verificationState = await ensureVerifiedUserSession(data.user);
+            const sessionPayload = loginData?.session;
+
+            if (!sessionPayload?.access_token || !sessionPayload?.refresh_token) {
+                throw new Error('Unable to establish your session. Please try again.');
+            }
+
+            const { data: sessionData, error: setSessionError } = await supabase.auth.setSession({
+                access_token: sessionPayload.access_token,
+                refresh_token: sessionPayload.refresh_token,
+            });
+
+            if (setSessionError || !sessionData?.session?.user) {
+                throw setSessionError || new Error('Unable to establish your session. Please try again.');
+            }
+
+            const authUser = sessionData.session.user;
+            const verificationState = await ensureVerifiedUserSession(authUser);
 
             if (verificationState.shouldSignOut) {
                 await supabase.auth.signOut();
-                setShowVerificationHelp(true);
-                setVerificationEmail(data.user.email || email.trim().toLowerCase());
-                setError('Please verify your email before logging in.');
+                setLoginRetryAfter(0);
+                setError('Invalid email or password');
                 return;
             }
 
+            setLoginRetryAfter(0);
             navigate('/');
 
             if (typeof onLogin === 'function') {
                 onLogin();
             }
 
-            const { user } = data;
-            const nameParts = getUserNameParts({}, user);
+            const nameParts = getUserNameParts({}, authUser);
             const profilePayload = buildCustomerProfilePayload({
                 firstName: nameParts.firstName,
                 middleName: nameParts.middleName,
                 lastName: nameParts.lastName,
-                email: user.email,
-                contactNumber: getUserContactNumber({}, user),
-                birthday: user.user_metadata?.birthdate || '',
-                gender: user.user_metadata?.gender || '',
+                email: authUser.email,
+                contactNumber: getUserContactNumber({}, authUser),
+                birthday: authUser.user_metadata?.birthdate || '',
+                gender: authUser.user_metadata?.gender || '',
             });
 
             supabase
                 .from('users')
                 .upsert({
-                    id: user.id,
+                    id: authUser.id,
                     ...profilePayload,
                 }, { onConflict: 'id' })
                 .then(({ error: upsertError }) => {
@@ -251,6 +360,7 @@ const Login = ({ onLogin }) => {
                 });
         } catch (loginException) {
             console.error('Unexpected login error:', loginException);
+            setLoginRetryAfter(0);
             setError('Invalid email or password');
         } finally {
             setLoading(false);
@@ -259,22 +369,57 @@ const Login = ({ onLogin }) => {
 
     const handleResetPassword = async (event) => {
         event.preventDefault();
+
+        if (isResetLocked) {
+            return;
+        }
+
         setResetMessage('');
         setResetError('');
         setResetLoading(true);
 
         try {
-            const normalizedResetEmail = String(resetEmail || '').trim().toLowerCase();
             const { error: resetPasswordError } = await requestPasswordReset(normalizedResetEmail);
 
             if (resetPasswordError) {
                 throw resetPasswordError;
             }
 
+            setResetRetryEmail(normalizedResetEmail);
+            setResetRetryMode('cooldown');
+            setResetRetryAfter(DEFAULT_RESET_RETRY_SECONDS);
             setResetMessage('If an account exists for that email, a password reset link has been sent.');
         } catch (resetPasswordException) {
             console.error('Password reset error:', resetPasswordException);
-            setResetError(getFriendlyResetRequestError(resetPasswordException));
+            const message = String(resetPasswordException?.message || '').toLowerCase();
+            const retryAfterSeconds = Number(resetPasswordException?.retryAfterSeconds);
+            const resetRateLimitMode = resetPasswordException?.code === 'daily_limit'
+                ? 'daily_limit'
+                : 'cooldown';
+
+            if (
+                resetPasswordException?.status === 429
+                || resetPasswordException?.code === 'cooldown'
+                || resetPasswordException?.code === 'daily_limit'
+                || message.includes('rate limit')
+                || message.includes('too many requests')
+            ) {
+                setResetRetryEmail(normalizedResetEmail);
+                setResetRetryMode(resetRateLimitMode);
+                setResetRetryAfter(
+                    Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+                        ? Math.ceil(retryAfterSeconds)
+                        : resetRateLimitMode === 'daily_limit'
+                            ? DEFAULT_RESET_DAILY_LIMIT_SECONDS
+                            : DEFAULT_RESET_RETRY_SECONDS,
+                );
+                setResetError('');
+            } else {
+                setResetRetryEmail('');
+                setResetRetryMode('');
+                setResetRetryAfter(0);
+                setResetError(getFriendlyResetRequestError(resetPasswordException));
+            }
         } finally {
             setResetLoading(false);
         }
@@ -323,9 +468,13 @@ const Login = ({ onLogin }) => {
                                 <button
                                     type="submit"
                                     className="btn btn-auth"
-                                    disabled={resetLoading}
+                                    disabled={resetLoading || isResetLocked}
                                 >
-                                    {resetLoading ? 'Sending...' : 'Send reset link'}
+                                    {resetLoading
+                                        ? 'Sending...'
+                                        : isResetLocked
+                                            ? `Try again in ${formatCompactRetryDuration(resetRetryAfter)}`
+                                            : 'Send reset link'}
                                 </button>
                             </form>
 
@@ -347,9 +496,9 @@ const Login = ({ onLogin }) => {
                             <p className="auth-subtitle">Enter your details to access your account.</p>
 
                             <form onSubmit={handleLogin}>
-                                {error && (
+                                {loginErrorMessage && (
                                     <div className="alert alert-danger" role="alert">
-                                        {error}
+                                        {loginErrorMessage}
                                     </div>
                                 )}
                                 {verificationMessage && (
@@ -421,12 +570,14 @@ const Login = ({ onLogin }) => {
                                     </div>
                                 )}
 
-                                <button type="submit" className="btn btn-auth" disabled={loading}>
+                                <button type="submit" className="btn btn-auth" disabled={loading || isLoginLocked}>
                                     {loading ? (
                                         <>
                                             <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
                                             Please wait...
                                         </>
+                                    ) : isLoginLocked ? (
+                                        `Try again in ${loginRetryAfter}s`
                                     ) : (
                                         'Sign In'
                                     )}

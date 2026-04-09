@@ -340,6 +340,93 @@
     margin-top: 0;
 }
 
+.signup-password-strength {
+    border: 1px solid #f1d7df;
+    border-radius: 14px;
+    padding: 14px 16px;
+    background: #fff8fb;
+}
+
+.signup-password-strength-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.signup-password-strength-title {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: #3f454b;
+}
+
+.signup-password-strength-label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 68px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 0.76rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+.signup-password-strength-label-neutral {
+    background: #f3edf0;
+    color: #6b7280;
+}
+
+.signup-password-strength-label-weak {
+    background: #fde4e7;
+    color: #b42318;
+}
+
+.signup-password-strength-label-fair {
+    background: #fff0d6;
+    color: #b56a00;
+}
+
+.signup-password-strength-label-strong {
+    background: #dff7e6;
+    color: #157347;
+}
+
+.signup-password-strength-bars {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.signup-password-strength-bar {
+    height: 8px;
+    border-radius: 999px;
+    background: #eadfe4;
+    transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+.signup-password-strength-bar-weak {
+    background: #e35d6a;
+}
+
+.signup-password-strength-bar-fair {
+    background: #e6a23c;
+}
+
+.signup-password-strength-bar-strong {
+    background: #2f9e62;
+}
+
+.signup-password-strength-note {
+    margin: 0;
+    font-size: 0.84rem;
+    line-height: 1.5;
+    color: #6a7178;
+}
+
 .modal-overlay {
     position: fixed;
     inset: 0;
@@ -669,6 +756,11 @@
 
     .signup-address-panel {
         padding: 16px;
+    }
+
+    .signup-password-strength-header {
+        align-items: flex-start;
+        flex-direction: column;
     }
 }
 

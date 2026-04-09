@@ -14,9 +14,17 @@ import {
     isValidContactNumber,
 } from '../utils/customerProfile';
 import { getEmailVerificationRedirectUrl } from '../utils/emailVerification';
+import {
+    getPasswordStrength,
+    getWeakPasswordMessage,
+    isAtLeastAgeFromBirthdayParts,
+    MIN_PASSWORD_LENGTH,
+    MIN_SIGNUP_AGE,
+    sanitizeNameInput,
+    validateNameField,
+} from '../utils/signupValidation';
 import '../styles/Auth.css';
 
-const MIN_SIGNUP_AGE = 13;
 const EARLIEST_BIRTH_YEAR = 1900;
 const BIRTHDAY_INPUT_LENGTHS = {
     birthMonth: 2,
@@ -37,6 +45,7 @@ const MONTH_OPTIONS = [
     { value: '11', label: 'November' },
     { value: '12', label: 'December' },
 ];
+const NAME_FIELDS = new Set(['firstName', 'middleName', 'lastName']);
 
 const sanitizeBirthdayInput = (part, value) => String(value || '')
     .replace(/\D/g, '')
@@ -106,19 +115,7 @@ const Signup = () => {
     const [error, setError] = useState('');
     const [notice, setNotice] = useState({ type: '', message: '' });
     const [loading, setLoading] = useState(false);
-    const latestAllowedBirthday = useMemo(() => {
-        const today = new Date();
-        const minimumBirthday = new Date(today.getFullYear() - 13, today.getMonth(), today.getDate());
-        const year = minimumBirthday.getFullYear();
-        const month = String(minimumBirthday.getMonth() + 1).padStart(2, '0');
-        const day = String(minimumBirthday.getDate()).padStart(2, '0');
-        return {
-            year: String(year),
-            month,
-            day,
-            iso: `${year}-${month}-${day}`,
-        };
-    }, []);
+    const [currentCalendarYear, setCurrentCalendarYear] = useState(() => new Date().getFullYear());
     const signupGenderOptions = useMemo(
         () => GENDER_OPTIONS.filter((option) => option.value !== 'Non-binary'),
         [],
@@ -132,13 +129,15 @@ const Signup = () => {
         });
     }, [formData.birthMonth, formData.birthYear]);
     const birthdayYearOptions = useMemo(() => {
-        const latestYear = Number(latestAllowedBirthday.year);
-
-        return Array.from({ length: latestYear - EARLIEST_BIRTH_YEAR + 1 }, (_, index) => {
-            const value = String(latestYear - index);
+        return Array.from({ length: currentCalendarYear - EARLIEST_BIRTH_YEAR + 1 }, (_, index) => {
+            const value = String(currentCalendarYear - index);
             return { value, label: value };
         });
-    }, [latestAllowedBirthday.year]);
+    }, [currentCalendarYear]);
+    const passwordStrength = useMemo(
+        () => getPasswordStrength(formData.password),
+        [formData.password],
+    );
     const noticeRef = useRef(null);
 
     const scrollNoticeIntoView = () => {
@@ -164,12 +163,30 @@ const Signup = () => {
         };
     }, [notice.message]);
 
+    useEffect(() => {
+        const intervalId = window.setInterval(() => {
+            const nextYear = new Date().getFullYear();
+            setCurrentCalendarYear((previousYear) => (
+                previousYear === nextYear ? previousYear : nextYear
+            ));
+        }, 60 * 60 * 1000);
+
+        return () => {
+            window.clearInterval(intervalId);
+        };
+    }, []);
+
     const handleChange = (event) => {
         const { name, value } = event.target;
+        const nextValue = name === 'contactNumber'
+            ? formatPhoneNumber(value)
+            : NAME_FIELDS.has(name)
+                ? sanitizeNameInput(value)
+                : value;
 
         setFormData((prev) => ({
             ...prev,
-            [name]: name === 'contactNumber' ? formatPhoneNumber(value) : value,
+            [name]: nextValue,
         }));
 
         setFieldErrors((prev) => ({
@@ -187,6 +204,14 @@ const Signup = () => {
                 ...prev,
                 [part]: sanitizedValue,
             };
+
+            if (next.birthMonth) {
+                const totalDaysInMonth = getDaysInMonth(next.birthYear, next.birthMonth);
+
+                if (next.birthDay && Number(next.birthDay) > totalDaysInMonth) {
+                    next.birthDay = '';
+                }
+            }
 
             next.birthday = buildIsoBirthday(next.birthYear, next.birthMonth, next.birthDay);
             return next;
@@ -216,9 +241,13 @@ const Signup = () => {
 
     const validateForm = () => {
         const nextErrors = {};
+        const firstNameError = validateNameField(formData.firstName, 'First name', { required: true });
+        const middleNameError = validateNameField(formData.middleName, 'Middle name');
+        const lastNameError = validateNameField(formData.lastName, 'Last name', { required: true });
 
-        if (!formData.firstName.trim()) nextErrors.firstName = 'First name is required.';
-        if (!formData.lastName.trim()) nextErrors.lastName = 'Last name is required.';
+        if (firstNameError) nextErrors.firstName = firstNameError;
+        if (middleNameError) nextErrors.middleName = middleNameError;
+        if (lastNameError) nextErrors.lastName = lastNameError;
         if (!formData.email.trim()) nextErrors.email = 'Email is required.';
         if (!formData.contactNumber.trim()) nextErrors.contactNumber = 'Contact number is required.';
         if (!formData.birthMonth || !formData.birthDay || !formData.birthYear) nextErrors.birthday = 'Birthday is required.';
@@ -226,8 +255,10 @@ const Signup = () => {
         if (!formData.password) nextErrors.password = 'Password is required.';
         if (!formData.confirmPassword) nextErrors.confirmPassword = 'Please confirm your password.';
 
-        if (formData.password && formData.password.length < 6) {
-            nextErrors.password = 'Password must be at least 6 characters.';
+        if (formData.password && formData.password.length < MIN_PASSWORD_LENGTH) {
+            nextErrors.password = `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+        } else if (formData.password && passwordStrength.isWeak) {
+            nextErrors.password = getWeakPasswordMessage();
         }
 
         if (formData.password && formData.confirmPassword && formData.password !== formData.confirmPassword) {
@@ -242,8 +273,16 @@ const Signup = () => {
             nextErrors.birthday = 'Please enter a valid birth date.';
         }
 
-        if (!nextErrors.birthday && formData.birthday > latestAllowedBirthday.iso) {
-            nextErrors.birthday = 'You must be at least 13 years old to create an account.';
+        if (
+            !nextErrors.birthday
+            && !isAtLeastAgeFromBirthdayParts(
+                formData.birthYear,
+                formData.birthMonth,
+                formData.birthDay,
+                MIN_SIGNUP_AGE,
+            )
+        ) {
+            nextErrors.birthday = `You must be at least ${MIN_SIGNUP_AGE} years old.`;
         }
 
         if (!hasCompleteAddress(address)) {
@@ -408,7 +447,7 @@ const Signup = () => {
                                 <div className="form-floating">
                                     <input
                                         type="text"
-                                        className="form-control"
+                                        className={`form-control ${fieldErrors.middleName ? 'is-invalid' : ''}`}
                                         id="floatingMiddleName"
                                         name="middleName"
                                         placeholder="Middle Name"
@@ -417,6 +456,7 @@ const Signup = () => {
                                         disabled={loading}
                                     />
                                     <label htmlFor="floatingMiddleName">Middle Name (Optional)</label>
+                                    {fieldErrors.middleName && <div className="invalid-feedback">{fieldErrors.middleName}</div>}
                                 </div>
                             </div>
                             <div className="col-lg-4 col-md-6">
@@ -613,6 +653,33 @@ const Signup = () => {
                                 </div>
                             </div>
                         </div>
+
+                        {formData.password && (
+                            <div className="signup-password-strength mb-3" aria-live="polite">
+                                <div className="signup-password-strength-header">
+                                    <span className="signup-password-strength-title">Password strength</span>
+                                    <span className={`signup-password-strength-label signup-password-strength-label-${passwordStrength.tone}`}>
+                                        {passwordStrength.label}
+                                    </span>
+                                </div>
+                                <div className="signup-password-strength-bars" role="presentation" aria-hidden="true">
+                                    {[1, 2, 3].map((step) => (
+                                        <span
+                                            key={step}
+                                            className={`signup-password-strength-bar ${
+                                                passwordStrength.score >= step
+                                                    ? `signup-password-strength-bar-${passwordStrength.tone}`
+                                                    : ''
+                                            }`}
+                                        />
+                                    ))}
+                                </div>
+                                <p className="signup-password-strength-note mb-0">
+                                    Use at least {MIN_PASSWORD_LENGTH} characters and combine at least 3 of these:
+                                    uppercase, lowercase, number, and symbol.
+                                </p>
+                            </div>
+                        )}
 
                         <div className="form-check mb-4">
                             <input className="form-check-input" type="checkbox" id="terms" required disabled={loading} />
