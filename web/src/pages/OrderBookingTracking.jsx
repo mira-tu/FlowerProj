@@ -800,6 +800,9 @@ const OrderBookingTracking = () => {
         refundRequest,
     }) && ['completed', 'cancelled'].includes(String(request?.status || '').toLowerCase());
     const showRefundGcashForm = String(refundRequest?.status || '').toLowerCase() === 'approved';
+    const shouldShowFinalPrice = Boolean(request)
+        && String(request?.status || '').toLowerCase() !== 'pending'
+        && Number(request?.finalPrice || 0) > 0;
 
     if (loading) {
         return (
@@ -1381,7 +1384,9 @@ const OrderBookingTracking = () => {
                             <div className="mt-4 pt-4 border-top">
                                 <div className="d-flex justify-content-between align-items-center">
                                     <span className="text-muted fw-bold">Final Price</span>
-                                    <span className="fs-5 fw-bold" style={{ color: 'var(--shop-pink)' }}>{request.finalPrice ? `₱${request.finalPrice.toLocaleString()}` : 'For Discussion'}</span>
+                                    <span className="fs-5 fw-bold" style={{ color: 'var(--shop-pink)' }}>
+                                        {shouldShowFinalPrice ? `₱${request.finalPrice.toLocaleString()}` : 'For Discussion'}
+                                    </span>
                                 </div>
                             </div>
                             <div className="mt-4 pt-4 border-top">
