@@ -59,7 +59,7 @@ const getStatusColor = (status) => {
     case 'ready_for_pick_up': return '#6366F1';
     case 'out_for_delivery': return '#8B5CF6';
     case 'processing': return '#2196F3';
-    case 'accepted': return '#0891B2'; // Teal - between pending and processing
+    case 'accepted': return '#0891B2';
     case 'cancelled': return '#f44336';
     case 'pending': return '#FFA726';
     default: return '#999';
@@ -73,10 +73,32 @@ const getPaymentStatusDisplay = (paymentStatus, paymentMethod) => {
   return getStatusLabel(paymentStatus);
 };
 
+const getAdminRoleLabel = (role) => {
+  if (role === 'employee') return 'Employee';
+  if (role === 'admin') return 'Admin';
+  return 'Staff';
+};
+
+const getInitials = (value) => {
+  if (!value) return '?';
+
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return parts
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join('');
+};
+
 export {
   formatTimestamp,
   formatMessageTimestamp,
   getStatusLabel,
   getStatusColor,
   getPaymentStatusDisplay,
+  getAdminRoleLabel,
+  getInitials,
 };

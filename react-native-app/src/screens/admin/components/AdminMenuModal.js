@@ -2,31 +2,43 @@ import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import styles from '../../AdminDashboard.styles';
+import { getAdminRoleLabel, getInitials } from '../adminHelpers';
 
-const getRoleLabel = (role) => {
-  if (role === 'employee') return 'Employee';
-  if (role === 'admin') return 'Admin';
-  return 'Staff';
-};
+const MAIN_MENU_ITEMS = [
+  { tab: 'catalogue', icon: 'flower-outline', label: 'Catalogue', color: '#ec4899' },
+  { tab: 'orders', icon: 'cart-outline', label: 'Orders' },
+  { tab: 'requests', icon: 'calendar-outline', label: 'Requests & Bookings' },
+  { tab: 'stock', icon: 'cube-outline', label: 'Stock' },
+  { tab: 'fees', icon: 'cash-outline', label: 'Delivery Fees' },
+  { tab: 'messaging', icon: 'chatbubbles-outline', label: 'Messaging' },
+  { tab: 'notifications', icon: 'notifications-outline', label: 'Notifications' },
+];
 
-const getInitials = (value) => {
-  if (!value) return '?';
+const ADMIN_MENU_ITEMS = [
+  { tab: 'sales', icon: 'cash-outline', label: 'Sales' },
+  { tab: 'about', icon: 'information-circle-outline', label: 'About', groupStart: true },
+  { tab: 'customOrder', icon: 'color-wand-outline', label: 'Custom Order' },
+  { tab: 'contact', icon: 'call-outline', label: 'Contact' },
+  { tab: 'employees', icon: 'people-outline', label: 'Employees' },
+];
 
-  const parts = value.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 1) {
-    return parts[0].slice(0, 2).toUpperCase();
-  }
-
-  return parts
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join('');
-};
+const MenuItem = ({ icon, label, onPress, color = '#333', textStyle }) => (
+  <TouchableOpacity style={styles.menuItem} onPress={onPress}>
+    <Ionicons name={icon} size={20} color={color} />
+    <Text style={[styles.menuItemText, textStyle]}>{label}</Text>
+  </TouchableOpacity>
+);
 
 const AdminMenuModal = ({ visible, onClose, setActiveTab, currentUser, onLogoutPress }) => {
-  const roleLabel = getRoleLabel(currentUser?.role);
+  const roleLabel = getAdminRoleLabel(currentUser?.role);
   const displayName = currentUser?.name || currentUser?.email || 'Staff User';
   const isEmployee = currentUser?.role === 'employee';
+  const isAdmin = currentUser?.role === 'admin';
+
+  const selectTab = (tab) => {
+    setActiveTab(tab);
+    onClose();
+  };
 
   return (
     <Modal
@@ -83,73 +95,26 @@ const AdminMenuModal = ({ visible, onClose, setActiveTab, currentUser, onLogoutP
 
             <View style={styles.menuDivider} />
 
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('catalogue'); onClose(); }}>
-              <Ionicons name="flower-outline" size={20} color="#ec4899" />
-              <Text style={styles.menuItemText}>Catalogue</Text>
-            </TouchableOpacity>
+            {MAIN_MENU_ITEMS.map((item) => (
+              <MenuItem
+                key={item.tab}
+                icon={item.icon}
+                label={item.label}
+                color={item.color}
+                onPress={() => selectTab(item.tab)}
+              />
+            ))}
 
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('orders'); onClose(); }}>
-              <Ionicons name="cart-outline" size={20} color="#333" />
-              <Text style={styles.menuItemText}>Orders</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('requests'); onClose(); }}>
-              <Ionicons name="calendar-outline" size={20} color="#333" />
-              <Text style={styles.menuItemText}>Requests & Bookings</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('stock'); onClose(); }}>
-              <Ionicons name="cube-outline" size={20} color="#333" />
-              <Text style={styles.menuItemText}>Stock</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('fees'); onClose(); }}>
-              <Ionicons name="cash-outline" size={20} color="#333" />
-              <Text style={styles.menuItemText}>Delivery Fees</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('messaging'); onClose(); }}>
-              <Ionicons name="chatbubbles-outline" size={20} color="#333" />
-              <Text style={styles.menuItemText}>Messaging</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('notifications'); onClose(); }}>
-              <Ionicons name="notifications-outline" size={20} color="#333" />
-              <Text style={styles.menuItemText}>Notifications</Text>
-            </TouchableOpacity>
-
-            {currentUser?.role === 'admin' && (
-              <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('sales'); onClose(); }}>
-                <Ionicons name="cash-outline" size={20} color="#333" />
-                <Text style={styles.menuItemText}>Sales</Text>
-              </TouchableOpacity>
-            )}
-
-            {currentUser?.role === 'admin' && (
-              <>
-                <View style={styles.menuDivider} />
-
-                <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('about'); onClose(); }}>
-                  <Ionicons name="information-circle-outline" size={20} color="#333" />
-                  <Text style={styles.menuItemText}>About</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('customOrder'); onClose(); }}>
-                  <Ionicons name="color-wand-outline" size={20} color="#333" />
-                  <Text style={styles.menuItemText}>Custom Order</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('contact'); onClose(); }}>
-                  <Ionicons name="call-outline" size={20} color="#333" />
-                  <Text style={styles.menuItemText}>Contact</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.menuItem} onPress={() => { setActiveTab('employees'); onClose(); }}>
-                  <Ionicons name="people-outline" size={20} color="#333" />
-                  <Text style={styles.menuItemText}>Employees</Text>
-                </TouchableOpacity>
-              </>
-            )}
+            {isAdmin && ADMIN_MENU_ITEMS.map((item) => (
+              <React.Fragment key={item.tab}>
+                {item.groupStart && <View style={styles.menuDivider} />}
+                <MenuItem
+                  icon={item.icon}
+                  label={item.label}
+                  onPress={() => selectTab(item.tab)}
+                />
+              </React.Fragment>
+            ))}
 
             <View style={styles.menuDivider} />
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -27,6 +27,8 @@ import { groupDeliveryDestinations } from '../../../utils/deliveryDestinations';
 import { filterOrderForAssignedRider, shouldRestrictOrderToAssignedRider } from '../../../utils/riderAssignmentFilter';
 
 const getNormalizedPaymentMethod = (paymentMethod) => String(paymentMethod || '').trim().toLowerCase();
+
+const getOrderActionKey = (action, orderId) => `${action}:${orderId || 'unknown'}`;
 
 const resolveAcceptedOrderPaymentStatus = (order) => {
   const paymentMethod = getNormalizedPaymentMethod(order?.payment_method);
@@ -81,8 +83,10 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [statusFilter, setStatusFilter] = useState('All');
+  const [activeActionKey, setActiveActionKey] = useState(null);
+  const actionLockRef = useRef(null);
+  const ordersLoadInProgressRef = useRef(false);
 
-  // State for Modals
   const [statusModalVisible, setStatusModalVisible] = useState(false);
   const [orderToUpdate, setOrderToUpdate] = useState(null);
   const [selectedStatus, setSelectedStatus] = useState(null);
@@ -98,7 +102,6 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
   const [orderToRecordPayment, setOrderToRecordPayment] = useState(null);
   const [isEditPaymentMode, setIsEditPaymentMode] = useState(false);
 
-  // New state for rider assignment
   const [riders, setRiders] = useState([]);
   const [assignRiderModalVisible, setAssignRiderModalVisible] = useState(false);
   const [selectedRider, setSelectedRider] = useState(null);
@@ -128,6 +131,22 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
     (order) => groupDeliveryDestinations(order?.multi_delivery_destinations || []),
     []
   );
+
+  const runOrderAction = React.useCallback(async (actionKey, action) => {
+    if (actionLockRef.current) {
+      return;
+    }
+
+    actionLockRef.current = actionKey;
+    setActiveActionKey(actionKey);
+
+    try {
+      await action();
+    } finally {
+      actionLockRef.current = null;
+      setActiveActionKey(null);
+    }
+  }, []);
 
   const getInitialStopRiderAssignments = React.useCallback((order) => {
     const groupedDestinations = getGroupedDestinations(order);
@@ -193,7 +212,6 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
       .filter(Boolean);
   }, [currentUser?.id, currentUser?.role, ordersWithRiderDetails]);
 
-  // Filter wrapper
   const filteredOrders = React.useMemo(() => {
     let result = riderScopedOrders;
     if (statusFilter !== 'All') {
@@ -227,8 +245,6 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
 
   const orderStatusFilters = ['All', 'Pending', 'Processing', 'To Deliver', 'To Pick Up', 'Completed', 'Cancelled'];
 
-  const statusOptions = ['pending', 'processing', 'out_for_delivery', 'ready_for_pickup', 'claimed', 'completed', 'cancelled'];
-
   const deliveryStepperStatuses = [
     { id: 'pending', label: 'Pending', description: 'Order received' },
     { id: 'processing', label: 'Processing', description: 'Being prepared' },
@@ -259,8 +275,8 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'orders' },
-          (payload) => {
-            loadOrders();
+          () => {
+            loadOrders({ showLoader: false });
           }
         )
         .subscribe();
@@ -271,8 +287,17 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
     }, [])
   );
 
-  const loadOrders = async () => {
-    setLoading(true);
+  const loadOrders = async ({ showLoader = true } = {}) => {
+    if (ordersLoadInProgressRef.current) {
+      return;
+    }
+
+    ordersLoadInProgressRef.current = true;
+
+    if (showLoader) {
+      setLoading(true);
+    }
+
     try {
       const response = await adminAPI.getAllOrders();
       const sortedOrders = (response.data || []).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
@@ -282,7 +307,10 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
       setOrders([]);
       Alert.alert('Error', 'Failed to load orders');
     } finally {
-      setLoading(false);
+      ordersLoadInProgressRef.current = false;
+      if (showLoader) {
+        setLoading(false);
+      }
     }
   };
 
@@ -291,7 +319,7 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
       const { error } = await supabase.functions.invoke('send-status-email', {
         body: {
           order_number: order.order_number,
-          user_email: order.customer_email || order.users?.email, // Fallback to user relation if needed
+          user_email: order.customer_email || order.users?.email,
           status: status,
           customer_name: order.customer_name,
         },
@@ -317,19 +345,21 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadOrders();
+    await loadOrders({ showLoader: false });
     setRefreshing(false);
   };
 
   const handleAccept = async (orderId) => {
-    // Find the order in the current state
     const orderToAccept = orders.find(order => order.id === orderId);
     if (!orderToAccept) {
       Alert.alert('Error', 'Order not found.');
       return;
     }
 
-    await processAccept(orderToAccept);
+    await runOrderAction(
+      getOrderActionKey('accept', orderId),
+      () => processAccept(orderToAccept)
+    );
   };
 
   const processAccept = async (orderToAccept) => {
@@ -347,10 +377,9 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
         text1: 'Order Accepted',
       });
 
-      // Send email notification
       await sendStatusEmail(orderToAccept, 'processing');
 
-      await loadOrders();
+      await loadOrders({ showLoader: false });
     } catch (error) {
       const errorMessage = error?.message || 'Failed to accept order.';
       console.error('Error accepting order:', error);
@@ -359,6 +388,10 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
   };
 
   const openOrderDeclineModal = (order, action = 'decline') => {
+    if (actionLockRef.current || declineModalVisible) {
+      return;
+    }
+
     setOrderToDecline(order);
     setDeclineAction(action);
     setDeclineReason('');
@@ -385,29 +418,41 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
       return;
     }
 
-    setIsDecliningOrder(true);
-    try {
-      const status = 'cancelled';
-      const options = { cancellationReason: reason };
+    await runOrderAction(getOrderActionKey(declineAction, orderToDecline.id), async () => {
+      setIsDecliningOrder(true);
+      try {
+        const status = 'cancelled';
+        const options = { cancellationReason: reason };
 
-      if (declineAction === 'cancel') {
-        await adminAPI.updateOrderStatus(orderToDecline.id, status, options);
-        Toast.show({ type: 'success', text1: 'Order Cancelled' });
-      } else {
-        await adminAPI.declineOrder(orderToDecline.id, status, options);
-        Toast.show({ type: 'success', text1: 'Order Declined' });
+        if (declineAction === 'cancel') {
+          await adminAPI.updateOrderStatus(orderToDecline.id, status, options);
+          Toast.show({ type: 'success', text1: 'Order Cancelled' });
+        } else {
+          await adminAPI.declineOrder(orderToDecline.id, status, options);
+          Toast.show({ type: 'success', text1: 'Order Declined' });
+        }
+      } catch (error) {
+        Toast.show({ type: 'error', text1: 'Decline Failed' });
+      } finally {
+        setIsDecliningOrder(false);
+        closeOrderDeclineModal();
+        await loadOrders({ showLoader: false });
       }
-    } catch (error) {
-      Toast.show({ type: 'error', text1: 'Decline Failed' });
-    } finally {
-      setIsDecliningOrder(false);
-      closeOrderDeclineModal();
-      await loadOrders();
-    }
+    });
   };
 
 
+  const closeStatusModal = () => {
+    setStatusModalVisible(false);
+    setOrderToUpdate(null);
+    setSelectedStatus(null);
+  };
+
   const openStatusModal = (order) => {
+    if (actionLockRef.current || statusModalVisible) {
+      return;
+    }
+
     if (
       order?.delivery_method === 'delivery'
       && order?.status === 'processing'
@@ -446,62 +491,29 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
     }
   };
 
-  const handleProceedStatus = async (order) => {
-    const nextStatus = getNextStatus(order.status, order.delivery_method);
-    if (!nextStatus) return;
-
-    // Rider enforcement: If moving to out_for_delivery, must have a rider assigned
-    if (nextStatus === 'out_for_delivery') {
-      const hasRider = hasRequiredRiderAssignments(order);
-      if (!hasRider) {
-        Alert.alert(
-          "Rider Required",
-          "Please assign a rider to every delivery stop before moving this order to Out for Delivery."
-        );
-        return;
-      }
-    }
-
-    try {
-      await adminAPI.updateOrderStatus(order.id, nextStatus);
-
-      // New logic: If order is completed and payment method is COD and payment is 'to_pay', mark as 'paid'
-      if (nextStatus === 'completed' && order.payment_method === 'cod' && order.payment_status === 'to_pay') {
-        await adminAPI.updateOrderPaymentStatus(order.id, 'paid');
-        Toast.show({ type: 'success', text1: 'Order Completed & Paid' });
-      } else if (nextStatus === 'claimed' && order.payment_method === 'cod' && order.payment_status === 'to_pay') {
-        await adminAPI.updateOrderPaymentStatus(order.id, 'paid');
-        Toast.show({ type: 'success', text1: 'Order Claimed & Paid' });
-      } else {
-        Toast.show({ type: 'success', text1: `Status Updated to ${getStatusLabel(nextStatus)}` });
-      }
-
-      // Send email if status is completed or claimed
-      if (nextStatus === 'completed' || nextStatus === 'claimed') {
-        await sendStatusEmail(order, nextStatus);
-      }
-
-      await loadOrders();
-    } catch (error) {
-      console.error('Error proceeding status:', error);
-      Toast.show({ type: 'error', text1: 'Update Failed' });
-    }
-  };
-
   const confirmStatusChange = async () => {
-    if (!orderToUpdate || !selectedStatus) return;
+    if (!orderToUpdate || !selectedStatus || actionLockRef.current) return;
     const orderId = orderToUpdate.id;
 
     if (selectedStatus === 'cancelled') {
-      setStatusModalVisible(false);
-      openOrderDeclineModal(orderToUpdate, 'cancel');
-      setOrderToUpdate(null);
-      setSelectedStatus(null);
+      const orderToCancel = orderToUpdate;
+      closeStatusModal();
+      openOrderDeclineModal(orderToCancel, 'cancel');
       return;
     }
 
+    const actionKey = getOrderActionKey('status', orderId);
+    actionLockRef.current = actionKey;
+    setActiveActionKey(actionKey);
+    const releaseStatusAction = () => {
+      if (actionLockRef.current === actionKey) {
+        actionLockRef.current = null;
+        setActiveActionKey(null);
+      }
+    };
+    let shouldCloseAfterStatusChange = true;
+
     try {
-      // Rider enforcement: If moving to out_for_delivery, must have a rider assigned
       if (selectedStatus === 'out_for_delivery') {
         const hasRider = hasRequiredRiderAssignments(orderToUpdate);
         if (!hasRider) {
@@ -509,11 +521,12 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
             "Rider Required",
             "Please assign a rider to every delivery stop before moving this order to Out for Delivery."
           );
+          shouldCloseAfterStatusChange = false;
+          releaseStatusAction();
           return;
         }
       }
 
-      // Payment enforcement: If moving to Out for Delivery or Ready for Pickup, status must be paid if not COD
       const isMovingToDelivery = ['out_for_delivery', 'ready_for_pick_up', 'ready_for_pickup', 'completed', 'claimed'].includes(selectedStatus);
       const isNotPaid = orderToUpdate.payment_status !== 'paid';
       const isNotCOD = orderToUpdate.payment_method?.toLowerCase() !== 'cod';
@@ -523,12 +536,13 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
           "Payment Required",
           "You cannot move this order to delivery/pickup until the payment is confirmed (except for COD orders)."
         );
+        shouldCloseAfterStatusChange = false;
+        releaseStatusAction();
         return;
       }
 
       await adminAPI.updateOrderStatus(orderId, selectedStatus);
 
-      // COD: Auto-mark payment as paid on completion
       if (selectedStatus === 'completed' && orderToUpdate.payment_method === 'cod' && orderToUpdate.payment_status === 'to_pay') {
         await adminAPI.updateOrderPaymentStatus(orderId, 'paid');
         Toast.show({ type: 'success', text1: 'Order Completed and Payment Marked as Paid' });
@@ -541,18 +555,22 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
         Toast.show({ type: 'success', text1: `Status Updated to ${getStatusLabel(selectedStatus)}` });
       }
 
-      // Send email on key milestones
       if (['processing', 'completed', 'claimed', 'out_for_delivery'].includes(selectedStatus)) {
         await sendStatusEmail(orderToUpdate, selectedStatus);
       }
     } catch (error) {
       Toast.show({ type: 'error', text1: 'Update Failed' });
     } finally {
-      // Close modal FIRST, then refresh — prevents the loading flash reopening the modal
-      setStatusModalVisible(false);
-      setOrderToUpdate(null);
-      setSelectedStatus(null);
-      loadOrders();
+      if (shouldCloseAfterStatusChange) {
+        closeStatusModal();
+        try {
+          await loadOrders({ showLoader: false });
+        } finally {
+          releaseStatusAction();
+        }
+      } else {
+        releaseStatusAction();
+      }
     }
   };
 
@@ -585,13 +603,22 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
     return progress[status] || '10%';
   };
 
-  const getCustomerInitials = (name) => {
-    if (!name) return '??';
-    const names = name.trim().split(' ');
-    if (names.length > 1) {
-      return `${names[0][0]}${names[names.length - 1][0]}`.toUpperCase();
+  const openPaymentModal = (order, editMode = false) => {
+    if (actionLockRef.current || paymentModalVisible) {
+      return;
     }
-    return name.substring(0, 2).toUpperCase();
+
+    setOrderToRecordPayment(order);
+    setPaymentAmount(editMode ? String(order.amount_received || '') : '');
+    setIsEditPaymentMode(editMode);
+    setPaymentModalVisible(true);
+  };
+
+  const closePaymentModal = () => {
+    setPaymentModalVisible(false);
+    setOrderToRecordPayment(null);
+    setPaymentAmount('');
+    setIsEditPaymentMode(false);
   };
 
   const EnhancedOrderCard = ({ item, onMessageCustomer, onPhoneCall, onAssignRider, onUpdateStatus, openReceiptModal, onPrintReceipt }) => {
@@ -606,10 +633,10 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
       && item.payment_status !== 'paid'
     );
     const isStatusChangeDisabled = isAwaitingPaidGCash || requiresRiderBeforeStatusChange;
+    const isActionBusy = Boolean(activeActionKey);
 
     return (
       <View style={styles.eoCard}>
-        {/* Header */}
         <View style={styles.eoCardHeader}>
           <View style={{ flex: 1, gap: 4 }}>
             <Text style={styles.eoLabel}>Order ID</Text>
@@ -632,7 +659,6 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
           </View>
         </View>
 
-        {/* Progress Bar */}
         <View style={styles.eoProgressSection}>
           <View style={styles.eoProgressMeta}>
             <Text style={styles.eoProgressLabel}>Order Progress</Text>
@@ -643,7 +669,6 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
           </View>
         </View>
 
-        {/* Customer Info */}
         <View style={styles.eoSection}>
           <View style={styles.eoCustomerHeader}>
             <View style={{ flexShrink: 1 }}>
@@ -734,7 +759,6 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
           </View>
         )}
 
-        {/* Items */}
         {item.items?.length > 0 && (
           <View style={styles.eoSection}>
             <View style={styles.eoSectionHeader}>
@@ -776,7 +800,6 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
           </View>
         )}
 
-        {/* Assigned Rider Info */}
         {item.rider && groupedDestinations.length === 0 ? (
           <View style={styles.eoSection}>
             <View style={styles.eoSectionHeader}>
@@ -804,18 +827,8 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
         <PaymentDetailsSection
           item={item}
           styles={styles}
-          onRecordPay={() => {
-            setOrderToRecordPayment(item);
-            setPaymentAmount('');
-            setIsEditPaymentMode(false);
-            setPaymentModalVisible(true);
-          }}
-          onEditAmount={() => {
-            setOrderToRecordPayment(item);
-            setPaymentAmount(String(item.amount_received || ''));
-            setIsEditPaymentMode(true);
-            setPaymentModalVisible(true);
-          }}
+          onRecordPay={() => openPaymentModal(item)}
+          onEditAmount={() => openPaymentModal(item, true)}
           onViewReceipt={(url) => openReceiptModal(url)}
           requireReceipt={false}
         />
@@ -870,13 +883,15 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
               {currentUser?.role === 'admin' && item.refund_request.status === 'requested' ? (
                 <View style={{ flexDirection: 'row', gap: 10 }}>
                   <TouchableOpacity
-                    style={[styles.eoMainBtn, { backgroundColor: '#10B981', flex: 1 }]}
+                    style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#10B981', flex: 1 }]}
+                    disabled={isActionBusy}
                     onPress={() => handleApproveRefund(item)}
                   >
                     <Text style={styles.eoMainBtnText}>Approve Refund</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.eoMainBtn, { backgroundColor: '#EF4444', flex: 1 }]}
+                    style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#EF4444', flex: 1 }]}
+                    disabled={isActionBusy}
                     onPress={() => handleRejectRefund(item)}
                   >
                     <Text style={styles.eoMainBtnText}>Reject Refund</Text>
@@ -892,7 +907,8 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
 
               {['admin', 'employee'].includes(currentUser?.role) && item.refund_request.status === 'gcash_submitted' ? (
                 <TouchableOpacity
-                  style={[styles.eoMainBtn, { backgroundColor: '#2563EB' }]}
+                  style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#2563EB' }]}
+                  disabled={isActionBusy}
                   onPress={() => handleStartRefundProcessing(item)}
                 >
                   <Text style={styles.eoMainBtnText}>Start Refund Processing</Text>
@@ -901,7 +917,8 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
 
               {['admin', 'employee'].includes(currentUser?.role) && item.refund_request.status === 'processing' ? (
                 <TouchableOpacity
-                  style={[styles.eoMainBtn, { backgroundColor: '#7C3AED' }]}
+                  style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#7C3AED' }]}
+                  disabled={isActionBusy}
                   onPress={() => handleCompleteRefund(item)}
                 >
                   <Text style={styles.eoMainBtnText}>Mark Refunded</Text>
@@ -911,14 +928,21 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
           </View>
         ) : null}
 
-        {/* Actions */}
         <View style={styles.eoFooter}>
           {item.status === 'pending' ? (
             <View style={{ flexDirection: 'row', gap: 12 }}>
-              <TouchableOpacity style={[styles.eoMainBtn, { backgroundColor: '#22C55E', flex: 1 }]} onPress={() => handleAccept(item.id)}>
+              <TouchableOpacity
+                style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#22C55E', flex: 1 }]}
+                disabled={isActionBusy}
+                onPress={() => handleAccept(item.id)}
+              >
                 <Text style={styles.eoMainBtnText}>Accept</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.eoMainBtn, { backgroundColor: '#EF4444', flex: 1 }]} onPress={() => handleDecline(item)}>
+              <TouchableOpacity
+                style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#EF4444', flex: 1 }]}
+                disabled={isActionBusy}
+                onPress={() => handleDecline(item)}
+              >
                 <Text style={styles.eoMainBtnText}>Decline</Text>
               </TouchableOpacity>
             </View>
@@ -927,9 +951,9 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
               <TouchableOpacity
                 style={[
                   styles.eoMainBtn,
-                  { backgroundColor: isStatusChangeDisabled ? '#9CA3AF' : '#3B82F6' }
+                  { backgroundColor: (isStatusChangeDisabled || isActionBusy) ? '#9CA3AF' : '#3B82F6' }
                 ]}
-                disabled={isStatusChangeDisabled}
+                disabled={isStatusChangeDisabled || isActionBusy}
                 onPress={() => onUpdateStatus(item)}
               >
                 <Ionicons name="git-network-outline" size={18} color="#fff" />
@@ -943,7 +967,11 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
                 </Text>
               )}
               {item.delivery_method === 'delivery' && item.status === 'processing' && (
-                <TouchableOpacity style={[styles.eoMainBtn, { backgroundColor: '#10B981', marginTop: 10 }]} onPress={() => onAssignRider(item)}>
+                <TouchableOpacity
+                  style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#10B981', marginTop: 10 }]}
+                  disabled={isActionBusy}
+                  onPress={() => onAssignRider(item)}
+                >
                   <Ionicons name="person-add-outline" size={18} color="#fff" />
                   <Text style={styles.eoMainBtnText}>{groupedDestinations.length > 0 ? 'Assign Stop Riders' : 'Assign Rider'}</Text>
                 </TouchableOpacity>
@@ -973,6 +1001,10 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
   };
 
   const handleAssignRider = (order) => {
+    if (actionLockRef.current || assignRiderModalVisible) {
+      return;
+    }
+
     const groupedDestinations = getGroupedDestinations(order);
     setOrderToAssignRider(order);
     setRiderSearchQuery('');
@@ -1032,35 +1064,37 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
   const handleConfirmAssignRider = async () => {
     if (!orderToAssignRider) return;
 
-    try {
-      const groupedDestinations = getGroupedDestinations(orderToAssignRider);
+    await runOrderAction(getOrderActionKey('assign-rider', orderToAssignRider.id), async () => {
+      try {
+        const groupedDestinations = getGroupedDestinations(orderToAssignRider);
 
-      if (groupedDestinations.length > 0) {
-        const stopAssignments = groupedDestinations.map((group) => ({
-          unitKeys: group.unitKeys,
-          riderId: stopRiderAssignments[group.groupKey] || null,
-        }));
+        if (groupedDestinations.length > 0) {
+          const stopAssignments = groupedDestinations.map((group) => ({
+            unitKeys: group.unitKeys,
+            riderId: stopRiderAssignments[group.groupKey] || null,
+          }));
 
-        await adminAPI.assignOrderStopRiders(orderToAssignRider.id, stopAssignments);
-        Toast.show({ type: 'success', text1: 'Delivery stop riders updated' });
-      } else {
-        if (!selectedRider) {
-          Alert.alert('Error', 'Please select an employee rider.');
-          return;
+          await adminAPI.assignOrderStopRiders(orderToAssignRider.id, stopAssignments);
+          Toast.show({ type: 'success', text1: 'Delivery stop riders updated' });
+        } else {
+          if (!selectedRider) {
+            Alert.alert('Error', 'Please select an employee rider.');
+            return;
+          }
+
+          await adminAPI.assignRider(orderToAssignRider.id, selectedRider.id);
+          Toast.show({ type: 'success', text1: 'Rider Assigned' });
         }
 
-        await adminAPI.assignRider(orderToAssignRider.id, selectedRider.id);
-        Toast.show({ type: 'success', text1: 'Rider Assigned' });
+        closeAssignRiderModal();
+        await loadOrders({ showLoader: false });
+      } catch (error) {
+        console.error('Error assigning rider:', error);
+        const errorMessage = error?.message || 'Failed to assign rider.';
+        Toast.show({ type: 'error', text1: 'Assignment Failed', text2: errorMessage });
+        Alert.alert('Assignment Failed', errorMessage);
       }
-
-      closeAssignRiderModal();
-      loadOrders();
-    } catch (error) {
-      console.error('Error assigning rider:', error);
-      const errorMessage = error?.message || 'Failed to assign rider.';
-      Toast.show({ type: 'error', text1: 'Assignment Failed', text2: errorMessage });
-      Alert.alert('Assignment Failed', errorMessage);
-    }
+    });
   };
 
   const sendReceiptEmail = async (order, amount_received) => {
@@ -1092,127 +1126,113 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
       return;
     }
 
-    try {
-      // In edit mode: replace the existing amount. In add mode: accumulate.
-      const newTotalReceived = isEditPaymentMode
-        ? amount
-        : (orderToRecordPayment.amount_received || 0) + amount;
-      const newStatus = newTotalReceived >= orderToRecordPayment.total ? 'paid' : 'partial';
+    await runOrderAction(getOrderActionKey('payment', orderToRecordPayment.id), async () => {
+      try {
+        const newTotalReceived = isEditPaymentMode
+          ? amount
+          : (orderToRecordPayment.amount_received || 0) + amount;
+        const newStatus = newTotalReceived >= orderToRecordPayment.total ? 'paid' : 'partial';
 
-      const { error } = await supabase
-        .from('orders')
-        .update({
-          amount_received: newTotalReceived,
-          payment_status: newStatus
-        })
-        .eq('id', orderToRecordPayment.id);
+        const { error } = await supabase
+          .from('orders')
+          .update({
+            amount_received: newTotalReceived,
+            payment_status: newStatus
+          })
+          .eq('id', orderToRecordPayment.id);
 
-      if (error) throw error;
+        if (error) throw error;
 
-      if (newStatus === 'paid' && orderToRecordPayment.payment_method?.toLowerCase() === 'gcash') {
-        await sendReceiptEmail(orderToRecordPayment, newTotalReceived);
+        if (newStatus === 'paid' && orderToRecordPayment.payment_method?.toLowerCase() === 'gcash') {
+          await sendReceiptEmail(orderToRecordPayment, newTotalReceived);
+        }
+
+        Toast.show({ type: 'success', text1: isEditPaymentMode ? 'Amount Updated' : 'Payment Recorded' });
+        closePaymentModal();
+        await loadOrders({ showLoader: false });
+      } catch (error) {
+        console.error(error);
+        Toast.show({ type: 'error', text1: 'Failed to record payment' });
       }
-
-      Toast.show({ type: 'success', text1: isEditPaymentMode ? 'Amount Updated' : 'Payment Recorded' });
-      setPaymentModalVisible(false);
-      setOrderToRecordPayment(null);
-      setIsEditPaymentMode(false);
-      loadOrders();
-    } catch (error) {
-      console.error(error);
-      Toast.show({ type: 'error', text1: 'Failed to record payment' });
-    }
-  };
-
-  const handleRejectBalanceReceipt = async (order) => {
-    try {
-      const { error } = await supabase
-        .from('orders')
-        .update({ additional_receipts: [] })
-        .eq('id', order.id);
-
-      if (error) throw error;
-
-      Toast.show({
-        type: 'info',
-        text1: 'Receipt Rejected',
-        text2: 'Customer will be prompted to re-upload.',
-      });
-      loadOrders();
-    } catch (error) {
-      console.error(error);
-      Toast.show({ type: 'error', text1: 'Failed to reject receipt' });
-    }
+    });
   };
 
   const handleApproveRefund = async (order) => {
     if (!order?.refund_request) return;
 
-    try {
-      await adminAPI.approveRefundRequest(order.refund_request.id, {
-        actorId: currentUser?.id,
-        refundAmount: order.amount_received || order.total || order.refund_request.refund_amount,
-      });
-      Toast.show({ type: 'success', text1: 'Refund Approved' });
-      loadOrders();
-    } catch (error) {
-      console.error('Error approving refund:', error);
-      const errorMessage = error?.message || 'Failed to approve refund.';
-      Toast.show({ type: 'error', text1: 'Approval Failed', text2: errorMessage });
-      Alert.alert('Approval Failed', errorMessage);
-    }
+    await runOrderAction(getOrderActionKey('approve-refund', order.id), async () => {
+      try {
+        await adminAPI.approveRefundRequest(order.refund_request.id, {
+          actorId: currentUser?.id,
+          refundAmount: order.amount_received || order.total || order.refund_request.refund_amount,
+        });
+        Toast.show({ type: 'success', text1: 'Refund Approved' });
+        await loadOrders({ showLoader: false });
+      } catch (error) {
+        console.error('Error approving refund:', error);
+        const errorMessage = error?.message || 'Failed to approve refund.';
+        Toast.show({ type: 'error', text1: 'Approval Failed', text2: errorMessage });
+        Alert.alert('Approval Failed', errorMessage);
+      }
+    });
   };
 
   const handleRejectRefund = async (order) => {
     if (!order?.refund_request) return;
 
-    try {
-      await adminAPI.rejectRefundRequest(order.refund_request.id, {
-        actorId: currentUser?.id,
-        rejectionReason: 'Refund request was not approved by admin.',
-      });
-      Toast.show({ type: 'success', text1: 'Refund Rejected' });
-      loadOrders();
-    } catch (error) {
-      console.error('Error rejecting refund:', error);
-      const errorMessage = error?.message || 'Failed to reject refund.';
-      Toast.show({ type: 'error', text1: 'Rejection Failed', text2: errorMessage });
-      Alert.alert('Rejection Failed', errorMessage);
-    }
+    await runOrderAction(getOrderActionKey('reject-refund', order.id), async () => {
+      try {
+        await adminAPI.rejectRefundRequest(order.refund_request.id, {
+          actorId: currentUser?.id,
+          rejectionReason: 'Refund request was not approved by admin.',
+        });
+        Toast.show({ type: 'success', text1: 'Refund Rejected' });
+        await loadOrders({ showLoader: false });
+      } catch (error) {
+        console.error('Error rejecting refund:', error);
+        const errorMessage = error?.message || 'Failed to reject refund.';
+        Toast.show({ type: 'error', text1: 'Rejection Failed', text2: errorMessage });
+        Alert.alert('Rejection Failed', errorMessage);
+      }
+    });
   };
 
   const handleStartRefundProcessing = async (order) => {
     if (!order?.refund_request) return;
 
-    try {
-      await adminAPI.startRefundProcessing(order.refund_request.id, {
-        actorId: currentUser?.id,
-      });
-      Toast.show({ type: 'success', text1: 'Refund Processing Started' });
-      loadOrders();
-    } catch (error) {
-      console.error('Error starting refund processing:', error);
-      const errorMessage = error?.message || 'Failed to start refund processing.';
-      Toast.show({ type: 'error', text1: 'Processing Failed', text2: errorMessage });
-      Alert.alert('Processing Failed', errorMessage);
-    }
+    await runOrderAction(getOrderActionKey('start-refund', order.id), async () => {
+      try {
+        await adminAPI.startRefundProcessing(order.refund_request.id, {
+          actorId: currentUser?.id,
+        });
+        Toast.show({ type: 'success', text1: 'Refund Processing Started' });
+        await loadOrders({ showLoader: false });
+      } catch (error) {
+        console.error('Error starting refund processing:', error);
+        const errorMessage = error?.message || 'Failed to start refund processing.';
+        Toast.show({ type: 'error', text1: 'Processing Failed', text2: errorMessage });
+        Alert.alert('Processing Failed', errorMessage);
+      }
+    });
   };
 
   const handleCompleteRefund = async (order) => {
     if (!order?.refund_request) return;
 
-    try {
-      await adminAPI.completeRefundRequest(order.refund_request.id, {
-        actorId: currentUser?.id,
-      });
-      Toast.show({ type: 'success', text1: 'Refund Completed' });
-      loadOrders();
-    } catch (error) {
-      console.error('Error completing refund:', error);
-      const errorMessage = error?.message || 'Failed to complete refund.';
-      Toast.show({ type: 'error', text1: 'Completion Failed', text2: errorMessage });
-      Alert.alert('Completion Failed', errorMessage);
-    }
+    await runOrderAction(getOrderActionKey('complete-refund', order.id), async () => {
+      try {
+        await adminAPI.completeRefundRequest(order.refund_request.id, {
+          actorId: currentUser?.id,
+        });
+        Toast.show({ type: 'success', text1: 'Refund Completed' });
+        await loadOrders({ showLoader: false });
+      } catch (error) {
+        console.error('Error completing refund:', error);
+        const errorMessage = error?.message || 'Failed to complete refund.';
+        Toast.show({ type: 'error', text1: 'Completion Failed', text2: errorMessage });
+        Alert.alert('Completion Failed', errorMessage);
+      }
+    });
   };
 
   const assignableStopGroups = React.useMemo(
@@ -1243,7 +1263,6 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
     <View style={styles.eoContainer}>
       <Text style={styles.eoTitle}>Orders Management</Text>
 
-      {/* Scrollable Status Filters */}
       <View style={{ marginBottom: 15 }}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingHorizontal: 16 }}>
           {orderStatusFilters.map((filter) => (
@@ -1335,8 +1354,7 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
         }
       />
 
-      {/* Order Cancellation Reason Modal */}
-      <Modal visible={declineModalVisible} animationType="fade" transparent>
+      <Modal visible={declineModalVisible} animationType="fade" transparent onRequestClose={closeOrderDeclineModal}>
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{declineAction === 'cancel' ? 'Cancel Order' : 'Decline Order'}</Text>
@@ -1360,14 +1378,14 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelButton]}
                 onPress={closeOrderDeclineModal}
-                disabled={isDecliningOrder}
+                disabled={isDecliningOrder || Boolean(activeActionKey)}
               >
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.deleteButton]}
                 onPress={confirmDecline}
-                disabled={isDecliningOrder}
+                disabled={isDecliningOrder || Boolean(activeActionKey)}
               >
                 <Text style={styles.buttonText}>
                   {isDecliningOrder
@@ -1380,8 +1398,13 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
         </View>
       </Modal>
 
-      {/* Assign Rider Modal */}
-      <Modal visible={assignRiderModalVisible} animationType="fade" transparent statusBarTranslucent>
+      <Modal
+        visible={assignRiderModalVisible}
+        animationType="fade"
+        transparent
+        statusBarTranslucent
+        onRequestClose={closeAssignRiderModal}
+      >
         <View style={styles.modalContainer}>
           <View style={[styles.modalContent, styles.assignRiderModalContent, { height: assignRiderModalMaxHeight }]}>
             <Text style={styles.modalTitle}>{isStopAssignmentMode ? 'Assign Delivery Stop Riders' : 'Assign Rider'}</Text>
@@ -1506,13 +1529,17 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
               />
             </View>
             <View style={[styles.modalButtons, styles.assignRiderFooter]}>
-              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={closeAssignRiderModal}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={closeAssignRiderModal}
+                disabled={Boolean(activeActionKey)}
+              >
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.saveButton]}
                 onPress={handleConfirmAssignRider}
-                disabled={!selectedRider && !isStopAssignmentMode}
+                disabled={Boolean(activeActionKey) || (!selectedRider && !isStopAssignmentMode)}
               >
                 <Text style={styles.buttonText}>Confirm</Text>
               </TouchableOpacity>
@@ -1521,8 +1548,7 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
         </View>
       </Modal>
 
-      {/* Change Status Modal (Timeline UI) */}
-      <Modal visible={statusModalVisible} transparent animationType="fade" onRequestClose={() => setStatusModalVisible(false)}>
+      <Modal visible={statusModalVisible} transparent animationType="fade" onRequestClose={closeStatusModal}>
         <View style={styles.statusModalBackdrop}>
           <View style={styles.timelineModalContainer}>
             <View style={styles.statusModalHeader}>
@@ -1548,14 +1574,12 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
 
                       return (
                         <View key={status.id} style={styles.timelineStepContainer}>
-                          {/* Line */}
                           {!isLast && (
                             <View style={[
                               styles.timelineLine,
                               (isPast || isSelected) && styles.timelineLineActive
                             ]} />
                           )}
-                          {/* Content */}
                           <TouchableOpacity
                             style={styles.timelineStep}
                             disabled={true}
@@ -1592,7 +1616,6 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
                         </View>
                       );
                     })}
-                    {/* Special Status Buttons */}
                     <View style={styles.timelineActions}>
                       <TouchableOpacity
                         onPress={() => setSelectedStatus('cancelled')}
@@ -1616,10 +1639,18 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
             </ScrollView>
 
             <View style={styles.statusModalFooter}>
-              <TouchableOpacity onPress={confirmStatusChange} style={styles.statusConfirmButton}>
+              <TouchableOpacity
+                onPress={confirmStatusChange}
+                style={[styles.statusConfirmButton, activeActionKey && { opacity: 0.6 }]}
+                disabled={Boolean(activeActionKey)}
+              >
                 <Text style={styles.statusConfirmButtonText}>Proceed</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setStatusModalVisible(false)} style={styles.statusCloseButton}>
+              <TouchableOpacity
+                onPress={closeStatusModal}
+                style={styles.statusCloseButton}
+                disabled={Boolean(activeActionKey)}
+              >
                 <Text style={styles.statusCloseButtonText}>Cancel</Text>
               </TouchableOpacity>
             </View>
@@ -1627,8 +1658,7 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
         </View>
       </Modal>
 
-      {/* Payment Recording Modal */}
-      <Modal visible={paymentModalVisible} animationType="fade" transparent>
+      <Modal visible={paymentModalVisible} animationType="fade" transparent onRequestClose={closePaymentModal}>
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{isEditPaymentMode ? 'Edit Amount Received' : 'Record GCash Payment'}</Text>
@@ -1650,10 +1680,18 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
               onChangeText={setPaymentAmount}
             />
             <View style={styles.modalButtons}>
-              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={() => setPaymentModalVisible(false)}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={closePaymentModal}
+                disabled={Boolean(activeActionKey)}
+              >
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalButton, styles.saveButton]} onPress={handleConfirmPayment}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.saveButton]}
+                onPress={handleConfirmPayment}
+                disabled={Boolean(activeActionKey)}
+              >
                 <Text style={styles.buttonText}>Confirm</Text>
               </TouchableOpacity>
             </View>
@@ -1661,8 +1699,7 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
         </View>
       </Modal>
 
-      {/* Receipt View Modal */}
-      <Modal visible={receiptModalVisible} animationType="fade" transparent>
+      <Modal visible={receiptModalVisible} animationType="fade" transparent onRequestClose={() => setReceiptModalVisible(false)}>
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>

@@ -110,6 +110,7 @@ const SalesTab = () => {
   const [bestSellers, setBestSellers] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
+  const [selectedPipelineItem, setSelectedPipelineItem] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [exportModalVisible, setExportModalVisible] = useState(false);
   const [exportOptions, setExportOptions] = useState({
@@ -423,8 +424,16 @@ const SalesTab = () => {
     const amountValue = section === 'unpaid' ? item.remainingBalance : item.totalAmount;
 
     return (
-      <View
+      <TouchableOpacity
         key={item.id}
+        activeOpacity={0.78}
+        onPress={() => setSelectedPipelineItem({
+          ...item,
+          section,
+          sourceType,
+          amountLabel,
+          amountValue,
+        })}
         style={{
           backgroundColor: '#fff',
           borderRadius: 12,
@@ -499,7 +508,12 @@ const SalesTab = () => {
             </Text>
           </View>
         </View>
-      </View>
+
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, marginTop: 10 }}>
+          <Text style={{ fontSize: 11, color: '#9CA3AF', fontWeight: '600' }}>Tap to view details</Text>
+          <Ionicons name="chevron-forward" size={14} color="#ccc" />
+        </View>
+      </TouchableOpacity>
     );
   };
 
@@ -634,7 +648,7 @@ const SalesTab = () => {
           ` : ''}
 
           ${showTransactions && transactions.length > 0 ? `
-            <h2>Transaction History</h2>
+            <h2>Payment History</h2>
             <table>
               <thead>
                 <tr>
@@ -853,7 +867,7 @@ const SalesTab = () => {
           />
         </View>
         <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 14 }}>
-          Chart and transaction history show recorded completed sales. The cards below show live cash, credit, receivable, and upcoming amounts.
+          Chart and cards use the latest paid, partial, unpaid, and upcoming order data from the shared database.
         </Text>
 
         {/* Sales Summary Cards */}
@@ -1072,10 +1086,10 @@ const SalesTab = () => {
           )}
         </View>
 
-        {/* ========== Transaction History ========== */}
+        {/* ========== Payment History ========== */}
         <View style={{ marginTop: 5, marginBottom: 20 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
-            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#333' }}>Transaction History</Text>
+            <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#333' }}>Payment History</Text>
             <View style={{
               backgroundColor: '#EFF6FF', borderRadius: 10,
               paddingHorizontal: 8, paddingVertical: 2, marginLeft: 'auto',
@@ -1092,7 +1106,7 @@ const SalesTab = () => {
               alignItems: 'center', elevation: 1,
             }}>
               <Ionicons name="receipt-outline" size={40} color="#ddd" />
-              <Text style={{ color: '#999', marginTop: 8 }}>No transactions for this period</Text>
+              <Text style={{ color: '#999', marginTop: 8 }}>No payments found for this period</Text>
             </View>
           ) : (
             transactions.map((txn) => (
@@ -1157,7 +1171,7 @@ const SalesTab = () => {
         <View style={{ height: 50 }} />
       </ScrollView>
 
-      {/* Transaction Details Modal */}
+      {/* Payment Details Modal */}
       <Modal
         visible={Boolean(selectedTransaction)}
         animationType="slide"
@@ -1170,7 +1184,7 @@ const SalesTab = () => {
               <>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.modalTitle}>Sale Details</Text>
+                    <Text style={styles.modalTitle}>Payment Details</Text>
                     <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 4 }}>
                       #{selectedTransaction.refNumber} - {getSourceLabel(selectedTransaction.sourceType)}
                     </Text>
@@ -1190,7 +1204,7 @@ const SalesTab = () => {
                     borderColor: '#FBCFE8',
                   }}>
                     <Text style={{ color: '#9D174D', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                      Total Sale
+                      Payment Received
                     </Text>
                     <Text style={{ color: '#BE185D', fontSize: 24, fontWeight: '800', marginTop: 4 }}>
                       {formatCurrency(selectedTransaction.amount)}
@@ -1206,6 +1220,7 @@ const SalesTab = () => {
                     {renderTransactionDetailRow('Status', selectedTransaction.status ? getStatusLabel(selectedTransaction.status) : null)}
                     {renderTransactionDetailRow('Payment', selectedTransaction.paymentStatus ? getPaymentStatusDisplay(selectedTransaction.paymentStatus) : null)}
                     {renderTransactionDetailRow('Payment Method', formatPlainLabel(selectedTransaction.paymentMethod))}
+                    {renderTransactionDetailRow('Total Amount', selectedTransaction.totalAmount > 0 ? formatCurrency(selectedTransaction.totalAmount) : null)}
                     {renderTransactionDetailRow('Amount Paid', selectedTransaction.amountReceived > 0 ? formatCurrency(selectedTransaction.amountReceived) : null)}
                     {renderTransactionDetailRow('Remaining Balance', selectedTransaction.remainingBalance > 0 ? formatCurrency(selectedTransaction.remainingBalance) : null)}
                     {renderTransactionDetailRow('Delivery Method', formatPlainLabel(selectedTransaction.deliveryMethod))}
@@ -1254,6 +1269,90 @@ const SalesTab = () => {
         </View>
       </Modal>
 
+      {/* Sales Pipeline Details Modal */}
+      <Modal
+        visible={Boolean(selectedPipelineItem)}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setSelectedPipelineItem(null)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={[styles.modalContent, { width: isWeb ? 520 : '92%', maxHeight: '85%' }]}>
+            {selectedPipelineItem ? (
+              <>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.modalTitle}>
+                      {selectedPipelineItem.section === 'unpaid' ? 'Unpaid Order Details' : 'Upcoming Sale Details'}
+                    </Text>
+                    <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 4 }}>
+                      #{selectedPipelineItem.refNumber} - {getSourceLabel(selectedPipelineItem.sourceType)}
+                    </Text>
+                  </View>
+                  <TouchableOpacity onPress={() => setSelectedPipelineItem(null)} style={{ padding: 8 }}>
+                    <Ionicons name="close" size={24} color="#374151" />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView showsVerticalScrollIndicator={false}>
+                  <View style={{
+                    backgroundColor: selectedPipelineItem.section === 'unpaid' ? '#FEF2F2' : '#ECFDF5',
+                    borderRadius: 14,
+                    padding: 14,
+                    marginBottom: 12,
+                    borderWidth: 1,
+                    borderColor: selectedPipelineItem.section === 'unpaid' ? '#FECACA' : '#BBF7D0',
+                  }}>
+                    <Text style={{
+                      color: selectedPipelineItem.section === 'unpaid' ? '#991B1B' : '#047857',
+                      fontSize: 12,
+                      fontWeight: '700',
+                      textTransform: 'uppercase',
+                      letterSpacing: 0.5,
+                    }}>
+                      {selectedPipelineItem.amountLabel}
+                    </Text>
+                    <Text style={{
+                      color: selectedPipelineItem.section === 'unpaid' ? '#DC2626' : '#16A34A',
+                      fontSize: 24,
+                      fontWeight: '800',
+                      marginTop: 4,
+                    }}>
+                      {formatCurrency(selectedPipelineItem.amountValue)}
+                    </Text>
+                  </View>
+
+                  <View style={{ marginBottom: 14 }}>
+                    {renderTransactionDetailRow('Reference', `#${selectedPipelineItem.refNumber}`)}
+                    {renderTransactionDetailRow('Type', getSourceLabel(selectedPipelineItem.sourceType))}
+                    {renderTransactionDetailRow('Customer', selectedPipelineItem.customerName)}
+                    {renderTransactionDetailRow('Email', selectedPipelineItem.customerEmail)}
+                    {renderTransactionDetailRow('Schedule', selectedPipelineItem.scheduleText)}
+                    {renderTransactionDetailRow('Date', formatDate(selectedPipelineItem.scheduleDate || new Date()))}
+                    {renderTransactionDetailRow('Order Status', selectedPipelineItem.status ? getStatusLabel(selectedPipelineItem.status) : null)}
+                    {renderTransactionDetailRow('Payment Status', selectedPipelineItem.paymentStatus ? getPaymentStatusDisplay(selectedPipelineItem.paymentStatus) : null)}
+                    {renderTransactionDetailRow('Total Amount', selectedPipelineItem.totalAmount > 0 ? formatCurrency(selectedPipelineItem.totalAmount) : null)}
+                    {renderTransactionDetailRow('Amount Paid', selectedPipelineItem.amountReceived > 0 ? formatCurrency(selectedPipelineItem.amountReceived) : null)}
+                    {renderTransactionDetailRow('Remaining Balance', selectedPipelineItem.remainingBalance > 0 ? formatCurrency(selectedPipelineItem.remainingBalance) : null)}
+                  </View>
+
+                  <Text style={{ color: '#6B7280', fontSize: 12, lineHeight: 18, marginBottom: 4 }}>
+                    This is a quick sales view. Use the Orders or Requests tab if you need to change the order status, payment, rider, or item details.
+                  </Text>
+                </ScrollView>
+
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.saveButton, { marginTop: 12 }]}
+                  onPress={() => setSelectedPipelineItem(null)}
+                >
+                  <Text style={styles.buttonText}>Close</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
       {/* Export Options Modal */}
       <Modal visible={exportModalVisible} animationType="fade" transparent>
         <View style={styles.modalContainer}>
@@ -1291,7 +1390,7 @@ const SalesTab = () => {
             </View>
 
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 15 }}>
-              <Text>Transaction History</Text>
+              <Text>Payment History</Text>
               <Switch
                 value={exportOptions.transactions}
                 onValueChange={v => setExportOptions(prev => ({ ...prev, transactions: v }))}

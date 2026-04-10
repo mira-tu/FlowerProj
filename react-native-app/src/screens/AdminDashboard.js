@@ -1,6 +1,3 @@
-// AdminDashboard.js - Complete Version with Full UI + API Integration
-// Restored all features from original design
-
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -31,6 +28,9 @@ import SalesTab from './admin/tabs/SalesTab';
 import StockTab from './admin/tabs/StockTab';
 import styles from './AdminDashboard.styles';
 
+const SESSION_STORAGE_KEYS = ['currentUser', 'token'];
+const EMPLOYEE_RESTRICTED_TABS = new Set(['sales', 'about', 'contact', 'employees', 'customOrder']);
+
 const AdminDashboard = () => {
   const navigation = useNavigation();
   const [activeTab, setActiveTab] = useState('catalogue');
@@ -42,6 +42,13 @@ const AdminDashboard = () => {
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [customerToMessage, setCustomerToMessage] = useState(null);
   const [focusedEntityTarget, setFocusedEntityTarget] = useState(null);
+
+  const goToLogin = () => {
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'Login' }],
+    });
+  };
 
   const refreshUnreadNotificationCount = async (userId = currentUser?.id) => {
     if (!userId) return;
@@ -63,7 +70,7 @@ const AdminDashboard = () => {
   useEffect(() => {
     let isActive = true;
 
-    const checkUserAndSubscribe = async () => {
+    const loadStaffSession = async () => {
       setLoading(true);
       try {
         const restoredSession = await authAPI.restoreStaffSession();
@@ -73,21 +80,15 @@ const AdminDashboard = () => {
         }
 
         if (!restoredSession?.data?.user) {
-          await AsyncStorage.multiRemove(['currentUser', 'token']);
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'Login' }],
-          });
+          await AsyncStorage.multiRemove(SESSION_STORAGE_KEYS);
+          goToLogin();
           return;
         }
 
         const { user, token } = restoredSession.data;
         if (user.role !== 'admin' && user.role !== 'employee') {
           Alert.alert('Access Denied', 'You do not have permission to access this page');
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'Login' }],
-          });
+          goToLogin();
           return;
         }
 
@@ -100,12 +101,9 @@ const AdminDashboard = () => {
         }
       } catch (error) {
         console.error('Error checking user:', error);
-        await AsyncStorage.multiRemove(['currentUser', 'token']);
+        await AsyncStorage.multiRemove(SESSION_STORAGE_KEYS);
         if (isActive) {
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'Login' }],
-          });
+          goToLogin();
         }
       } finally {
         if (isActive) {
@@ -114,7 +112,7 @@ const AdminDashboard = () => {
       }
     };
 
-    checkUserAndSubscribe();
+    loadStaffSession();
 
     return () => {
       isActive = false;
@@ -177,21 +175,23 @@ const AdminDashboard = () => {
   const performLogout = async () => {
     try {
       await authAPI.logout();
-      await AsyncStorage.removeItem('currentUser');
-      await AsyncStorage.removeItem('token');
+      await AsyncStorage.multiRemove(SESSION_STORAGE_KEYS);
     } catch (e) {
       console.warn('Logout cleanup error:', e);
     }
-    navigation.reset({
-      index: 0,
-      routes: [{ name: 'Login' }],
-    });
+    goToLogin();
   };
 
-  const showLogoutConfirm = () => setLogoutConfirmVisible(true);
+  const handleSelectCustomerForMessage = (customer) => {
+    setCustomerToMessage(customer);
+    setActiveTab('messaging');
+  };
 
   const renderTabContent = () => {
-    if (currentUser?.role === 'employee' && (activeTab === 'sales' || activeTab === 'about' || activeTab === 'contact' || activeTab === 'employees' || activeTab === 'customOrder')) {
+    const isRestrictedEmployeeTab = currentUser?.role === 'employee'
+      && EMPLOYEE_RESTRICTED_TABS.has(activeTab);
+
+    if (isRestrictedEmployeeTab) {
       return <CatalogueTab />;
     }
 
@@ -253,11 +253,6 @@ const AdminDashboard = () => {
       default:
         return <CatalogueTab />;
     }
-  };
-
-  const handleSelectCustomerForMessage = (customer) => {
-    setCustomerToMessage(customer);
-    setActiveTab('messaging');
   };
 
   if (loading) {

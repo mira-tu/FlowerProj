@@ -3,86 +3,51 @@ import { View, Text, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import styles from '../../AdminDashboard.styles';
 
-const AdminBottomNavigation = ({ activeTab, setActiveTab, unreadMessageCount, setUnreadMessageCount }) => (
-  <View style={styles.bottomNav}>
-    <TouchableOpacity
-      style={styles.navItem}
-      onPress={() => setActiveTab('catalogue')}
-    >
-      <Ionicons
-        name="flower"
-        size={24}
-        color={activeTab === 'catalogue' ? '#ec4899' : '#999'}
-      />
-      <Text style={[styles.navText, activeTab === 'catalogue' && styles.navTextActive]}>
-        Catalog..
-      </Text>
-    </TouchableOpacity>
+const NAV_ITEMS = [
+  { tab: 'catalogue', icon: 'flower', label: 'Catalog..' },
+  { tab: 'orders', icon: 'cart', label: 'Orders' },
+  { tab: 'stock', icon: 'cube', label: 'Stock' },
+  { tab: 'messaging', icon: 'chatbubbles', label: 'Messagi..', showsBadge: true },
+  { tab: 'fees', icon: 'cash', label: 'Fees' },
+];
 
-    <TouchableOpacity
-      style={styles.navItem}
-      onPress={() => setActiveTab('orders')}
-    >
-      <Ionicons
-        name="cart"
-        size={24}
-        color={activeTab === 'orders' ? '#ec4899' : '#999'}
-      />
-      <Text style={[styles.navText, activeTab === 'orders' && styles.navTextActive]}>
-        Orders
-      </Text>
-    </TouchableOpacity>
+const AdminBottomNavigation = ({ activeTab, setActiveTab, unreadMessageCount, setUnreadMessageCount }) => {
+  const openTab = (tab) => {
+    setActiveTab(tab);
+    if (tab === 'messaging') {
+      setUnreadMessageCount?.(0);
+    }
+  };
 
-    <TouchableOpacity
-      style={styles.navItem}
-      onPress={() => setActiveTab('stock')}
-    >
-      <Ionicons
-        name="cube"
-        size={24}
-        color={activeTab === 'stock' ? '#ec4899' : '#999'}
-      />
-      <Text style={[styles.navText, activeTab === 'stock' && styles.navTextActive]}>
-        Stock
-      </Text>
-    </TouchableOpacity>
+  return (
+    <View style={styles.bottomNav}>
+      {NAV_ITEMS.map((item) => {
+        const isActive = activeTab === item.tab;
 
-    <TouchableOpacity
-      style={styles.navItem}
-      onPress={() => {
-        setActiveTab('messaging');
-        setUnreadMessageCount(0);
-      }}
-    >
-      <Ionicons
-        name="chatbubbles"
-        size={24}
-        color={activeTab === 'messaging' ? '#ec4899' : '#999'}
-      />
-      {unreadMessageCount > 0 && (
-        <View style={styles.navBadge}>
-          <Text style={styles.navBadgeText}>{unreadMessageCount}</Text>
-        </View>
-      )}
-      <Text style={[styles.navText, activeTab === 'messaging' && styles.navTextActive]}>
-        Messagi..
-      </Text>
-    </TouchableOpacity>
-
-    <TouchableOpacity
-      style={styles.navItem}
-      onPress={() => setActiveTab('fees')}
-    >
-      <Ionicons
-        name="cash"
-        size={24}
-        color={activeTab === 'fees' ? '#ec4899' : '#999'}
-      />
-      <Text style={[styles.navText, activeTab === 'fees' && styles.navTextActive]}>
-        Fees
-      </Text>
-    </TouchableOpacity>
-  </View>
-);
+        return (
+          <TouchableOpacity
+            key={item.tab}
+            style={styles.navItem}
+            onPress={() => openTab(item.tab)}
+          >
+            <Ionicons
+              name={item.icon}
+              size={24}
+              color={isActive ? '#ec4899' : '#999'}
+            />
+            {item.showsBadge && unreadMessageCount > 0 && (
+              <View style={styles.navBadge}>
+                <Text style={styles.navBadgeText}>{unreadMessageCount}</Text>
+              </View>
+            )}
+            <Text style={[styles.navText, isActive && styles.navTextActive]}>
+              {item.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+};
 
 export default AdminBottomNavigation;

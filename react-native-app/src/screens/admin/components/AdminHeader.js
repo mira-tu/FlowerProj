@@ -2,15 +2,10 @@ import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import styles from '../../AdminDashboard.styles';
-
-const getRoleLabel = (role) => {
-  if (role === 'employee') return 'Employee';
-  if (role === 'admin') return 'Admin';
-  return 'Staff';
-};
+import { getAdminRoleLabel } from '../adminHelpers';
 
 const AdminHeader = ({ currentUser, onMenuPress, onNotificationsPress, unreadNotificationCount = 0 }) => {
-  const roleLabel = getRoleLabel(currentUser?.role);
+  const roleLabel = getAdminRoleLabel(currentUser?.role);
   const workspaceLabel = `${roleLabel} Workspace`;
   const displayName = currentUser?.name || currentUser?.email || 'Signed in';
   const isEmployee = currentUser?.role === 'employee';

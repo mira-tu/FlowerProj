@@ -776,6 +776,30 @@ const applyDateRangeToQuery = (query, column, range) => {
         .lt(column, range.endIso);
 };
 
+const isMissingTableColumnError = (error, tableName, columnName) => {
+    const code = String(error?.code || '');
+    const message = String(error?.message || '');
+    const looksLikeMissingColumn = code === '42703'
+        || code === 'PGRST204'
+        || message.includes('schema cache')
+        || message.includes('does not exist');
+
+    if (!looksLikeMissingColumn) {
+        return false;
+    }
+
+    return message.includes(`${tableName}.${columnName}`)
+        || message.includes(`'${columnName}' column of '${tableName}'`)
+        || (message.includes(tableName) && message.includes(columnName));
+};
+
+const getMissingRequestColumnFallback = (error, fallbacks, options) => (
+    fallbacks.find(([columnName, optionKey]) => (
+        options[optionKey] !== false
+        && isMissingTableColumnError(error, 'requests', columnName)
+    ))
+);
+
 const CREDIT_PAYMENT_STATUSES = new Set(['partial', 'to_pay', 'waiting_for_confirmation', 'failed']);
 const UPCOMING_ORDER_STATUSES = new Set(['pending', 'processing', 'ready_for_pickup', 'out_for_delivery']);
 const UPCOMING_REQUEST_STATUSES = new Set(['pending', 'quoted', 'accepted', 'processing', 'ready_for_pickup', 'out_for_delivery']);
@@ -815,12 +839,25 @@ const getRequestTentativeAmount = (request) => {
 };
 
 const getRequestTotalAmount = (request, options = {}) => {
-    const finalPrice = parseMoney(request?.final_price);
+    const requestData = parseJsonObject(request?.data);
+    const quoteBreakdown = parseJsonObject(requestData?.quote_breakdown || requestData?.quoteBreakdown);
+    const finalPrice = [
+        request?.final_price,
+        requestData?.final_price,
+        requestData?.finalPrice,
+        quoteBreakdown?.computed_total,
+    ].map(parseMoney).find((amount) => amount > 0) || 0;
     if (finalPrice > 0) {
         return finalPrice;
     }
 
-    const estimatedPrice = parseMoney(request?.estimated_price);
+    const estimatedPrice = [
+        request?.estimated_price,
+        requestData?.estimated_price,
+        requestData?.estimatedPrice,
+        requestData?.estimated_total,
+        requestData?.estimatedTotal,
+    ].map(parseMoney).find((amount) => amount > 0) || 0;
     if (estimatedPrice > 0) {
         return estimatedPrice;
     }
@@ -1060,7 +1097,65 @@ const getCollectedCashAmount = (totalAmount, amountReceived, paymentStatus) => {
         return safeTotal > 0 ? safeTotal : safeReceived;
     }
 
+    if (safeTotal <= 0) {
+        return safeReceived;
+    }
+
     return Math.min(safeTotal, safeReceived);
+};
+
+const addLiveSaleRow = (rows, dateValue, amount) => {
+    const saleAmount = parseMoney(amount);
+    if (!dateValue || saleAmount <= 0) {
+        return;
+    }
+
+    rows.push({
+        sale_date: dateValue,
+        total_amount: saleAmount,
+    });
+};
+
+const sumSaleRowsInRange = (rows = [], range = null) => rows.reduce((sum, sale) => {
+    const saleDate = new Date(sale.sale_date);
+    const saleAmount = parseMoney(sale.total_amount);
+
+    if (Number.isNaN(saleDate.getTime()) || saleAmount <= 0) {
+        return sum;
+    }
+
+    if (!range) {
+        return sum + saleAmount;
+    }
+
+    return saleDate >= range.start && saleDate < range.end ? sum + saleAmount : sum;
+}, 0);
+
+const getOrderLiveSaleAmount = (order = {}) => {
+    const status = String(order?.status || '').trim().toLowerCase();
+    if (CLOSED_ORDER_STATUSES.has(status)) {
+        return 0;
+    }
+
+    return getCollectedCashAmount(
+        order?.total,
+        order?.amount_received,
+        order?.payment_status
+    );
+};
+
+const getRequestLiveSaleAmount = (request = {}) => {
+    const status = String(request?.status || '').trim().toLowerCase();
+    if (CLOSED_REQUEST_STATUSES.has(status)) {
+        return 0;
+    }
+
+    const requestDetails = getRequestTransactionDetails(request);
+    return getCollectedCashAmount(
+        getRequestTotalAmount(request),
+        requestDetails.amountReceived,
+        requestDetails.paymentStatus
+    );
 };
 
 const getRequestScheduleDate = (request) => {
@@ -2508,9 +2603,6 @@ export const adminAPI = {
         const weekRange = getWeekRange();
         const currentMonthRange = getMonthRange(formatMonthKey(new Date()));
 
-        let salesQuery = supabase.from('sales').select('total_amount, sale_date');
-        salesQuery = applyDateRangeToQuery(salesQuery, 'sale_date', periodRange);
-
         let ordersQuery = supabase
             .from('orders')
             .select(`
@@ -2538,12 +2630,12 @@ export const adminAPI = {
                 type,
                 created_at,
                 status,
-                payment_status,
-                amount_received,
-                final_price,
+                ${options.includePaymentStatus !== false ? 'payment_status,' : ''}
+                ${options.includeAmountReceived !== false ? 'amount_received,' : ''}
+                ${options.includeFinalPrice !== false ? 'final_price,' : ''}
                 ${options.includeEstimatedPrice !== false ? 'estimated_price,' : ''}
-                delivery_method,
-                pickup_time,
+                ${options.includeDeliveryMethod !== false ? 'delivery_method,' : ''}
+                ${options.includePickupTime !== false ? 'pickup_time,' : ''}
                 data,
                 users (
                     name,
@@ -2554,29 +2646,39 @@ export const adminAPI = {
 
         ordersQuery = applyDateRangeToQuery(ordersQuery, 'created_at', periodRange);
         let requestQueryOptions = {
-            includeEstimatedPrice: true,
+            includePaymentStatus: true,
+            includeAmountReceived: true,
+            includeFinalPrice: true,
+            includeEstimatedPrice: false,
+            includeDeliveryMethod: true,
+            includePickupTime: true,
         };
         let requestsQuery = applyDateRangeToQuery(buildSalesRequestsQuery(requestQueryOptions), 'created_at', periodRange);
 
         const [
-            { data: sales, error: salesError },
             { data: orders, error: ordersError },
             requestsResult,
-        ] = await Promise.all([salesQuery, ordersQuery, requestsQuery]);
+        ] = await Promise.all([ordersQuery, requestsQuery]);
 
         let { data: requests, error: requestsError } = requestsResult;
 
         const requestSalesColumnFallbacks = [
-            ['requests.estimated_price', 'includeEstimatedPrice', 'estimated_price'],
+            ['payment_status', 'includePaymentStatus', 'payment_status'],
+            ['amount_received', 'includeAmountReceived', 'amount_received'],
+            ['final_price', 'includeFinalPrice', 'final_price'],
+            ['estimated_price', 'includeEstimatedPrice', 'estimated_price'],
+            ['delivery_method', 'includeDeliveryMethod', 'delivery_method'],
+            ['pickup_time', 'includePickupTime', 'pickup_time'],
         ];
 
         let shouldRetryRequests = true;
         while (requestsError && shouldRetryRequests) {
             shouldRetryRequests = false;
-            const message = String(requestsError.message || '');
-            const missingColumn = requestSalesColumnFallbacks.find(([qualifiedName]) => (
-                message.includes(qualifiedName)
-            ));
+            const missingColumn = getMissingRequestColumnFallback(
+                requestsError,
+                requestSalesColumnFallbacks,
+                requestQueryOptions
+            );
 
             if (missingColumn) {
                 const [, optionKey, columnLabel] = missingColumn;
@@ -2597,31 +2699,17 @@ export const adminAPI = {
             }
         }
 
-        if (salesError || ordersError || requestsError) {
-            console.error('Error fetching sales summary sources:', { salesError, ordersError, requestsError });
-            throw salesError || ordersError || requestsError;
+        if (ordersError || requestsError) {
+            console.error('Error fetching sales summary sources:', { ordersError, requestsError });
+            throw ordersError || requestsError;
         }
 
-        const addSalesInRange = (range) => (sales || []).reduce((sum, sale) => {
-            const saleDate = new Date(sale.sale_date);
-            const saleAmount = parseMoney(sale.total_amount);
-
-            if (Number.isNaN(saleDate.getTime()) || saleAmount <= 0) {
-                return sum;
-            }
-
-            if (!range) {
-                return sum + saleAmount;
-            }
-
-            return saleDate >= range.start && saleDate < range.end ? sum + saleAmount : sum;
-        }, 0);
-
+        const liveSaleRows = [];
         const summary = {
-            totalSales: addSalesInRange(periodRange),
-            todaySales: addSalesInRange(todayRange),
-            weekSales: addSalesInRange(weekRange),
-            monthSales: addSalesInRange(currentMonthRange),
+            totalSales: 0,
+            todaySales: 0,
+            weekSales: 0,
+            monthSales: 0,
             totalOrders: 0,
             completedOrders: 0,
             pendingOrders: 0,
@@ -2644,10 +2732,11 @@ export const adminAPI = {
             const status = String(order?.status || '').trim().toLowerCase();
             const isClosed = CLOSED_ORDER_STATUSES.has(status);
             const isUpcoming = UPCOMING_ORDER_STATUSES.has(status);
-            const collectedCash = getCollectedCashAmount(totalAmount, amountReceived, paymentStatus);
+            const collectedCash = getOrderLiveSaleAmount(order);
 
             summary.totalOrders += 1;
             summary.cashSales += collectedCash;
+            addLiveSaleRow(liveSaleRows, order?.created_at, collectedCash);
 
             if (status === 'completed' || status === 'claimed') {
                 summary.completedOrders += 1;
@@ -2700,22 +2789,24 @@ export const adminAPI = {
         });
 
         (requests || []).forEach((request) => {
+            const requestDetails = getRequestTransactionDetails(request);
             const requestTotal = getRequestTotalAmount(request);
             const requestDisplayTotal = getRequestTotalAmount(request, { allowTentative: true });
-            const amountReceived = parseMoney(request?.amount_received);
-            const paymentStatus = String(request?.payment_status || '').trim().toLowerCase();
+            const amountReceived = requestDetails.amountReceived;
+            const paymentStatus = String(requestDetails.paymentStatus || '').trim().toLowerCase();
             const remainingBalance = getOutstandingBalance(requestTotal, amountReceived, paymentStatus);
             const status = String(request?.status || '').trim().toLowerCase();
             const isClosed = CLOSED_REQUEST_STATUSES.has(status);
             const isUpcoming = UPCOMING_REQUEST_STATUSES.has(status);
             const scheduleDate = getRequestScheduleDate(request) || request?.created_at || null;
-            const scheduleText = request?.pickup_time
-                ? `Pickup ${request.pickup_time}`
+            const scheduleText = requestDetails.pickupTime
+                ? `Pickup ${requestDetails.pickupTime}`
                 : (getRequestScheduleDate(request) ? 'Scheduled request' : 'Active request');
-            const collectedCash = getCollectedCashAmount(requestTotal, amountReceived, paymentStatus);
+            const collectedCash = getRequestLiveSaleAmount(request);
 
             summary.totalOrders += 1;
             summary.cashSales += collectedCash;
+            addLiveSaleRow(liveSaleRows, request?.created_at, collectedCash);
 
             if (status === 'completed' || status === 'claimed') {
                 summary.completedOrders += 1;
@@ -2766,26 +2857,100 @@ export const adminAPI = {
 
         summary.outstandingItems.sort((a, b) => new Date(b.scheduleDate || 0) - new Date(a.scheduleDate || 0));
         summary.upcomingItems.sort((a, b) => new Date(a.scheduleDate || 0) - new Date(b.scheduleDate || 0));
+        summary.totalSales = summary.cashSales;
+        summary.todaySales = sumSaleRowsInRange(liveSaleRows, todayRange);
+        summary.weekSales = sumSaleRowsInRange(liveSaleRows, weekRange);
+        summary.monthSales = sumSaleRowsInRange(liveSaleRows, currentMonthRange);
 
         return { data: summary };
     },
 
     getSalesChartData: async (period = 'week', monthKey = null, dateKey = null) => {
         const periodRange = getPeriodRange(period, monthKey, dateKey);
-        let query = supabase
-            .from('sales')
-            .select('sale_date, total_amount')
-            .order('sale_date', { ascending: true });
+        let ordersQuery = supabase
+            .from('orders')
+            .select('id, created_at, status, payment_status, amount_received, total')
+            .order('created_at', { ascending: true });
 
-        query = applyDateRangeToQuery(query, 'sale_date', periodRange);
+        const buildChartRequestsQuery = (options = {}) => supabase
+            .from('requests')
+            .select(`
+                id,
+                created_at,
+                status,
+                ${options.includePaymentStatus !== false ? 'payment_status,' : ''}
+                ${options.includeAmountReceived !== false ? 'amount_received,' : ''}
+                ${options.includeFinalPrice !== false ? 'final_price,' : ''}
+                ${options.includeEstimatedPrice !== false ? 'estimated_price,' : ''}
+                data
+            `)
+            .order('created_at', { ascending: true });
 
-        const { data, error } = await query;
+        ordersQuery = applyDateRangeToQuery(ordersQuery, 'created_at', periodRange);
+        let requestQueryOptions = {
+            includePaymentStatus: true,
+            includeAmountReceived: true,
+            includeFinalPrice: true,
+            includeEstimatedPrice: false,
+        };
+        let requestsQuery = applyDateRangeToQuery(buildChartRequestsQuery(requestQueryOptions), 'created_at', periodRange);
 
-        if (error) {
-            console.error('Error fetching sales chart data:', error);
-            throw error;
+        const [
+            { data: orders, error: ordersError },
+            requestsResult,
+        ] = await Promise.all([ordersQuery, requestsQuery]);
+
+        let { data: requests, error: requestsError } = requestsResult;
+
+        const chartRequestColumnFallbacks = [
+            ['payment_status', 'includePaymentStatus', 'payment_status'],
+            ['amount_received', 'includeAmountReceived', 'amount_received'],
+            ['final_price', 'includeFinalPrice', 'final_price'],
+            ['estimated_price', 'includeEstimatedPrice', 'estimated_price'],
+        ];
+
+        let shouldRetryChartRequests = true;
+        while (requestsError && shouldRetryChartRequests) {
+            shouldRetryChartRequests = false;
+            const missingColumn = getMissingRequestColumnFallback(
+                requestsError,
+                chartRequestColumnFallbacks,
+                requestQueryOptions
+            );
+
+            if (!missingColumn) {
+                break;
+            }
+
+            const [, optionKey, columnLabel] = missingColumn;
+            requestQueryOptions = { ...requestQueryOptions, [optionKey]: false };
+            console.warn(`Retrying sales chart request fetch without optional column ${columnLabel}`);
+            const retryResult = await applyDateRangeToQuery(
+                buildChartRequestsQuery(requestQueryOptions),
+                'created_at',
+                periodRange
+            );
+            requests = retryResult.data;
+            requestsError = retryResult.error;
+            shouldRetryChartRequests = Boolean(requestsError);
         }
-        return { data };
+
+        if (ordersError || requestsError) {
+            console.error('Error fetching sales chart data:', { ordersError, requestsError });
+            throw ordersError || requestsError;
+        }
+
+        const liveSaleRows = [];
+        (orders || []).forEach((order) => {
+            addLiveSaleRow(liveSaleRows, order?.created_at, getOrderLiveSaleAmount(order));
+        });
+        (requests || []).forEach((request) => {
+            addLiveSaleRow(liveSaleRows, request?.created_at, getRequestLiveSaleAmount(request));
+        });
+
+        return {
+            data: liveSaleRows.sort((a, b) => new Date(a.sale_date || 0) - new Date(b.sale_date || 0)),
+        };
     },
 
     getBestSellingProducts: async (period = 'all', monthKey = null, dateKey = null) => {
@@ -2885,11 +3050,10 @@ export const adminAPI = {
                     email
                 )
             `)
-            .in('status', ['completed', 'claimed'])
             .order('created_at', { ascending: false })
             .limit(500);
 
-        const requestsQuery = supabase
+        const buildTransactionRequestsQuery = (options = {}) => supabase
             .from('requests')
             .select(`
                 id,
@@ -2897,30 +3061,77 @@ export const adminAPI = {
                 type,
                 created_at,
                 status,
-                status_timestamps,
-                payment_status,
-                payment_method,
-                amount_received,
-                estimated_price,
-                final_price,
-                shipping_fee,
-                delivery_method,
-                pickup_time,
+                ${options.includeStatusTimestamps !== false ? 'status_timestamps,' : ''}
+                ${options.includePaymentStatus !== false ? 'payment_status,' : ''}
+                ${options.includePaymentMethod !== false ? 'payment_method,' : ''}
+                ${options.includeAmountReceived !== false ? 'amount_received,' : ''}
+                ${options.includeEstimatedPrice !== false ? 'estimated_price,' : ''}
+                ${options.includeFinalPrice !== false ? 'final_price,' : ''}
+                ${options.includeShippingFee !== false ? 'shipping_fee,' : ''}
+                ${options.includeDeliveryMethod !== false ? 'delivery_method,' : ''}
+                ${options.includePickupTime !== false ? 'pickup_time,' : ''}
                 data,
                 users (
                     name,
                     email
                 )
             `)
-            .in('status', ['completed', 'claimed'])
             .order('created_at', { ascending: false })
             .limit(500);
+        let requestQueryOptions = {
+            includeStatusTimestamps: true,
+            includePaymentStatus: true,
+            includePaymentMethod: false,
+            includeAmountReceived: true,
+            includeEstimatedPrice: false,
+            includeFinalPrice: true,
+            includeShippingFee: true,
+            includeDeliveryMethod: true,
+            includePickupTime: true,
+        };
+        let requestsQuery = buildTransactionRequestsQuery(requestQueryOptions);
 
         const [
             { data: sales, error: salesError },
             { data: orders, error: ordersError },
-            { data: requests, error: requestsError },
+            requestsResult,
         ] = await Promise.all([salesQuery, ordersQuery, requestsQuery]);
+
+        let { data: requests, error: requestsError } = requestsResult;
+
+        const transactionRequestColumnFallbacks = [
+            ['status_timestamps', 'includeStatusTimestamps', 'status_timestamps'],
+            ['payment_status', 'includePaymentStatus', 'payment_status'],
+            ['payment_method', 'includePaymentMethod', 'payment_method'],
+            ['amount_received', 'includeAmountReceived', 'amount_received'],
+            ['estimated_price', 'includeEstimatedPrice', 'estimated_price'],
+            ['final_price', 'includeFinalPrice', 'final_price'],
+            ['shipping_fee', 'includeShippingFee', 'shipping_fee'],
+            ['delivery_method', 'includeDeliveryMethod', 'delivery_method'],
+            ['pickup_time', 'includePickupTime', 'pickup_time'],
+        ];
+
+        let shouldRetryTransactionRequests = true;
+        while (requestsError && shouldRetryTransactionRequests) {
+            shouldRetryTransactionRequests = false;
+            const missingColumn = getMissingRequestColumnFallback(
+                requestsError,
+                transactionRequestColumnFallbacks,
+                requestQueryOptions
+            );
+
+            if (!missingColumn) {
+                break;
+            }
+
+            const [, optionKey, columnLabel] = missingColumn;
+            requestQueryOptions = { ...requestQueryOptions, [optionKey]: false };
+            console.warn(`Retrying transaction request history without optional column ${columnLabel}`);
+            const retryResult = await buildTransactionRequestsQuery(requestQueryOptions);
+            requests = retryResult.data;
+            requestsError = retryResult.error;
+            shouldRetryTransactionRequests = Boolean(requestsError);
+        }
 
         if (ordersError || requestsError) {
             console.error('Error fetching transaction history records:', { ordersError, requestsError });
@@ -2944,8 +3155,9 @@ export const adminAPI = {
 
         const orderTransactions = (orders || []).map((order) => {
             const sale = salesByOrderId.get(String(order.id)) || {};
-            const saleAmount = parseMoney(sale.total_amount) || parseMoney(order.total);
-            const amountReceived = parseMoney(order.amount_received);
+            const totalAmount = parseMoney(sale.total_amount) || parseMoney(order.total);
+            const paymentStatus = String(order.payment_status || '').trim().toLowerCase();
+            const amountReceived = getOrderLiveSaleAmount(order);
             const saleDate = sale.sale_date ? new Date(sale.sale_date) : getTransactionStatusDate(order);
             const items = Array.isArray(order.order_items)
                 ? order.order_items.map((item) => {
@@ -2964,17 +3176,18 @@ export const adminAPI = {
             return {
                 id: sale.id ? `sale-${sale.id}` : `order-${order.id}`,
                 date: saleDate ? saleDate.toISOString() : order.created_at,
-                amount: saleAmount,
+                amount: amountReceived,
+                totalAmount,
                 customerName: order.users?.name || 'N/A',
                 customerEmail: order.users?.email || '',
                 refNumber: order.order_number || `Order #${order.id}`,
                 sourceType: 'Order',
                 entityType: 'order',
                 status: order.status,
-                paymentStatus: order.payment_status,
+                paymentStatus,
                 paymentMethod: order.payment_method,
                 amountReceived,
-                remainingBalance: getRemainingBalance(saleAmount, amountReceived),
+                remainingBalance: getOutstandingBalance(totalAmount, amountReceived, paymentStatus),
                 deliveryMethod: order.delivery_method,
                 pickupTime: order.pickup_time,
                 shippingFee: parseMoney(order.shipping_fee),
@@ -2986,31 +3199,33 @@ export const adminAPI = {
         const requestTransactions = (requests || []).map((request) => {
             const sale = salesByRequestId.get(String(request.id)) || {};
             const requestDetails = getRequestTransactionDetails(request);
-            const saleAmount = parseMoney(sale.total_amount)
+            const totalAmount = parseMoney(sale.total_amount)
                 || requestDetails.finalPrice
                 || getRequestTotalAmount(request);
-            const amountReceived = requestDetails.amountReceived;
+            const paymentStatus = String(requestDetails.paymentStatus || '').trim().toLowerCase();
+            const amountReceived = getRequestLiveSaleAmount(request);
             const saleDate = sale.sale_date ? new Date(sale.sale_date) : getTransactionStatusDate(request);
 
             return {
                 id: sale.id ? `sale-${sale.id}` : `request-${request.id}`,
                 date: saleDate ? saleDate.toISOString() : request.created_at,
-                amount: saleAmount,
+                amount: amountReceived,
+                totalAmount,
                 customerName: request.users?.name || 'N/A',
                 customerEmail: request.users?.email || '',
                 refNumber: request.request_number || `Request #${request.id}`,
                 sourceType: request.type || 'Request',
                 entityType: 'request',
                 status: request.status,
-                paymentStatus: requestDetails.paymentStatus,
+                paymentStatus,
                 paymentMethod: requestDetails.paymentMethod,
                 amountReceived,
-                remainingBalance: getRemainingBalance(saleAmount, amountReceived),
+                remainingBalance: getOutstandingBalance(totalAmount, amountReceived, paymentStatus),
                 deliveryMethod: requestDetails.deliveryMethod,
                 pickupTime: requestDetails.pickupTime,
                 shippingFee: requestDetails.shippingFee,
                 requestDetails,
-                items: getRequestTransactionItems(request, saleAmount),
+                items: getRequestTransactionItems(request, totalAmount),
             };
         });
 
