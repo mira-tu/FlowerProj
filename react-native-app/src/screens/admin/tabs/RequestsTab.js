@@ -819,9 +819,27 @@ const quoteStyles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+    gap: 8,
     marginBottom: 8,
   },
+  quoteLiveItemRow: {
+    marginBottom: 10,
+  },
+  quoteLiveItemName: {
+    fontSize: 14,
+    color: '#831843',
+    fontWeight: '600',
+    lineHeight: 19,
+  },
+  quoteLiveItemPrice: {
+    marginTop: 4,
+    fontSize: 14,
+    color: '#831843',
+    fontWeight: '700',
+    textAlign: 'right',
+  },
   quoteTotalLabel: {
+    flex: 1,
     fontSize: 14,
     color: '#831843',
     fontWeight: '600',
@@ -836,6 +854,7 @@ const quoteStyles = StyleSheet.create({
     fontSize: 14,
     color: '#831843',
     fontWeight: '700',
+    textAlign: 'right',
   },
   quoteTotalDivider: {
     marginTop: 6,
@@ -844,14 +863,17 @@ const quoteStyles = StyleSheet.create({
     borderTopColor: '#f9a8d4',
   },
   quoteGrandTotalLabel: {
+    flex: 1,
     fontSize: 18,
     fontWeight: '700',
     color: '#be185d',
   },
   quoteGrandTotalValue: {
+    marginLeft: 12,
     fontSize: 18,
     fontWeight: '700',
     color: '#be185d',
+    textAlign: 'right',
   },
 });
 const normalizeRequestData = (request) => {
@@ -3517,9 +3539,9 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                               <Text style={[quoteStyles.quoteTotalMeta, { marginBottom: 4, marginTop: 4, fontWeight: '700', color: '#9a3412' }]}>{groupKey}</Text>
                             ) : null}
                             {groupRows.map((row, index) => (
-                              <View key={`${row.productName}-${index}`} style={quoteStyles.quoteTotalRow}>
-                                <Text style={[quoteStyles.quoteTotalLabel, { flex: 1, paddingRight: 12 }]}>{row.productName}</Text>
-                                <Text style={quoteStyles.quoteTotalValue}>{formatCurrency(row.price)}</Text>
+                              <View key={`${row.productName}-${index}`} style={quoteStyles.quoteLiveItemRow}>
+                                <Text style={quoteStyles.quoteLiveItemName}>{row.productName}</Text>
+                                <Text style={quoteStyles.quoteLiveItemPrice}>{formatCurrency(row.price)}</Text>
                               </View>
                             ))}
                           </View>
