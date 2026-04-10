@@ -211,6 +211,8 @@ const formatBookingEventTime = (value) => {
     return `${hours}:${minutes} ${period}`;
 };
 
+const roundCurrency = (value) => Math.round((Number.parseFloat(String(value ?? 0)) || 0) * 100) / 100;
+
 const buildBookingOverview = (requestData = {}) => {
     const items = getBookingItems(requestData);
     const uniqueValues = (values = []) => Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
@@ -357,7 +359,28 @@ const OrderBookingTracking = () => {
             const bookingItems = getBookingItems(normalizedRequestData);
             const bookingSummary = summarizeCancellationItems(bookingItems);
             const primaryBookingItem = bookingItems[0] || null;
-            const nextShippingFee = bookingSummary.allCancelled ? 0 : Number(foundRequest.shipping_fee || normalizedRequestData?.shipping_fee || 0);
+            const quoteBreakdown = normalizedRequestData?.quote_breakdown || null;
+            const quoteSummary = quoteBreakdown
+                ? summarizeCustomOrderQuoteBreakdown(quoteBreakdown, foundRequest.shipping_fee || normalizedRequestData?.shipping_fee || 0)
+                : null;
+            const nextShippingFee = bookingSummary.allCancelled
+                ? 0
+                : (
+                    quoteSummary
+                        ? Number(quoteSummary.shipping || 0)
+                        : Number(foundRequest.shipping_fee || normalizedRequestData?.shipping_fee || 0)
+                );
+            const nextFinalPrice = quoteSummary
+                ? roundCurrency(quoteSummary.total)
+                : (
+                    Number(foundRequest.final_price || 0) > 0
+                        ? Number(foundRequest.final_price || 0)
+                        : (
+                            bookingSummary.hasItems
+                                ? (bookingSummary.allCancelled ? 0 : roundCurrency(bookingSummary.remainingSubtotal + nextShippingFee))
+                                : Number(foundRequest.final_price || 0)
+                        )
+                );
 
             const transformedRequest = {
                 ...foundRequest,
@@ -372,9 +395,7 @@ const OrderBookingTracking = () => {
                     items: bookingItems,
                 },
                 imageUrl: foundRequest.image_url || primaryBookingItem?.image_url || null,
-                finalPrice: bookingSummary.hasItems
-                    ? (bookingSummary.allCancelled ? 0 : bookingSummary.remainingSubtotal + nextShippingFee)
-                    : foundRequest.final_price,
+                finalPrice: nextFinalPrice,
                 shipping_fee: nextShippingFee,
                 status: bookingSummary.allCancelled ? 'cancelled' : foundRequest.status,
             };
