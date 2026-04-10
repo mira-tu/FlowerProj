@@ -109,7 +109,7 @@ const SalesTab = () => {
   const [dateInputValue, setDateInputValue] = useState(formatDateKey(new Date()));
   const [bestSellers, setBestSellers] = useState([]);
   const [transactions, setTransactions] = useState([]);
-  const [expandedTxn, setExpandedTxn] = useState(null);
+  const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [exportModalVisible, setExportModalVisible] = useState(false);
   const [exportOptions, setExportOptions] = useState({
@@ -317,11 +317,17 @@ const SalesTab = () => {
   };
 
   const formatCurrency = (amount) => {
-    return `₱${parseFloat(amount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const parsed = Number.parseFloat(amount);
+    const safeAmount = Number.isFinite(parsed) ? parsed : 0;
+    return `₱${safeAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
   const formatDate = (dateString) => {
     const d = new Date(dateString);
+    if (Number.isNaN(d.getTime())) {
+      return 'N/A';
+    }
+
     return d.toLocaleDateString('en-PH', {
       month: 'short',
       day: 'numeric',
@@ -341,10 +347,19 @@ const SalesTab = () => {
 
   const getSourceLabel = (type) => {
     if (type === 'Order') return 'Order';
-    if (type === 'booking') return 'Booking';
-    if (type === 'customized') return 'Custom';
+    if (type === 'booking') return 'Custom Order';
+    if (type === 'customized') return 'Customizer Studio';
     if (type === 'special_order') return 'Special';
     return 'Request';
+  };
+
+  const formatPlainLabel = (value) => {
+    const normalized = String(value || '').trim();
+    if (!normalized) return '';
+
+    return normalized
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, char => char.toUpperCase());
   };
 
   const getStatusBadgeColor = (status) => {
@@ -359,6 +374,47 @@ const SalesTab = () => {
       default:
         return getStatusColor(String(status || '').trim().toLowerCase());
     }
+  };
+
+  const renderTransactionDetailRow = (label, value) => {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    return (
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12, paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' }}>
+        <Text style={{ flex: 1, color: '#6B7280', fontSize: 12, fontWeight: '600' }}>{label}</Text>
+        <Text style={{ flex: 1.4, color: '#111827', fontSize: 12, fontWeight: '700', textAlign: 'right' }}>
+          {value}
+        </Text>
+      </View>
+    );
+  };
+
+  const renderTransactionItemRow = (item, index) => {
+    const quantity = Number.parseFloat(item?.quantity);
+    const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
+    const lineTotal = Number.isFinite(Number.parseFloat(item?.lineTotal))
+      ? Number.parseFloat(item.lineTotal)
+      : Number.parseFloat(item?.price || 0) * safeQuantity;
+
+    return (
+      <View key={`${item?.name || 'item'}-${index}`} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
+          <Text style={{ flex: 1, color: '#111827', fontSize: 13, fontWeight: '700' }}>
+            {item?.name || `Item ${index + 1}`} x {safeQuantity}
+          </Text>
+          <Text style={{ color: '#16A34A', fontSize: 13, fontWeight: '700' }}>
+            {formatCurrency(lineTotal)}
+          </Text>
+        </View>
+        {item?.description ? (
+          <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 3 }}>
+            {item.description}
+          </Text>
+        ) : null}
+      </View>
+    );
   };
 
   const renderPipelineItem = (item, section = 'unpaid') => {
@@ -618,6 +674,9 @@ const SalesTab = () => {
       setExporting(false);
     }
   };
+
+  const selectedTransactionItems = selectedTransaction?.items || [];
+  const selectedRequestDetails = selectedTransaction?.requestDetails || {};
 
   if (loading && !refreshing) {
     return (
@@ -1040,7 +1099,7 @@ const SalesTab = () => {
               <TouchableOpacity
                 key={txn.id}
                 activeOpacity={0.7}
-                onPress={() => setExpandedTxn(expandedTxn === txn.id ? null : txn.id)}
+                onPress={() => setSelectedTransaction(txn)}
                 style={{
                   backgroundColor: '#fff',
                   borderRadius: 12,
@@ -1085,41 +1144,10 @@ const SalesTab = () => {
                   </View>
                 </View>
 
-                {/* Expandable items */}
-                {expandedTxn === txn.id && txn.items.length > 0 && (
-                  <View style={{
-                    marginTop: 10, paddingTop: 10,
-                    borderTopWidth: 1, borderTopColor: '#f0f0f0',
-                  }}>
-                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#666', marginBottom: 6 }}>
-                      Items
-                    </Text>
-                    {txn.items.map((item, idx) => (
-                      <View key={idx} style={{
-                        flexDirection: 'row', justifyContent: 'space-between',
-                        paddingVertical: 3,
-                      }}>
-                        <Text style={{ fontSize: 12, color: '#555', flex: 1 }}>
-                          {item.name} × {item.quantity}
-                        </Text>
-                        <Text style={{ fontSize: 12, color: '#555', fontWeight: '500' }}>
-                          {formatCurrency(item.price * item.quantity)}
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
-
-                {/* Expand indicator */}
-                {txn.items.length > 0 && (
-                  <View style={{ alignItems: 'center', marginTop: 6 }}>
-                    <Ionicons
-                      name={expandedTxn === txn.id ? 'chevron-up' : 'chevron-down'}
-                      size={16}
-                      color="#ccc"
-                    />
-                  </View>
-                )}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, marginTop: 8 }}>
+                  <Text style={{ fontSize: 11, color: '#9CA3AF', fontWeight: '600' }}>Tap to view details</Text>
+                  <Ionicons name="chevron-forward" size={14} color="#ccc" />
+                </View>
               </TouchableOpacity>
             ))
           )}
@@ -1128,6 +1156,103 @@ const SalesTab = () => {
         <View style={{ height: 50 }} />
         <View style={{ height: 50 }} />
       </ScrollView>
+
+      {/* Transaction Details Modal */}
+      <Modal
+        visible={Boolean(selectedTransaction)}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setSelectedTransaction(null)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={[styles.modalContent, { width: isWeb ? 560 : '92%', maxHeight: '85%' }]}>
+            {selectedTransaction ? (
+              <>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.modalTitle}>Sale Details</Text>
+                    <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 4 }}>
+                      #{selectedTransaction.refNumber} - {getSourceLabel(selectedTransaction.sourceType)}
+                    </Text>
+                  </View>
+                  <TouchableOpacity onPress={() => setSelectedTransaction(null)} style={{ padding: 8 }}>
+                    <Ionicons name="close" size={24} color="#374151" />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView showsVerticalScrollIndicator={false}>
+                  <View style={{
+                    backgroundColor: '#FDF2F8',
+                    borderRadius: 14,
+                    padding: 14,
+                    marginBottom: 12,
+                    borderWidth: 1,
+                    borderColor: '#FBCFE8',
+                  }}>
+                    <Text style={{ color: '#9D174D', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      Total Sale
+                    </Text>
+                    <Text style={{ color: '#BE185D', fontSize: 24, fontWeight: '800', marginTop: 4 }}>
+                      {formatCurrency(selectedTransaction.amount)}
+                    </Text>
+                  </View>
+
+                  <View style={{ marginBottom: 14 }}>
+                    {renderTransactionDetailRow('Reference', `#${selectedTransaction.refNumber}`)}
+                    {renderTransactionDetailRow('Type', getSourceLabel(selectedTransaction.sourceType))}
+                    {renderTransactionDetailRow('Customer', selectedTransaction.customerName)}
+                    {renderTransactionDetailRow('Email', selectedTransaction.customerEmail)}
+                    {renderTransactionDetailRow('Date', formatDate(selectedTransaction.date))}
+                    {renderTransactionDetailRow('Status', selectedTransaction.status ? getStatusLabel(selectedTransaction.status) : null)}
+                    {renderTransactionDetailRow('Payment', selectedTransaction.paymentStatus ? getPaymentStatusDisplay(selectedTransaction.paymentStatus) : null)}
+                    {renderTransactionDetailRow('Payment Method', formatPlainLabel(selectedTransaction.paymentMethod))}
+                    {renderTransactionDetailRow('Amount Paid', selectedTransaction.amountReceived > 0 ? formatCurrency(selectedTransaction.amountReceived) : null)}
+                    {renderTransactionDetailRow('Remaining Balance', selectedTransaction.remainingBalance > 0 ? formatCurrency(selectedTransaction.remainingBalance) : null)}
+                    {renderTransactionDetailRow('Delivery Method', formatPlainLabel(selectedTransaction.deliveryMethod))}
+                    {renderTransactionDetailRow('Pickup Time', selectedTransaction.pickupTime)}
+                    {renderTransactionDetailRow('Delivery Fee', selectedTransaction.shippingFee > 0 ? formatCurrency(selectedTransaction.shippingFee) : null)}
+                  </View>
+
+                  {selectedTransaction.entityType === 'request' ? (
+                    <View style={{ marginBottom: 14 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '800', color: '#111827', marginBottom: 6 }}>
+                        Request Details
+                      </Text>
+                      {renderTransactionDetailRow('Items Count', selectedRequestDetails.itemCount)}
+                      {renderTransactionDetailRow('Recipient', selectedRequestDetails.recipientName)}
+                      {renderTransactionDetailRow('Occasion', selectedRequestDetails.occasion)}
+                      {renderTransactionDetailRow('Event Date', selectedRequestDetails.eventDate)}
+                      {renderTransactionDetailRow('Event Time', selectedRequestDetails.eventTime)}
+                      {renderTransactionDetailRow('Venue', selectedRequestDetails.venue)}
+                      {renderTransactionDetailRow('Instructions', selectedRequestDetails.specialInstructions)}
+                    </View>
+                  ) : null}
+
+                  <View style={{ marginBottom: 16 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '800', color: '#111827', marginBottom: 6 }}>
+                      Items
+                    </Text>
+                    {selectedTransactionItems.length ? (
+                      selectedTransactionItems.map(renderTransactionItemRow)
+                    ) : (
+                      <Text style={{ color: '#6B7280', fontSize: 12 }}>
+                        No saved item breakdown for this sale.
+                      </Text>
+                    )}
+                  </View>
+                </ScrollView>
+
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.saveButton, { marginTop: 12 }]}
+                  onPress={() => setSelectedTransaction(null)}
+                >
+                  <Text style={styles.buttonText}>Close</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
 
       {/* Export Options Modal */}
       <Modal visible={exportModalVisible} animationType="fade" transparent>

@@ -608,6 +608,7 @@ const quoteStyles = StyleSheet.create({
   },
   quoteBreakdownRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'flex-start',
     backgroundColor: 'rgba(255,255,255,0.82)',
     borderRadius: 14,
@@ -634,23 +635,25 @@ const quoteStyles = StyleSheet.create({
     fontWeight: '700',
     color: '#7c2d12',
     lineHeight: 20,
+    flexShrink: 1,
   },
   quoteBreakdownMeta: {
     marginTop: 4,
     fontSize: 12,
     color: '#c2410c',
     lineHeight: 16,
+    flexShrink: 1,
   },
   quoteBreakdownFlowerRail: {
-    marginLeft: 12,
-    width: 124,
+    marginTop: 10,
+    width: '100%',
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
   },
   quoteBreakdownFlowerTile: {
     width: 52,
-    marginLeft: 6,
+    marginRight: 6,
     marginBottom: 8,
     alignItems: 'center',
   },
@@ -1599,16 +1602,16 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                   <View style={{ backgroundColor: '#ffffff', borderRadius: 12, padding: 12, marginTop: 6 }}>
                     {tentativeBreakdown.lineItems.map((lineItem) => (
                       <View key={lineItem.key} style={{ marginBottom: 10 }}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
-                          <Text style={[styles.detailValue, { flex: 1 }]}>{`${lineItem.label} x${lineItem.quantity}`}</Text>
-                          <Text style={[styles.detailValue, { textAlign: 'right' }]}>{lineItem.formattedLineRange}</Text>
+                        <View>
+                          <Text style={styles.detailValue}>{`${lineItem.label} x${lineItem.quantity}`}</Text>
+                          <Text style={[styles.detailValue, { marginTop: 2 }]}>{lineItem.formattedLineRange}</Text>
                         </View>
                         <Text style={[styles.detailLabel, { marginTop: 2, textTransform: 'none', letterSpacing: 0 }]}>Each: {lineItem.formattedUnitRange}</Text>
                       </View>
                     ))}
-                    <View style={{ borderTopWidth: 1, borderTopColor: '#f3d7e3', paddingTop: 10, marginTop: 2, flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
+                    <View style={{ borderTopWidth: 1, borderTopColor: '#f3d7e3', paddingTop: 10, marginTop: 2 }}>
                       <Text style={styles.detailLabel}>Tentative Subtotal</Text>
-                      <Text style={[styles.detailValue, { textAlign: 'right' }]}>{tentativeBreakdown.formattedSubtotalRange}</Text>
+                      <Text style={styles.detailValue}>{tentativeBreakdown.formattedSubtotalRange}</Text>
                     </View>
                   </View>
                 </View>
@@ -2073,11 +2076,15 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
     const bookingItems = getBookingItemsFromData(requestData);
     const storedQuoteBreakdown = requestData?.quote_breakdown;
 
-    const initialShipping = request.shipping_fee !== null && request.shipping_fee !== undefined
-      ? parseCurrencyNumber(request.shipping_fee)
-      : (storedQuoteBreakdown?.shipping_fee !== null && storedQuoteBreakdown?.shipping_fee !== undefined
-        ? parseCurrencyNumber(storedQuoteBreakdown.shipping_fee)
-        : 0);
+    const hasStoredQuoteShipping = storedQuoteBreakdown?.shipping_fee !== null && storedQuoteBreakdown?.shipping_fee !== undefined;
+    const isPendingCustomOrderQuote = request?.type === 'booking' && String(request?.status || '').toLowerCase() === 'pending';
+    const initialShipping = hasStoredQuoteShipping
+      ? parseCurrencyNumber(storedQuoteBreakdown.shipping_fee)
+      : (isPendingCustomOrderQuote
+        ? 0
+        : (request.shipping_fee !== null && request.shipping_fee !== undefined
+          ? parseCurrencyNumber(request.shipping_fee)
+          : 0));
 
     const initialPrice = request.final_price !== null && request.final_price !== undefined
       ? String(Math.max(parseCurrencyNumber(request.final_price) - initialShipping, 0))
@@ -3483,11 +3490,7 @@ const RequestsTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage
                     </View>
 
                     <Text style={quoteStyles.quoteInfoHint}>
-                      Saved request fee: {formatCurrency(
-                        requestToQuote?.shipping_fee !== null && requestToQuote?.shipping_fee !== undefined
-                          ? parseCurrencyNumber(requestToQuote.shipping_fee)
-                          : 0
-                      )}. You can change it here before sending the quote.
+                      Enter the admin-reviewed delivery fee for this custom order before sending the quote.
                     </Text>
                   </View>
 

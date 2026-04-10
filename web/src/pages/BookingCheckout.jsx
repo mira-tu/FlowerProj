@@ -9,7 +9,6 @@ import { formatCustomOrderV4Currency, getSelectedEstimateFromItem, isCustomOrder
 import {
     buildAddressFeeMap,
     buildMultiDeliveryDestinations,
-    calculateDeliveryFee,
     createDeliveryAssignments,
     syncDeliveryAssignments,
 } from '../utils/deliveryDestinations';
@@ -222,17 +221,6 @@ const BookingCheckout = ({ user }) => {
         return addressFeeMap[String(selectedAddressId)] ?? DEFAULT_SHIPPING_FEE;
     }, [addressFeeMap, selectedAddressId]);
 
-    const shippingFee = useMemo(() => calculateDeliveryFee({
-        deliveryMethod,
-        hasFreeShipping: false,
-        selectedAddressId,
-        multiAddressEnabled,
-        assignments: deliveryAssignments,
-        addressFeeMap: Object.keys(addressFeeMap).length
-            ? addressFeeMap
-            : (selectedAddressId ? { [selectedAddressId]: dynamicShippingFee } : {}),
-    }), [addressFeeMap, deliveryAssignments, deliveryMethod, dynamicShippingFee, multiAddressEnabled, selectedAddressId]);
-
     const inquirySummary = useMemo(() => buildBookingSummary(inquiryItems), [inquiryItems]);
     const estimatedInquiryTotal = useMemo(() => (
         inquiryItems.reduce((sum, item) => sum + (getSelectedEstimateFromItem(item)?.estimatedPrice || item.estimatedPrice || 0), 0)
@@ -251,14 +239,7 @@ const BookingCheckout = ({ user }) => {
         }),
         [estimatedInquiryTotal, tentativeInquiryBreakdowns]
     );
-    const combinedPricingSummaryWithShipping = useMemo(
-        () => buildTentativePricingSummary({
-            fixedAmount: estimatedInquiryTotal,
-            tentativeBreakdowns: tentativeInquiryBreakdowns,
-            extraFixedAmount: deliveryMethod === 'delivery' ? shippingFee : 0,
-        }),
-        [deliveryMethod, estimatedInquiryTotal, shippingFee, tentativeInquiryBreakdowns]
-    );
+    const customOrderReviewShippingFee = 0;
 
     const handleSubmitInquiry = async () => {
         if (!user) {
@@ -294,7 +275,10 @@ const BookingCheckout = ({ user }) => {
                     addressFeeMap: Object.keys(addressFeeMap).length
                         ? addressFeeMap
                         : (selectedAddressId ? { [selectedAddressId]: dynamicShippingFee } : {}),
-                })
+                }).map((destination) => ({
+                    ...destination,
+                    shipping_fee: customOrderReviewShippingFee,
+                }))
                 : [];
 
             const uploadedItems = await uploadBookingRequestImages(inquiryItems, user.id);
@@ -322,7 +306,7 @@ const BookingCheckout = ({ user }) => {
                 contact_number: primaryDestination?.recipient_phone || firstItem.contactNumber || address.phone || null,
                 delivery_method: deliveryMethod,
                 pickup_time: pickupDateTime,
-                shipping_fee: shippingFee,
+                shipping_fee: customOrderReviewShippingFee,
                 payment_status: 'to_pay',
                 image_url: firstItem.image_url || null,
                 notes: commonNotes || null,
@@ -372,7 +356,7 @@ const BookingCheckout = ({ user }) => {
                     multi_delivery_destinations: multiDeliveryDestinations,
                     delivery_method: deliveryMethod,
                     pickup_time: pickupDateTime,
-                    shipping_fee: shippingFee,
+                    shipping_fee: customOrderReviewShippingFee,
                     stock_allocations: stockAllocations,
                 },
             };
@@ -643,14 +627,14 @@ const BookingCheckout = ({ user }) => {
                             )}
                             <div className="summary-row">
                                 <span>{deliveryMethod === 'pickup' ? 'Pickup' : 'Delivery Fee'}</span>
-                                <span>{deliveryMethod === 'pickup' ? 'FREE' : `PHP ${shippingFee.toLocaleString()}`}</span>
+                                <span>{deliveryMethod === 'pickup' ? 'FREE' : 'Set after review'}</span>
                             </div>
                             <hr />
                             <div className="summary-row total">
                                 <span>Tentative Total</span>
                                 <span className="fw-bold fs-5">
-                                    {combinedPricingSummaryWithShipping.hasCompleteEstimate
-                                        ? combinedPricingSummaryWithShipping.formattedTotalRange
+                                    {combinedPricingSummary.hasCompleteEstimate
+                                        ? combinedPricingSummary.formattedTotalRange
                                         : hasEstimatedInquiryTotal
                                             ? `Guide: ${formatCustomOrderV4Currency(estimatedInquiryTotal)}`
                                             : 'To be quoted'}

@@ -783,7 +783,14 @@ const CLOSED_ORDER_STATUSES = new Set(['cancelled']);
 const CLOSED_REQUEST_STATUSES = new Set(['cancelled', 'declined']);
 
 const parseMoney = (value) => {
-    const parsed = Number.parseFloat(value);
+    if (value === null || value === undefined || value === '') {
+        return 0;
+    }
+
+    const normalized = typeof value === 'number'
+        ? value
+        : String(value).replace(/[^\d.-]/g, '');
+    const parsed = Number.parseFloat(normalized);
     return Number.isFinite(parsed) ? parsed : 0;
 };
 
@@ -819,6 +826,175 @@ const getRequestTotalAmount = (request, options = {}) => {
     }
 
     return options.allowTentative ? getRequestTentativeAmount(request) : 0;
+};
+
+const getTransactionTextValue = (value) => {
+    if (Array.isArray(value)) {
+        return value.map(getTransactionTextValue).filter(Boolean).join(', ');
+    }
+
+    if (value && typeof value === 'object') {
+        return getTransactionTextValue(value.name || value.label || value.title || value.value);
+    }
+
+    return String(value ?? '').trim();
+};
+
+const getFirstTransactionText = (...values) => {
+    for (const value of values) {
+        const text = getTransactionTextValue(value);
+        if (text) {
+            return text;
+        }
+    }
+
+    return '';
+};
+
+const getTransactionQuantity = (value) => {
+    const parsed = Number.parseInt(String(value ?? '').replace(/[^\d-]/g, ''), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+};
+
+const buildRequestItemDescription = (item = {}) => {
+    const arrangement = getFirstTransactionText(
+        item?.arrangementSummary,
+        item?.arrangementType,
+        item?.arrangement_type,
+        Array.isArray(item?.arrangementTypes) ? item.arrangementTypes.join(', ') : null
+    );
+    const occasion = getFirstTransactionText(item?.occasion, item?.otherOccasion);
+    const flowers = getFirstTransactionText(item?.flowers, item?.flower, item?.selectedFlowers);
+    const bundleSize = getFirstTransactionText(item?.bundleSize ? `${item.bundleSize} stems` : null);
+
+    return [
+        arrangement,
+        occasion,
+        bundleSize,
+        flowers ? `Flowers: ${flowers}` : null,
+    ].filter(Boolean).join(' | ');
+};
+
+const getRequestTransactionItems = (request = {}, saleAmount = 0) => {
+    const requestData = parseJsonObject(request?.data);
+    const quoteBreakdown = parseJsonObject(requestData?.quote_breakdown);
+    const quoteLineItems = Array.isArray(quoteBreakdown?.line_items)
+        ? quoteBreakdown.line_items
+        : [];
+
+    if (quoteLineItems.length) {
+        return quoteLineItems.map((row, index) => {
+            const quantity = getTransactionQuantity(row?.quantity);
+            const price = parseMoney(row?.price ?? row?.unit_price ?? row?.unitPrice);
+
+            return {
+                name: getFirstTransactionText(row?.product_name, row?.productName, row?.name) || `Product ${index + 1}`,
+                quantity,
+                price,
+                lineTotal: price * quantity,
+                description: getFirstTransactionText(row?.arrangement_group, row?.arrangementGroup),
+            };
+        });
+    }
+
+    const sourceItems = Array.isArray(requestData?.items)
+        ? requestData.items.filter(Boolean)
+        : [];
+
+    if (sourceItems.length) {
+        return sourceItems.map((item, index) => {
+            const quantity = getTransactionQuantity(
+                item?.quantity ?? item?.qty ?? item?.arrangementQuantity ?? item?.arrangement_quantity
+            );
+            const price = parseMoney(
+                item?.price ?? item?.unit_price ?? item?.unitPrice ?? item?.final_price ?? item?.estimatedPrice ?? item?.estimated_price
+            );
+            const fallbackName = request?.type === 'customized'
+                ? `Customizer Studio ${index + 1}`
+                : `Custom Order ${index + 1}`;
+
+            return {
+                name: getFirstTransactionText(
+                    item?.name,
+                    item?.arrangementSummary,
+                    item?.arrangementType,
+                    item?.arrangement_type,
+                    item?.bundleSize ? `Customized Bouquet (${item.bundleSize} stems)` : null,
+                    item?.occasion
+                ) || fallbackName,
+                quantity,
+                price,
+                lineTotal: price * quantity,
+                description: buildRequestItemDescription(item),
+            };
+        });
+    }
+
+    const fallbackName = getFirstTransactionText(
+        requestData?.name,
+        requestData?.summary_label,
+        requestData?.bundleSize ? `Customized Bouquet (${requestData.bundleSize} stems)` : null,
+        requestData?.arrangementSummary,
+        requestData?.occasion
+    );
+
+    if (fallbackName || saleAmount > 0) {
+        return [{
+            name: fallbackName || 'Request sale',
+            quantity: 1,
+            price: saleAmount,
+            lineTotal: saleAmount,
+            description: '',
+        }];
+    }
+
+    return [];
+};
+
+const getRequestTransactionDetails = (request = {}) => {
+    const requestData = parseJsonObject(request?.data);
+    const quoteBreakdown = parseJsonObject(requestData?.quote_breakdown);
+    const sourceItems = Array.isArray(requestData?.items) ? requestData.items.filter(Boolean) : [];
+    const firstItem = sourceItems[0] || {};
+    const address = parseJsonObject(requestData?.address);
+
+    return {
+        status: request?.status || requestData?.status || '',
+        paymentStatus: request?.payment_status || requestData?.payment_status || '',
+        paymentMethod: request?.payment_method || requestData?.payment_method || '',
+        amountReceived: parseMoney(request?.amount_received ?? requestData?.amount_received),
+        finalPrice: parseMoney(request?.final_price ?? requestData?.final_price ?? quoteBreakdown?.computed_total),
+        shippingFee: parseMoney(quoteBreakdown?.shipping_fee ?? request?.shipping_fee ?? requestData?.shipping_fee),
+        deliveryMethod: request?.delivery_method || requestData?.delivery_method || '',
+        pickupTime: request?.pickup_time || requestData?.pickup_time || '',
+        itemCount: parseMoney(requestData?.item_count) || sourceItems.length || null,
+        recipientName: getFirstTransactionText(
+            firstItem?.recipientName,
+            firstItem?.recipient_name,
+            requestData?.recipientName,
+            requestData?.recipient_name,
+            address?.name
+        ),
+        occasion: getFirstTransactionText(firstItem?.occasion, firstItem?.otherOccasion, requestData?.occasion),
+        eventDate: getFirstTransactionText(firstItem?.eventDate, firstItem?.event_date, requestData?.eventDate, requestData?.event_date),
+        eventTime: getFirstTransactionText(firstItem?.eventTime, firstItem?.event_time, requestData?.eventTime, requestData?.event_time),
+        venue: getFirstTransactionText(
+            firstItem?.venue,
+            firstItem?.delivery_address,
+            requestData?.venue,
+            requestData?.delivery_address,
+            address?.address_line,
+            address?.street,
+            address?.barangay
+        ),
+        specialInstructions: getFirstTransactionText(
+            firstItem?.specialInstructions,
+            firstItem?.special_instructions,
+            firstItem?.notes,
+            requestData?.specialInstructions,
+            requestData?.special_instructions
+        ),
+    };
 };
 
 const getRemainingBalance = (totalAmount, amountReceived) => {
@@ -2645,8 +2821,13 @@ export const adminAPI = {
                 total_amount,
                 orders (
                     order_number,
+                    status,
+                    payment_status,
+                    amount_received,
+                    total,
                     delivery_method,
                     payment_method,
+                    pickup_time,
                     order_items (
                         quantity,
                         price,
@@ -2655,7 +2836,16 @@ export const adminAPI = {
                 ),
                 requests (
                     request_number,
-                    type
+                    type,
+                    status,
+                    payment_status,
+                    payment_method,
+                    amount_received,
+                    final_price,
+                    shipping_fee,
+                    delivery_method,
+                    pickup_time,
+                    data
                 ),
                 users (
                     name,
@@ -2680,22 +2870,43 @@ export const adminAPI = {
                 ? sale.orders?.order_number
                 : sale.requests?.request_number;
             const sourceType = isOrder ? 'Order' : (sale.requests?.type || 'Request');
+            const saleAmount = parseMoney(sale.total_amount);
+            const requestDetails = isOrder ? {} : getRequestTransactionDetails(sale.requests);
+            const amountReceived = isOrder
+                ? parseMoney(sale.orders?.amount_received)
+                : requestDetails.amountReceived;
             const items = isOrder && sale.orders?.order_items
-                ? sale.orders.order_items.map(oi => ({
-                    name: oi.products?.name || 'Unknown',
-                    quantity: oi.quantity,
-                    price: oi.price,
-                }))
-                : [];
+                ? sale.orders.order_items.map(oi => {
+                    const quantity = getTransactionQuantity(oi.quantity);
+                    const price = parseMoney(oi.price);
+
+                    return {
+                        name: oi.products?.name || 'Unknown',
+                        quantity,
+                        price,
+                        lineTotal: price * quantity,
+                    };
+                })
+                : getRequestTransactionItems(sale.requests, saleAmount);
 
             return {
                 id: sale.id,
                 date: sale.sale_date,
-                amount: parseFloat(sale.total_amount),
+                amount: saleAmount,
                 customerName: sale.users?.name || 'N/A',
                 customerEmail: sale.users?.email || '',
                 refNumber: refNumber || 'N/A',
                 sourceType,
+                entityType: isOrder ? 'order' : 'request',
+                status: isOrder ? sale.orders?.status : requestDetails.status,
+                paymentStatus: isOrder ? sale.orders?.payment_status : requestDetails.paymentStatus,
+                paymentMethod: isOrder ? sale.orders?.payment_method : requestDetails.paymentMethod,
+                amountReceived,
+                remainingBalance: getRemainingBalance(saleAmount, amountReceived),
+                deliveryMethod: isOrder ? sale.orders?.delivery_method : requestDetails.deliveryMethod,
+                pickupTime: isOrder ? sale.orders?.pickup_time : requestDetails.pickupTime,
+                shippingFee: isOrder ? 0 : requestDetails.shippingFee,
+                requestDetails,
                 items,
             };
         });
