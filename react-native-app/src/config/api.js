@@ -957,13 +957,18 @@ const getRequestTransactionDetails = (request = {}) => {
     const sourceItems = Array.isArray(requestData?.items) ? requestData.items.filter(Boolean) : [];
     const firstItem = sourceItems[0] || {};
     const address = parseJsonObject(requestData?.address);
+    const finalPrice = [
+        request?.final_price,
+        requestData?.final_price,
+        quoteBreakdown?.computed_total,
+    ].map(parseMoney).find((amount) => amount > 0) || 0;
 
     return {
         status: request?.status || requestData?.status || '',
         paymentStatus: request?.payment_status || requestData?.payment_status || '',
         paymentMethod: request?.payment_method || requestData?.payment_method || '',
         amountReceived: parseMoney(request?.amount_received ?? requestData?.amount_received),
-        finalPrice: parseMoney(request?.final_price ?? requestData?.final_price ?? quoteBreakdown?.computed_total),
+        finalPrice,
         shippingFee: parseMoney(quoteBreakdown?.shipping_fee ?? request?.shipping_fee ?? requestData?.shipping_fee),
         deliveryMethod: request?.delivery_method || requestData?.delivery_method || '',
         pickupTime: request?.pickup_time || requestData?.pickup_time || '',
@@ -995,6 +1000,41 @@ const getRequestTransactionDetails = (request = {}) => {
             requestData?.special_instructions
         ),
     };
+};
+
+const getTransactionStatusDate = (record = {}) => {
+    const timestamps = parseJsonObject(record?.status_timestamps);
+    const candidates = [
+        record?.sale_date,
+        timestamps?.claimed,
+        timestamps?.completed,
+        timestamps?.paid,
+        record?.updated_at,
+        record?.created_at,
+    ];
+
+    for (const candidate of candidates) {
+        if (!candidate) continue;
+        const parsed = new Date(candidate);
+        if (!Number.isNaN(parsed.getTime())) {
+            return parsed;
+        }
+    }
+
+    return null;
+};
+
+const isDateInRange = (dateValue, range) => {
+    if (!range) {
+        return true;
+    }
+
+    const parsed = dateValue instanceof Date ? dateValue : new Date(dateValue);
+    if (Number.isNaN(parsed.getTime())) {
+        return false;
+    }
+
+    return parsed >= range.start && parsed < range.end;
 };
 
 const getRemainingBalance = (totalAmount, amountReceived) => {
@@ -2810,106 +2850,174 @@ export const adminAPI = {
     },
 
     getTransactionHistory: async (period = 'all', monthKey = null, dateKey = null) => {
-        let query = supabase
+        const periodRange = getPeriodRange(period, monthKey, dateKey);
+
+        const salesQuery = supabase
             .from('sales')
+            .select('id, order_id, request_id, sale_date, total_amount')
+            .order('sale_date', { ascending: false })
+            .limit(500);
+
+        const ordersQuery = supabase
+            .from('orders')
             .select(`
                 id,
-                order_id,
-                request_id,
-                user_id,
-                sale_date,
-                total_amount,
-                orders (
-                    order_number,
-                    status,
-                    payment_status,
-                    amount_received,
-                    total,
-                    delivery_method,
-                    payment_method,
-                    pickup_time,
-                    order_items (
-                        quantity,
-                        price,
-                        products ( name )
-                    )
-                ),
-                requests (
-                    request_number,
-                    type,
-                    status,
-                    payment_status,
-                    payment_method,
-                    amount_received,
-                    final_price,
-                    shipping_fee,
-                    delivery_method,
-                    pickup_time,
-                    data
+                order_number,
+                created_at,
+                status,
+                status_timestamps,
+                payment_status,
+                payment_method,
+                amount_received,
+                subtotal,
+                shipping_fee,
+                total,
+                delivery_method,
+                pickup_time,
+                order_items (
+                    quantity,
+                    price,
+                    name,
+                    products ( name )
                 ),
                 users (
                     name,
                     email
                 )
             `)
-            .order('sale_date', { ascending: false });
+            .in('status', ['completed', 'claimed'])
+            .order('created_at', { ascending: false })
+            .limit(500);
 
-        const periodRange = getPeriodRange(period, monthKey, dateKey);
-        query = applyDateRangeToQuery(query, 'sale_date', periodRange);
+        const requestsQuery = supabase
+            .from('requests')
+            .select(`
+                id,
+                request_number,
+                type,
+                created_at,
+                status,
+                status_timestamps,
+                payment_status,
+                payment_method,
+                amount_received,
+                estimated_price,
+                final_price,
+                shipping_fee,
+                delivery_method,
+                pickup_time,
+                data,
+                users (
+                    name,
+                    email
+                )
+            `)
+            .in('status', ['completed', 'claimed'])
+            .order('created_at', { ascending: false })
+            .limit(500);
 
-        const { data, error } = await query;
+        const [
+            { data: sales, error: salesError },
+            { data: orders, error: ordersError },
+            { data: requests, error: requestsError },
+        ] = await Promise.all([salesQuery, ordersQuery, requestsQuery]);
 
-        if (error) {
-            console.error('Error fetching transaction history:', error);
-            throw error;
+        if (ordersError || requestsError) {
+            console.error('Error fetching transaction history records:', { ordersError, requestsError });
+            throw ordersError || requestsError;
         }
 
-        const transactions = (data || []).map(sale => {
-            const isOrder = !!sale.order_id;
-            const refNumber = isOrder
-                ? sale.orders?.order_number
-                : sale.requests?.request_number;
-            const sourceType = isOrder ? 'Order' : (sale.requests?.type || 'Request');
-            const saleAmount = parseMoney(sale.total_amount);
-            const requestDetails = isOrder ? {} : getRequestTransactionDetails(sale.requests);
-            const amountReceived = isOrder
-                ? parseMoney(sale.orders?.amount_received)
-                : requestDetails.amountReceived;
-            const items = isOrder && sale.orders?.order_items
-                ? sale.orders.order_items.map(oi => {
-                    const quantity = getTransactionQuantity(oi.quantity);
-                    const price = parseMoney(oi.price);
+        if (salesError) {
+            console.warn('Could not fetch sales rows for transaction history:', salesError.message);
+        }
+
+        const salesByOrderId = new Map();
+        const salesByRequestId = new Map();
+        (sales || []).forEach((sale) => {
+            if (sale?.order_id) {
+                salesByOrderId.set(String(sale.order_id), sale);
+            }
+            if (sale?.request_id) {
+                salesByRequestId.set(String(sale.request_id), sale);
+            }
+        });
+
+        const orderTransactions = (orders || []).map((order) => {
+            const sale = salesByOrderId.get(String(order.id)) || {};
+            const saleAmount = parseMoney(sale.total_amount) || parseMoney(order.total);
+            const amountReceived = parseMoney(order.amount_received);
+            const saleDate = sale.sale_date ? new Date(sale.sale_date) : getTransactionStatusDate(order);
+            const items = Array.isArray(order.order_items)
+                ? order.order_items.map((item) => {
+                    const quantity = getTransactionQuantity(item.quantity);
+                    const price = parseMoney(item.price);
 
                     return {
-                        name: oi.products?.name || 'Unknown',
+                        name: item.name || item.products?.name || 'Unknown',
                         quantity,
                         price,
                         lineTotal: price * quantity,
                     };
                 })
-                : getRequestTransactionItems(sale.requests, saleAmount);
+                : [];
 
             return {
-                id: sale.id,
-                date: sale.sale_date,
+                id: sale.id ? `sale-${sale.id}` : `order-${order.id}`,
+                date: saleDate ? saleDate.toISOString() : order.created_at,
                 amount: saleAmount,
-                customerName: sale.users?.name || 'N/A',
-                customerEmail: sale.users?.email || '',
-                refNumber: refNumber || 'N/A',
-                sourceType,
-                entityType: isOrder ? 'order' : 'request',
-                status: isOrder ? sale.orders?.status : requestDetails.status,
-                paymentStatus: isOrder ? sale.orders?.payment_status : requestDetails.paymentStatus,
-                paymentMethod: isOrder ? sale.orders?.payment_method : requestDetails.paymentMethod,
+                customerName: order.users?.name || 'N/A',
+                customerEmail: order.users?.email || '',
+                refNumber: order.order_number || `Order #${order.id}`,
+                sourceType: 'Order',
+                entityType: 'order',
+                status: order.status,
+                paymentStatus: order.payment_status,
+                paymentMethod: order.payment_method,
                 amountReceived,
                 remainingBalance: getRemainingBalance(saleAmount, amountReceived),
-                deliveryMethod: isOrder ? sale.orders?.delivery_method : requestDetails.deliveryMethod,
-                pickupTime: isOrder ? sale.orders?.pickup_time : requestDetails.pickupTime,
-                shippingFee: isOrder ? 0 : requestDetails.shippingFee,
-                requestDetails,
+                deliveryMethod: order.delivery_method,
+                pickupTime: order.pickup_time,
+                shippingFee: parseMoney(order.shipping_fee),
+                requestDetails: {},
                 items,
             };
         });
+
+        const requestTransactions = (requests || []).map((request) => {
+            const sale = salesByRequestId.get(String(request.id)) || {};
+            const requestDetails = getRequestTransactionDetails(request);
+            const saleAmount = parseMoney(sale.total_amount)
+                || requestDetails.finalPrice
+                || getRequestTotalAmount(request);
+            const amountReceived = requestDetails.amountReceived;
+            const saleDate = sale.sale_date ? new Date(sale.sale_date) : getTransactionStatusDate(request);
+
+            return {
+                id: sale.id ? `sale-${sale.id}` : `request-${request.id}`,
+                date: saleDate ? saleDate.toISOString() : request.created_at,
+                amount: saleAmount,
+                customerName: request.users?.name || 'N/A',
+                customerEmail: request.users?.email || '',
+                refNumber: request.request_number || `Request #${request.id}`,
+                sourceType: request.type || 'Request',
+                entityType: 'request',
+                status: request.status,
+                paymentStatus: requestDetails.paymentStatus,
+                paymentMethod: requestDetails.paymentMethod,
+                amountReceived,
+                remainingBalance: getRemainingBalance(saleAmount, amountReceived),
+                deliveryMethod: requestDetails.deliveryMethod,
+                pickupTime: requestDetails.pickupTime,
+                shippingFee: requestDetails.shippingFee,
+                requestDetails,
+                items: getRequestTransactionItems(request, saleAmount),
+            };
+        });
+
+        const transactions = [...orderTransactions, ...requestTransactions]
+            .filter((transaction) => transaction.amount > 0)
+            .filter((transaction) => isDateInRange(transaction.date, periodRange))
+            .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
 
         return { data: transactions };
     },

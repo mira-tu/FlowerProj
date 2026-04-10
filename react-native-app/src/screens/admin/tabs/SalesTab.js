@@ -103,7 +103,7 @@ const SalesTab = () => {
   });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedPeriod, setSelectedPeriod] = useState('today');
+  const [selectedPeriod, setSelectedPeriod] = useState('all');
   const [selectedMonthKey, setSelectedMonthKey] = useState(formatMonthKey(new Date()));
   const [selectedDateKey, setSelectedDateKey] = useState(formatDateKey(new Date()));
   const [dateInputValue, setDateInputValue] = useState(formatDateKey(new Date()));
