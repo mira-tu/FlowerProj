@@ -525,16 +525,29 @@ const Profile = ({ user, logout }) => {
                     qty: item.remainingQuantity,
                     quantity: item.remainingQuantity,
                 }));
-                const shippingFee = parseFloat(request.shipping_fee || requestData?.quote_breakdown?.shipping_fee || 0);
+                const quoteBreakdown = requestData?.quote_breakdown || null;
+                const quoteSummary = quoteBreakdown
+                    ? summarizeCustomOrderQuoteBreakdown(quoteBreakdown, request.shipping_fee || 0)
+                    : null;
+                const shippingFee = quoteSummary
+                    ? quoteSummary.shipping
+                    : parseFloat(request.shipping_fee || requestData?.quote_breakdown?.shipping_fee || 0);
                 const fallbackTotal = parseFloat(
                     request.final_price
                     || request.estimated_price
                     || requestData?.estimated_total
                     || 0
                 );
-                const computedTotal = requestItemSummary.hasItems
-                    ? (requestItemSummary.allCancelled ? 0 : roundCurrency(requestItemSummary.remainingSubtotal + shippingFee))
-                    : fallbackTotal;
+                const computedTotal = quoteSummary
+                    ? roundCurrency(quoteSummary.total)
+                    : (
+                        requestItemSummary.hasItems
+                            ? (requestItemSummary.allCancelled ? 0 : roundCurrency(requestItemSummary.remainingSubtotal + shippingFee))
+                            : fallbackTotal
+                    );
+                const computedSubtotal = quoteSummary
+                    ? roundCurrency(quoteSummary.subtotal)
+                    : (requestItemSummary.hasItems ? requestItemSummary.remainingSubtotal : fallbackTotal);
 
                 return {
                     id: `request-${request.id}`, // Prefix to avoid conflicts
@@ -547,10 +560,10 @@ const Profile = ({ user, logout }) => {
                     type: request.type, // booking, customized, special_order
                     payment_status: request.payment_status ?? requestData?.payment_status ?? null,
                     total: computedTotal,
-                    subtotal: requestItemSummary.hasItems ? requestItemSummary.remainingSubtotal : fallbackTotal,
+                    subtotal: computedSubtotal,
                     notes: request.notes || requestData.notes,
                     data: requestData,
-                    quoteBreakdown: requestData?.quote_breakdown || null,
+                    quoteBreakdown,
                     cancellationReason: request.cancellation_reason || requestData?.cancellation_reason || requestData?.decline_feedback || requestData?.declineFeedback || null,
                     declineFeedback: requestData?.decline_feedback || requestData?.declineFeedback || null,
                     shipping_fee: shippingFee,
