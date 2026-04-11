@@ -732,7 +732,13 @@ const getDateRange = (dateKey) => {
     const end = new Date(start);
     end.setDate(end.getDate() + 1);
 
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    if (
+        Number.isNaN(start.getTime())
+        || Number.isNaN(end.getTime())
+        || start.getFullYear() !== Number(yearText)
+        || start.getMonth() !== Number(monthText) - 1
+        || start.getDate() !== Number(dayText)
+    ) {
         return null;
     }
 
@@ -746,13 +752,83 @@ const getDateRange = (dateKey) => {
     };
 };
 
-const getPeriodRange = (period = 'all', monthKey = null, dateKey = null) => {
+const formatDateKeyValue = (date) => {
+    const parsed = date instanceof Date ? date : new Date(date);
+    if (Number.isNaN(parsed.getTime())) {
+        return '';
+    }
+
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+const getCustomRange = (startKey, endKey) => {
+    const startRange = getDateRange(startKey);
+    const endRange = getDateRange(endKey);
+    const fallbackRange = startRange || endRange;
+
+    if (!fallbackRange) {
+        return null;
+    }
+
+    let start = new Date((startRange || fallbackRange).start);
+    let endBase = new Date((endRange || fallbackRange).start);
+
+    if (endBase < start) {
+        [start, endBase] = [endBase, start];
+    }
+
+    const end = new Date(endBase);
+    end.setDate(end.getDate() + 1);
+
+    const normalizedStartKey = formatDateKeyValue(start);
+    const normalizedEndKey = formatDateKeyValue(endBase);
+    const startLabel = start.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' });
+    const endLabel = endBase.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' });
+
+    return {
+        key: `range:${normalizedStartKey}:${normalizedEndKey}`,
+        start,
+        end,
+        startIso: start.toISOString(),
+        endIso: end.toISOString(),
+        label: normalizedStartKey === normalizedEndKey ? startLabel : `${startLabel} - ${endLabel}`,
+    };
+};
+
+const normalizeSalesFilterArgs = (periodOrFilters = 'all', monthKey = null, dateKey = null, rangeStartKey = null, rangeEndKey = null) => {
+    if (periodOrFilters && typeof periodOrFilters === 'object' && !Array.isArray(periodOrFilters)) {
+        return {
+            period: periodOrFilters.period || 'all',
+            monthKey: periodOrFilters.monthKey || null,
+            dateKey: periodOrFilters.dateKey || null,
+            rangeStartKey: periodOrFilters.rangeStartKey || periodOrFilters.startKey || null,
+            rangeEndKey: periodOrFilters.rangeEndKey || periodOrFilters.endKey || null,
+        };
+    }
+
+    return {
+        period: periodOrFilters || 'all',
+        monthKey,
+        dateKey,
+        rangeStartKey,
+        rangeEndKey,
+    };
+};
+
+const getPeriodRange = (period = 'all', monthKey = null, dateKey = null, rangeStartKey = null, rangeEndKey = null) => {
     if (period === 'today') {
         return getTodayRange();
     }
 
     if (period === 'date') {
         return getDateRange(dateKey);
+    }
+
+    if (period === 'range') {
+        return getCustomRange(rangeStartKey, rangeEndKey);
     }
 
     if (period === 'week') {
@@ -1217,6 +1293,431 @@ const getRequestTransactionDetails = (request = {}) => {
             requestData?.special_instructions
         ),
     };
+};
+
+const toAbsolutePublicImageUrl = (value) => {
+    const text = String(value || '').trim();
+    if (!text) {
+        return null;
+    }
+
+    if (/^(https?:\/\/|data:)/i.test(text)) {
+        return text;
+    }
+
+    return `${BASE_URL}${text.startsWith('/') ? text : `/${text}`}`;
+};
+
+const normalizeBestSellerName = (value) => String(value || '')
+    .replace(/\s*\([^)]*\)\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const getFlowerNamesFromValue = (value) => {
+    if (!value) {
+        return [];
+    }
+
+    const names = [];
+    const pushName = (candidate) => {
+        const normalized = normalizeBestSellerName(candidate);
+        if (normalized && !names.includes(normalized)) {
+            names.push(normalized);
+        }
+    };
+
+    if (Array.isArray(value)) {
+        value.forEach((entry) => {
+            if (!entry) return;
+            if (typeof entry === 'string') {
+                pushName(entry);
+                return;
+            }
+
+            pushName(entry.name || entry.label || entry.value || entry.title);
+        });
+        return names;
+    }
+
+    if (typeof value === 'string') {
+        value
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter(Boolean)
+            .forEach(pushName);
+        return names;
+    }
+
+    if (typeof value === 'object') {
+        pushName(value.name || value.label || value.value || value.title);
+    }
+
+    return names;
+};
+
+const buildFlowerImageLookup = (flowers = []) => {
+    const imageLookup = new Map();
+
+    (Array.isArray(flowers) ? flowers : []).forEach((flower) => {
+        const normalizedName = normalizeBestSellerName(
+            flower?.name || flower?.label || flower?.value || flower?.title
+        );
+        const imageUrl = toAbsolutePublicImageUrl(
+            flower?.image_url
+            || flower?.img
+            || flower?.stemImg
+            || flower?.stem_image_url
+            || flower?.layerImg
+            || flower?.layer_image_url
+        );
+
+        if (normalizedName && imageUrl && !imageLookup.has(normalizedName)) {
+            imageLookup.set(normalizedName, imageUrl);
+        }
+    });
+
+    return imageLookup;
+};
+
+const addFlowerBreakdownEntry = (breakdownMap, name, quantity, imageUrl = null) => {
+    const normalizedName = normalizeBestSellerName(name);
+    const safeQuantity = parseMoney(quantity);
+
+    if (!normalizedName || safeQuantity <= 0) {
+        return;
+    }
+
+    const current = breakdownMap.get(normalizedName) || {
+        name: normalizedName,
+        quantity: 0,
+        image_url: null,
+    };
+
+    current.quantity += safeQuantity;
+    if (!current.image_url && imageUrl) {
+        current.image_url = toAbsolutePublicImageUrl(imageUrl);
+    }
+
+    breakdownMap.set(normalizedName, current);
+};
+
+const addFlowerBreakdownFromObject = (breakdownMap, source, imageLookup = new Map()) => {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) {
+        return;
+    }
+
+    Object.entries(source).forEach(([name, quantity]) => {
+        const normalizedName = normalizeBestSellerName(name);
+        addFlowerBreakdownEntry(
+            breakdownMap,
+            normalizedName,
+            quantity,
+            imageLookup.get(normalizedName) || null
+        );
+    });
+};
+
+const addRoundRobinFlowerBreakdown = (breakdownMap, flowerNames = [], totalQuantity = 0, imageLookup = new Map()) => {
+    const normalizedNames = Array.from(
+        new Set((Array.isArray(flowerNames) ? flowerNames : [])
+            .map((name) => normalizeBestSellerName(name))
+            .filter(Boolean))
+    );
+
+    if (!normalizedNames.length) {
+        return;
+    }
+
+    const parsedQuantity = Math.round(parseMoney(totalQuantity));
+    const safeTotalQuantity = parsedQuantity > 0 ? parsedQuantity : normalizedNames.length;
+
+    for (let index = 0; index < safeTotalQuantity; index += 1) {
+        const name = normalizedNames[index % normalizedNames.length];
+        addFlowerBreakdownEntry(
+            breakdownMap,
+            name,
+            1,
+            imageLookup.get(name) || null
+        );
+    }
+};
+
+const getArrangementSelectionFlowerTotal = (selection = {}) => {
+    const directTotal = Math.round(parseMoney(
+        selection?.total_flowers
+        ?? selection?.totalFlowers
+    ));
+
+    if (directTotal > 0) {
+        return directTotal;
+    }
+
+    const flowersPerArrangement = parseMoney(
+        selection?.flowers_per_arrangement
+        ?? selection?.flowersPerArrangement
+    );
+    const quantity = parseMoney(selection?.quantity ?? selection?.arrangement_quantity);
+
+    if (flowersPerArrangement > 0) {
+        return Math.round(flowersPerArrangement * (quantity > 0 ? quantity : 1));
+    }
+
+    return 0;
+};
+
+const getRequestItemFlowerTotal = (item = {}) => {
+    const directTotal = Math.round(parseMoney(
+        item?.totalFlowers
+        ?? item?.total_flowers
+        ?? item?.total_flower_count
+        ?? item?.flowerQuantity
+        ?? item?.flower_quantity
+        ?? item?.bundleSize
+    ));
+
+    if (directTotal > 0) {
+        return directTotal;
+    }
+
+    const arrangementSelections = Array.isArray(item?.arrangementSelections)
+        ? item.arrangementSelections
+        : [];
+
+    const arrangementTotal = arrangementSelections.reduce(
+        (sum, selection) => sum + getArrangementSelectionFlowerTotal(selection),
+        0
+    );
+
+    return arrangementTotal > 0 ? arrangementTotal : 0;
+};
+
+const getRequestBestSellerItems = (request = {}) => {
+    const requestData = parseJsonObject(request?.data);
+
+    if (Array.isArray(requestData?.items) && requestData.items.length) {
+        return requestData.items.filter(Boolean);
+    }
+
+    const hasLegacyItemData = Boolean(
+        requestData?.bundleSize
+        || requestData?.flower
+        || requestData?.flowers
+        || requestData?.flowerQuantities
+        || requestData?.flower_quantities
+        || requestData?.selectedFlowers
+        || requestData?.customerPreferredFlowers
+        || requestData?.customer_preferred_flowers
+        || (Array.isArray(requestData?.arrangementSelections) && requestData.arrangementSelections.length)
+    );
+
+    return hasLegacyItemData ? [requestData] : [];
+};
+
+const buildCustomizedFlowerBreakdown = (item = {}) => {
+    const breakdownMap = new Map();
+    const flowerEntries = Array.isArray(item?.flowers)
+        ? item.flowers
+        : item?.flower
+            ? [item.flower]
+            : [];
+    const imageLookup = buildFlowerImageLookup(flowerEntries);
+    const flowerAllocations = Array.isArray(item?.flowerAllocations)
+        ? item.flowerAllocations
+        : (Array.isArray(item?.flower_allocations) ? item.flower_allocations : []);
+
+    if (flowerAllocations.length) {
+        flowerAllocations.forEach((allocation) => {
+            const stockId = String(
+                allocation?.stock_product_id
+                ?? allocation?.id
+                ?? allocation?.flowerId
+                ?? ''
+            ).trim();
+            const matchedFlower = flowerEntries.find((flower) => (
+                String(flower?.id ?? flower?.stock_product_id ?? '').trim() === stockId
+            ));
+            const flowerName = matchedFlower?.name
+                || allocation?.name
+                || allocation?.flowerName
+                || allocation?.label;
+
+            addFlowerBreakdownEntry(
+                breakdownMap,
+                flowerName,
+                allocation?.quantity,
+                matchedFlower?.image_url
+                || matchedFlower?.img
+                || matchedFlower?.stemImg
+                || matchedFlower?.layerImg
+                || imageLookup.get(normalizeBestSellerName(flowerName))
+            );
+        });
+    }
+
+    if (!breakdownMap.size) {
+        const flowerNames = flowerEntries.length
+            ? flowerEntries.map((flower) => flower?.name)
+            : getFlowerNamesFromValue(item?.flowers || item?.flower || item?.selectedFlowers);
+        addRoundRobinFlowerBreakdown(
+            breakdownMap,
+            flowerNames,
+            item?.bundleSize,
+            imageLookup
+        );
+    }
+
+    return Array.from(breakdownMap.values());
+};
+
+const buildBookingFlowerBreakdown = (item = {}) => {
+    const breakdownMap = new Map();
+    const imageLookup = buildFlowerImageLookup(Array.isArray(item?.flowers) ? item.flowers : []);
+
+    addFlowerBreakdownFromObject(
+        breakdownMap,
+        item?.flowerQuantities || item?.flower_quantities || item?.flowerBreakdown,
+        imageLookup
+    );
+
+    if (!breakdownMap.size) {
+        const arrangementSelections = Array.isArray(item?.arrangementSelections)
+            ? item.arrangementSelections
+            : [];
+
+        arrangementSelections.forEach((selection) => {
+            const selectionFlowerQuantities = selection?.flowerQuantities
+                || selection?.flower_quantities
+                || selection?.flowerBreakdown;
+
+            if (selectionFlowerQuantities) {
+                addFlowerBreakdownFromObject(breakdownMap, selectionFlowerQuantities, imageLookup);
+                return;
+            }
+
+            const selectionFlowerNames = getFlowerNamesFromValue(
+                selection?.preferredFlowerNames
+                ?? selection?.preferredFlowers
+                ?? selection?.preferred_flowers
+                ?? selection?.customerPreferredFlowers
+                ?? selection?.customer_preferred_flowers
+                ?? selection?.selectedFlowers
+                ?? selection?.flowers
+            );
+            addRoundRobinFlowerBreakdown(
+                breakdownMap,
+                selectionFlowerNames,
+                getArrangementSelectionFlowerTotal(selection),
+                imageLookup
+            );
+        });
+    }
+
+    if (!breakdownMap.size) {
+        const fallbackFlowerNames = getFlowerNamesFromValue(
+            item?.customerPreferredFlowers
+            ?? item?.customer_preferred_flowers
+            ?? item?.preferredFlowers
+            ?? item?.preferred_flowers
+            ?? item?.selectedFlowers
+            ?? item?.flowers
+            ?? item?.flower
+        );
+
+        addRoundRobinFlowerBreakdown(
+            breakdownMap,
+            fallbackFlowerNames,
+            getRequestItemFlowerTotal(item),
+            imageLookup
+        );
+    }
+
+    return Array.from(breakdownMap.values());
+};
+
+const getRequestItemLineAmount = (item = {}, request = {}) => {
+    const remainingQuantity = getRequestItemRemainingQuantity(item);
+    if (remainingQuantity <= 0) {
+        return 0;
+    }
+
+    const unitAmount = getRequestItemUnitAmount(item, request);
+    if (unitAmount > 0) {
+        return unitAmount * remainingQuantity;
+    }
+
+    return 0;
+};
+
+const getRequestBestSellerFlowerEntries = (request = {}, saleAmount = 0) => {
+    const requestType = String(request?.type || '').trim().toLowerCase();
+    if (!['booking', 'customized'].includes(requestType)) {
+        return [];
+    }
+
+    const sourceItems = getRequestBestSellerItems(request);
+    if (!sourceItems.length) {
+        return [];
+    }
+
+    const requestSubtotalFallback = Math.max(
+        0,
+        parseMoney(saleAmount)
+        || (getRequestTotalAmount(request) - getRequestShippingFeeAmount(request))
+    );
+
+    return sourceItems.flatMap((item) => {
+        const flowerEntries = requestType === 'customized'
+            ? buildCustomizedFlowerBreakdown(item)
+            : buildBookingFlowerBreakdown(item);
+        const totalFlowerQuantity = flowerEntries.reduce((sum, entry) => sum + parseMoney(entry.quantity), 0);
+
+        if (totalFlowerQuantity <= 0) {
+            return [];
+        }
+
+        let itemLineAmount = getRequestItemLineAmount(item, request);
+        if (itemLineAmount <= 0 && sourceItems.length === 1) {
+            itemLineAmount = requestSubtotalFallback;
+        }
+
+        return flowerEntries.map((entry) => ({
+            name: entry.name,
+            image_url: entry.image_url || null,
+            quantity: parseMoney(entry.quantity),
+            revenue: itemLineAmount > 0
+                ? (itemLineAmount * parseMoney(entry.quantity)) / totalFlowerQuantity
+                : 0,
+        }));
+    });
+};
+
+const addBestSellerAggregate = (aggregateMap, entry = {}) => {
+    const itemKey = String(entry?.item_key || '').trim();
+    const quantity = parseMoney(entry?.total_sold);
+    const revenue = parseMoney(entry?.total_revenue);
+
+    if (!itemKey || quantity <= 0) {
+        return;
+    }
+
+    const current = aggregateMap.get(itemKey) || {
+        item_key: itemKey,
+        product_id: entry?.product_id || null,
+        name: entry?.name || 'Unknown',
+        image_url: entry?.image_url || null,
+        entry_type: entry?.entry_type || 'catalog_product',
+        source_label: entry?.source_label || 'Catalog Product',
+        total_sold: 0,
+        total_revenue: 0,
+    };
+
+    current.total_sold += quantity;
+    current.total_revenue += revenue;
+    if (!current.image_url && entry?.image_url) {
+        current.image_url = entry.image_url;
+    }
+
+    aggregateMap.set(itemKey, current);
 };
 
 const getTransactionStatusDate = (record = {}) => {
@@ -2777,8 +3278,15 @@ export const adminAPI = {
 
 
     getSalesSummary: async (filters = {}) => {
-        const period = filters?.period || 'all';
-        const periodRange = getPeriodRange(period, filters?.monthKey, filters?.dateKey);
+        const normalizedFilters = normalizeSalesFilterArgs(filters);
+        const period = normalizedFilters.period;
+        const periodRange = getPeriodRange(
+            period,
+            normalizedFilters.monthKey,
+            normalizedFilters.dateKey,
+            normalizedFilters.rangeStartKey,
+            normalizedFilters.rangeEndKey
+        );
         const todayRange = getTodayRange();
         const weekRange = getWeekRange();
         const currentMonthRange = getMonthRange(formatMonthKey(new Date()));
@@ -3039,8 +3547,15 @@ export const adminAPI = {
         return { data: summary };
     },
 
-    getSalesChartData: async (period = 'week', monthKey = null, dateKey = null) => {
-        const periodRange = getPeriodRange(period, monthKey, dateKey);
+    getSalesChartData: async (period = 'week', monthKey = null, dateKey = null, rangeStartKey = null, rangeEndKey = null) => {
+        const normalizedFilters = normalizeSalesFilterArgs(period, monthKey, dateKey, rangeStartKey, rangeEndKey);
+        const periodRange = getPeriodRange(
+            normalizedFilters.period,
+            normalizedFilters.monthKey,
+            normalizedFilters.dateKey,
+            normalizedFilters.rangeStartKey,
+            normalizedFilters.rangeEndKey
+        );
         let ordersQuery = supabase
             .from('orders')
             .select('id, created_at, status, payment_status, amount_received, total')
@@ -3126,77 +3641,194 @@ export const adminAPI = {
         };
     },
 
-    getBestSellingProducts: async (period = 'all', monthKey = null, dateKey = null) => {
-        const periodRange = getPeriodRange(period, monthKey, dateKey);
-        let query = supabase
+    getBestSellingProducts: async (period = 'all', monthKey = null, dateKey = null, rangeStartKey = null, rangeEndKey = null) => {
+        const normalizedFilters = normalizeSalesFilterArgs(period, monthKey, dateKey, rangeStartKey, rangeEndKey);
+        const periodRange = getPeriodRange(
+            normalizedFilters.period,
+            normalizedFilters.monthKey,
+            normalizedFilters.dateKey,
+            normalizedFilters.rangeStartKey,
+            normalizedFilters.rangeEndKey
+        );
+        let salesQuery = supabase
             .from('sales')
-            .select(`
-                sale_date,
-                orders (
+            .select('id, order_id, request_id, total_amount, sale_date')
+            .order('sale_date', { ascending: false });
+
+        salesQuery = applyDateRangeToQuery(salesQuery, 'sale_date', periodRange);
+
+        const { data: sales, error: salesError } = await salesQuery;
+
+        if (salesError) {
+            console.error('Error fetching best selling products:', salesError);
+            throw salesError;
+        }
+
+        const orderIds = Array.from(new Set(
+            (sales || [])
+                .map((sale) => sale?.order_id)
+                .filter(Boolean)
+        ));
+        const requestIds = Array.from(new Set(
+            (sales || [])
+                .map((sale) => sale?.request_id)
+                .filter(Boolean)
+        ));
+
+        let orders = [];
+        let orderFetchError = null;
+        if (orderIds.length) {
+            const orderResult = await supabase
+                .from('orders')
+                .select(`
+                    id,
                     order_items (
                         product_id,
                         quantity,
                         price,
+                        name,
                         products (
                             name,
                             image_url,
                             price
                         )
                     )
-                )
-            `)
-            .not('order_id', 'is', null);
+                `)
+                .in('id', orderIds);
 
-        query = applyDateRangeToQuery(query, 'sale_date', periodRange);
-
-        const { data, error } = await query;
-
-        if (error) {
-            console.error('Error fetching best selling products:', error);
-            throw error;
+            orders = orderResult.data || [];
+            orderFetchError = orderResult.error;
         }
 
-        const productMap = {};
+        const buildBestSellerRequestsQuery = (options = {}) => supabase
+            .from('requests')
+            .select(buildRequestSelectColumns(
+                ['id', 'type', 'data'],
+                [
+                    { enabled: options.includeFinalPrice, column: 'final_price' },
+                    { enabled: options.includeShippingFee, column: 'shipping_fee' },
+                ]
+            ))
+            .in('id', requestIds);
+        let requestQueryOptions = {
+            includeFinalPrice: true,
+            includeShippingFee: true,
+        };
+        let requests = [];
+        let requestsError = null;
 
-        (data || []).forEach((sale) => {
-            (sale.orders?.order_items || []).forEach((item) => {
-                const id = item.product_id;
-                if (!id) {
-                    return;
+        if (requestIds.length) {
+            const requestsResult = await buildBestSellerRequestsQuery(requestQueryOptions);
+            requests = requestsResult.data || [];
+            requestsError = requestsResult.error;
+
+            const bestSellerRequestColumnFallbacks = [
+                ['final_price', 'includeFinalPrice', 'final_price'],
+                ['shipping_fee', 'includeShippingFee', 'shipping_fee'],
+            ];
+
+            let shouldRetryBestSellerRequests = true;
+            while (requestsError && shouldRetryBestSellerRequests) {
+                shouldRetryBestSellerRequests = false;
+                const missingColumn = getMissingRequestColumnFallback(
+                    requestsError,
+                    bestSellerRequestColumnFallbacks,
+                    requestQueryOptions
+                );
+
+                if (!missingColumn) {
+                    break;
                 }
 
-                if (!productMap[id]) {
-                    productMap[id] = {
-                        product_id: id,
-                        name: item.products?.name || 'Unknown',
-                        image_url: item.products?.image_url || null,
-                        price: item.products?.price || item.price || 0,
-                        total_sold: 0,
-                        total_revenue: 0,
-                    };
-                }
+                const [, optionKey, columnLabel] = missingColumn;
+                requestQueryOptions = { ...requestQueryOptions, [optionKey]: false };
+                console.warn(`Retrying best-seller request fetch without optional column ${columnLabel}`);
+                const retryResult = await buildBestSellerRequestsQuery(requestQueryOptions);
+                requests = retryResult.data || [];
+                requestsError = retryResult.error;
+                shouldRetryBestSellerRequests = Boolean(requestsError);
+            }
+        }
 
-                const quantity = Number(item.quantity || 0);
-                const unitPrice = Number(item.price || item.products?.price || 0);
-                productMap[id].total_sold += quantity;
-                productMap[id].total_revenue += quantity * unitPrice;
-            });
+        if (orderFetchError || requestsError) {
+            console.error('Error fetching best seller source records:', { orderFetchError, requestsError });
+            throw orderFetchError || requestsError;
+        }
+
+        const orderMap = new Map((orders || []).map((order) => [String(order.id), order]));
+        const requestMap = new Map((requests || []).map((request) => [String(request.id), request]));
+        const aggregateMap = new Map();
+
+        (sales || []).forEach((sale) => {
+            if (sale?.order_id) {
+                const order = orderMap.get(String(sale.order_id));
+                (order?.order_items || []).forEach((item) => {
+                    const productId = item?.product_id;
+                    const quantity = parseMoney(item?.quantity);
+                    const unitPrice = parseMoney(item?.price ?? item?.products?.price);
+
+                    if (!productId || quantity <= 0) {
+                        return;
+                    }
+
+                    addBestSellerAggregate(aggregateMap, {
+                        item_key: `catalog:${productId}`,
+                        product_id: productId,
+                        name: item?.name || item?.products?.name || 'Unknown',
+                        image_url: toAbsolutePublicImageUrl(item?.products?.image_url),
+                        entry_type: 'catalog_product',
+                        source_label: 'Catalog Product',
+                        total_sold: quantity,
+                        total_revenue: quantity * unitPrice,
+                    });
+                });
+            }
+
+            if (sale?.request_id) {
+                const request = requestMap.get(String(sale.request_id));
+                getRequestBestSellerFlowerEntries(request, sale?.total_amount).forEach((entry) => {
+                    const normalizedName = normalizeBestSellerName(entry?.name);
+                    addBestSellerAggregate(aggregateMap, {
+                        item_key: `flower:${normalizedName.toLowerCase()}`,
+                        name: normalizedName || 'Unknown flower',
+                        image_url: toAbsolutePublicImageUrl(entry?.image_url),
+                        entry_type: 'flower',
+                        source_label: 'Flower',
+                        total_sold: entry?.quantity,
+                        total_revenue: entry?.revenue,
+                    });
+                });
+            }
         });
 
-        const sorted = Object.values(productMap).sort((a, b) => b.total_sold - a.total_sold);
+        const sorted = Array.from(aggregateMap.values())
+            .sort((left, right) => (
+                parseMoney(right.total_sold) - parseMoney(left.total_sold)
+                || parseMoney(right.total_revenue) - parseMoney(left.total_revenue)
+                || String(left.name || '').localeCompare(String(right.name || ''))
+            ));
+
         return { data: sorted.slice(0, 5) };
     },
 
-    getTransactionHistory: async (period = 'all', monthKey = null, dateKey = null) => {
-        const periodRange = getPeriodRange(period, monthKey, dateKey);
+    getTransactionHistory: async (period = 'all', monthKey = null, dateKey = null, rangeStartKey = null, rangeEndKey = null) => {
+        const normalizedFilters = normalizeSalesFilterArgs(period, monthKey, dateKey, rangeStartKey, rangeEndKey);
+        const periodRange = getPeriodRange(
+            normalizedFilters.period,
+            normalizedFilters.monthKey,
+            normalizedFilters.dateKey,
+            normalizedFilters.rangeStartKey,
+            normalizedFilters.rangeEndKey
+        );
 
-        const salesQuery = supabase
+        let salesQuery = supabase
             .from('sales')
             .select('id, order_id, request_id, sale_date, total_amount')
             .order('sale_date', { ascending: false })
             .limit(500);
+        salesQuery = applyDateRangeToQuery(salesQuery, 'sale_date', periodRange);
 
-        const ordersQuery = supabase
+        let ordersQuery = supabase
             .from('orders')
             .select(`
                 id,
@@ -3225,6 +3857,7 @@ export const adminAPI = {
             `)
             .order('created_at', { ascending: false })
             .limit(500);
+        ordersQuery = applyDateRangeToQuery(ordersQuery, 'created_at', periodRange);
 
         const buildTransactionRequestsQuery = (options = {}) => supabase
             .from('requests')
@@ -3256,7 +3889,11 @@ export const adminAPI = {
             includeDeliveryMethod: true,
             includePickupTime: true,
         };
-        let requestsQuery = buildTransactionRequestsQuery(requestQueryOptions);
+        let requestsQuery = applyDateRangeToQuery(
+            buildTransactionRequestsQuery(requestQueryOptions),
+            'created_at',
+            periodRange
+        );
 
         const [
             { data: sales, error: salesError },
@@ -3294,7 +3931,11 @@ export const adminAPI = {
             const [, optionKey, columnLabel] = missingColumn;
             requestQueryOptions = { ...requestQueryOptions, [optionKey]: false };
             console.warn(`Retrying transaction request history without optional column ${columnLabel}`);
-            const retryResult = await buildTransactionRequestsQuery(requestQueryOptions);
+            const retryResult = await applyDateRangeToQuery(
+                buildTransactionRequestsQuery(requestQueryOptions),
+                'created_at',
+                periodRange
+            );
             requests = retryResult.data;
             requestsError = retryResult.error;
             shouldRetryTransactionRequests = Boolean(requestsError);

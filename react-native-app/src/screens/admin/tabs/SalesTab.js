@@ -10,7 +10,6 @@ import {
   ScrollView,
   Switch,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
   useWindowDimensions,
@@ -50,6 +49,72 @@ const getDateLabel = (dateKey) => {
     : parsed.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' });
 };
 
+const parseDateKey = (dateKey) => {
+  const normalized = String(dateKey || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return null;
+  }
+
+  const [yearText, monthText, dayText] = normalized.split('-').map(Number);
+  const parsed = new Date(yearText, monthText - 1, dayText);
+
+  if (
+    Number.isNaN(parsed.getTime())
+    || parsed.getFullYear() !== yearText
+    || parsed.getMonth() !== monthText - 1
+    || parsed.getDate() !== dayText
+  ) {
+    return null;
+  }
+
+  parsed.setHours(0, 0, 0, 0);
+  return parsed;
+};
+
+const getNormalizedRangeKeys = (startKey, endKey) => {
+  const parsedStart = parseDateKey(startKey);
+  const parsedEnd = parseDateKey(endKey);
+  const fallbackDate = parsedStart || parsedEnd || new Date();
+  const safeStart = parsedStart || fallbackDate;
+  const safeEnd = parsedEnd || fallbackDate;
+
+  if (safeStart <= safeEnd) {
+    return {
+      startKey: formatDateKey(safeStart),
+      endKey: formatDateKey(safeEnd),
+    };
+  }
+
+  return {
+    startKey: formatDateKey(safeEnd),
+    endKey: formatDateKey(safeStart),
+  };
+};
+
+const getDateRangeLabel = (startKey, endKey) => {
+  const { startKey: normalizedStartKey, endKey: normalizedEndKey } = getNormalizedRangeKeys(startKey, endKey);
+  return normalizedStartKey === normalizedEndKey
+    ? getDateLabel(normalizedStartKey)
+    : `${getDateLabel(normalizedStartKey)} - ${getDateLabel(normalizedEndKey)}`;
+};
+
+const getRangeDetails = (startKey, endKey) => {
+  const normalizedKeys = getNormalizedRangeKeys(startKey, endKey);
+  const start = parseDateKey(normalizedKeys.startKey) || new Date();
+  const inclusiveEnd = parseDateKey(normalizedKeys.endKey) || new Date(start);
+  const end = new Date(inclusiveEnd);
+  end.setDate(end.getDate() + 1);
+  const totalDays = Math.max(1, Math.round((end - start) / (1000 * 60 * 60 * 24)));
+
+  return {
+    ...normalizedKeys,
+    start,
+    inclusiveEnd,
+    end,
+    totalDays,
+  };
+};
+
 const getMonthRange = (monthKey) => {
   const normalizedKey = String(monthKey || '').trim();
   if (!/^\d{4}-\d{2}$/.test(normalizedKey)) {
@@ -65,6 +130,158 @@ const getMonthRange = (monthKey) => {
   }
 
   return { start, end };
+};
+
+const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+const getCalendarDays = (monthDate, maxDate = new Date()) => {
+  const baseMonth = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
+  const month = baseMonth.getMonth();
+  const leadingEmptyDays = (baseMonth.getDay() + 6) % 7;
+  const daysInMonth = new Date(baseMonth.getFullYear(), month + 1, 0).getDate();
+  const totalCells = Math.ceil((leadingEmptyDays + daysInMonth) / 7) * 7;
+  const calendarDays = [];
+
+  for (let index = 0; index < totalCells; index += 1) {
+    const dayNumber = index - leadingEmptyDays + 1;
+    if (dayNumber < 1 || dayNumber > daysInMonth) {
+      calendarDays.push(null);
+      continue;
+    }
+
+    const date = new Date(baseMonth.getFullYear(), month, dayNumber);
+    date.setHours(0, 0, 0, 0);
+    const maxSelectableDate = new Date(maxDate);
+    maxSelectableDate.setHours(0, 0, 0, 0);
+
+    calendarDays.push({
+      key: formatDateKey(date),
+      label: dayNumber,
+      isDisabled: date > maxSelectableDate,
+    });
+  }
+
+  return calendarDays;
+};
+
+const getWeekStartDate = (date) => {
+  const normalized = new Date(date);
+  normalized.setHours(0, 0, 0, 0);
+  const dayOfWeek = normalized.getDay();
+  const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  normalized.setDate(normalized.getDate() + diff);
+  return normalized;
+};
+
+const formatShortDateLabel = (date) => date.toLocaleDateString('en-PH', {
+  month: 'short',
+  day: 'numeric',
+});
+
+const getSaleAmountValue = (sale) => {
+  const parsed = Number.parseFloat(sale?.total_amount);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const buildHourlySalesSeries = (sales = []) => {
+  const labels = ['12AM', '4AM', '8AM', '12PM', '4PM', '8PM'];
+  const data = Array(6).fill(0);
+
+  sales.forEach((sale) => {
+    const saleDate = new Date(sale.sale_date);
+    if (Number.isNaN(saleDate.getTime())) {
+      return;
+    }
+
+    const hour = saleDate.getHours();
+    const bucketIndex = Math.min(5, Math.max(0, Math.floor(hour / 4)));
+    data[bucketIndex] += getSaleAmountValue(sale);
+  });
+
+  return { labels, data };
+};
+
+const buildCurrentWeekSalesSeries = (sales = []) => {
+  const dailyData = new Map();
+  const monday = getWeekStartDate(new Date());
+
+  for (let index = 0; index < 7; index += 1) {
+    const day = new Date(monday);
+    day.setDate(monday.getDate() + index);
+    dailyData.set(formatDateKey(day), 0);
+  }
+
+  sales.forEach((sale) => {
+    const saleDate = new Date(sale.sale_date);
+    if (Number.isNaN(saleDate.getTime())) {
+      return;
+    }
+
+    saleDate.setHours(0, 0, 0, 0);
+    const saleDateKey = formatDateKey(saleDate);
+    if (dailyData.has(saleDateKey)) {
+      dailyData.set(saleDateKey, dailyData.get(saleDateKey) + getSaleAmountValue(sale));
+    }
+  });
+
+  return {
+    labels: DAY_LABELS,
+    data: Array.from(dailyData.values()),
+  };
+};
+
+const buildDailySalesSeries = (sales = [], start, end) => {
+  const totals = new Map();
+
+  for (let cursor = new Date(start); cursor < end; cursor.setDate(cursor.getDate() + 1)) {
+    const current = new Date(cursor);
+    totals.set(formatDateKey(current), 0);
+  }
+
+  sales.forEach((sale) => {
+    const saleDate = new Date(sale.sale_date);
+    if (Number.isNaN(saleDate.getTime()) || saleDate < start || saleDate >= end) {
+      return;
+    }
+
+    saleDate.setHours(0, 0, 0, 0);
+    const saleDateKey = formatDateKey(saleDate);
+    if (totals.has(saleDateKey)) {
+      totals.set(saleDateKey, totals.get(saleDateKey) + getSaleAmountValue(sale));
+    }
+  });
+
+  return {
+    labels: Array.from(totals.keys()).map((dateKey) => formatShortDateLabel(parseDateKey(dateKey) || new Date())),
+    data: Array.from(totals.values()),
+  };
+};
+
+const buildWeeklySalesSeries = (sales = [], start, end) => {
+  const weeklyTotals = new Map();
+  const firstWeekStart = getWeekStartDate(start);
+
+  for (let cursor = new Date(firstWeekStart); cursor < end; cursor.setDate(cursor.getDate() + 7)) {
+    const current = new Date(cursor);
+    weeklyTotals.set(formatDateKey(current), 0);
+  }
+
+  sales.forEach((sale) => {
+    const saleDate = new Date(sale.sale_date);
+    if (Number.isNaN(saleDate.getTime()) || saleDate < start || saleDate >= end) {
+      return;
+    }
+
+    const weekStartKey = formatDateKey(getWeekStartDate(saleDate));
+    if (weeklyTotals.has(weekStartKey)) {
+      weeklyTotals.set(weekStartKey, weeklyTotals.get(weekStartKey) + getSaleAmountValue(sale));
+    }
+  });
+
+  return {
+    labels: Array.from(weeklyTotals.keys()).map((dateKey) => formatShortDateLabel(parseDateKey(dateKey) || new Date())),
+    data: Array.from(weeklyTotals.values()),
+  };
 };
 
 const buildYearMonthOptions = (year = new Date().getFullYear()) => Array.from({ length: 12 }, (_, index) => {
@@ -110,6 +327,7 @@ const createEmptyChartData = () => ({
 const SalesTab = () => {
   const { width } = useWindowDimensions();
   const isWeb = Platform.OS === 'web';
+  const todayKey = formatDateKey(new Date());
   const [salesData, setSalesData] = useState(createEmptySalesData);
   const [chartData, setChartData] = useState(createEmptyChartData);
   const [activeSection, setActiveSection] = useState('overview');
@@ -128,39 +346,62 @@ const SalesTab = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState('all');
   const [selectedMonthKey, setSelectedMonthKey] = useState(formatMonthKey(new Date()));
-  const [selectedDateKey, setSelectedDateKey] = useState(formatDateKey(new Date()));
-  const [dateInputValue, setDateInputValue] = useState(formatDateKey(new Date()));
+  const [rangeStartKey, setRangeStartKey] = useState(todayKey);
+  const [rangeEndKey, setRangeEndKey] = useState(todayKey);
   const [bestSellers, setBestSellers] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [selectedPipelineItem, setSelectedPipelineItem] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [exportModalVisible, setExportModalVisible] = useState(false);
+  const [calendarModalVisible, setCalendarModalVisible] = useState(false);
+  const [calendarTarget, setCalendarTarget] = useState('start');
+  const [calendarMonthDate, setCalendarMonthDate] = useState(parseDateKey(todayKey) || new Date());
   const [exportOptions, setExportOptions] = useState({
     overview: true,
     followUp: true,
     products: true,
     history: true,
-    period: 'week',
   });
   const monthOptions = React.useMemo(() => buildYearMonthOptions(new Date().getFullYear()), []);
   const selectedMonthOption = monthOptions.find((option) => option.key === selectedMonthKey) || monthOptions[0] || null;
+  const selectedRangeDetails = React.useMemo(
+    () => getRangeDetails(rangeStartKey, rangeEndKey),
+    [rangeStartKey, rangeEndKey]
+  );
   const activeMonthKey = selectedPeriod === 'month' ? selectedMonthKey : null;
-  const activeDateKey = selectedPeriod === 'date' ? selectedDateKey : null;
+  const activeRangeStartKey = selectedPeriod === 'range' ? selectedRangeDetails.startKey : null;
+  const activeRangeEndKey = selectedPeriod === 'range' ? selectedRangeDetails.endKey : null;
   const selectedMonthRange = selectedPeriod === 'month' ? getMonthRange(selectedMonthKey) : null;
-  const activeFilterKey = `${selectedPeriod}|${activeMonthKey || ''}|${activeDateKey || ''}`;
+  const activeFilterKey = `${selectedPeriod}|${activeMonthKey || ''}|${activeRangeStartKey || ''}|${activeRangeEndKey || ''}`;
   const chartWidth = Math.max(Math.min(width - 30, 720), 280);
   const overviewLoaded = sectionLoadKey.overview === activeFilterKey;
   const historyLoaded = sectionLoadKey.history === activeFilterKey;
   const productsLoaded = sectionLoadKey.products === activeFilterKey;
+  const isCompactSalesSheet = !isWeb && width <= 420;
+  const salesSheetHorizontalPadding = isCompactSalesSheet ? 16 : 20;
+  const salesSheetWidth = isWeb ? 580 : Math.min(width - (isCompactSalesSheet ? 20 : 28), 500);
   const currentSales = salesData.cashSales;
+  const currentCalendarMonthKey = formatMonthKey(calendarMonthDate);
+  const currentMonthKey = formatMonthKey(new Date());
+  const canGoToNextCalendarMonth = currentCalendarMonthKey < currentMonthKey;
+  const calendarDays = React.useMemo(
+    () => getCalendarDays(calendarMonthDate, new Date()),
+    [calendarMonthDate]
+  );
+  const currentFilterLabel = selectedPeriod === 'all'
+    ? 'All Time'
+    : selectedPeriod === 'today'
+      ? 'Today'
+    : selectedPeriod === 'range'
+      ? getDateRangeLabel(selectedRangeDetails.startKey, selectedRangeDetails.endKey)
+      : selectedPeriod === 'month' && selectedMonthOption
+        ? selectedMonthOption.fullLabel
+        : selectedPeriod.charAt(0).toUpperCase() + selectedPeriod.slice(1);
+  const currentPeriodLabel = currentFilterLabel;
   const currentSalesLabel = selectedPeriod === 'all'
     ? 'Cash Sales'
-    : selectedPeriod === 'date'
-      ? `Cash Sales (${getDateLabel(selectedDateKey)})`
-      : selectedPeriod === 'month' && selectedMonthOption
-        ? `Cash Sales (${selectedMonthOption.fullLabel})`
-        : `Cash Sales (${selectedPeriod.charAt(0).toUpperCase() + selectedPeriod.slice(1)})`;
+    : `Cash Sales (${currentPeriodLabel})`;
   const filterBlockStyle = { marginBottom: 4 };
 
   const setSectionBusy = (sections, value) => {
@@ -171,6 +412,53 @@ const SalesTab = () => {
       });
       return next;
     });
+  };
+
+  const handlePeriodSelect = (period) => {
+    setSelectedPeriod(period);
+    setCalendarModalVisible(false);
+    if (period === 'range') {
+      const nextRange = getNormalizedRangeKeys(rangeStartKey || todayKey, rangeEndKey || todayKey);
+      setRangeStartKey(nextRange.startKey);
+      setRangeEndKey(nextRange.endKey);
+    }
+  };
+
+  const openCalendar = (target) => {
+    const activeKey = target === 'end' ? selectedRangeDetails.endKey : selectedRangeDetails.startKey;
+    setCalendarTarget(target);
+    setCalendarMonthDate(parseDateKey(activeKey) || new Date());
+    setCalendarModalVisible(true);
+  };
+
+  const changeCalendarMonth = (direction) => {
+    setCalendarMonthDate((prev) => {
+      const nextMonth = new Date(prev.getFullYear(), prev.getMonth() + direction, 1);
+      const cappedCurrentMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+      if (direction > 0 && nextMonth > cappedCurrentMonth) {
+        return prev;
+      }
+      return nextMonth;
+    });
+  };
+
+  const handleCalendarPick = (pickedDateKey) => {
+    const todayDateKey = formatDateKey(new Date());
+    const safeDateKey = pickedDateKey > todayDateKey ? todayDateKey : pickedDateKey;
+
+    if (calendarTarget === 'end') {
+      setRangeEndKey(safeDateKey);
+      if (safeDateKey < selectedRangeDetails.startKey) {
+        setRangeStartKey(safeDateKey);
+      }
+    } else {
+      setRangeStartKey(safeDateKey);
+      if (safeDateKey > selectedRangeDetails.endKey) {
+        setRangeEndKey(safeDateKey);
+      }
+    }
+
+    setCalendarModalVisible(false);
   };
 
   const loadSalesData = async ({ force = false, background = false } = {}) => {
@@ -186,7 +474,8 @@ const SalesTab = () => {
       const summaryRes = await adminAPI.getSalesSummary({
         period: selectedPeriod,
         monthKey: activeMonthKey,
-        dateKey: activeDateKey,
+        rangeStartKey: activeRangeStartKey,
+        rangeEndKey: activeRangeEndKey,
       });
       if (summaryRes.error) throw summaryRes.error;
 
@@ -210,55 +499,29 @@ const SalesTab = () => {
       };
       setSalesData(nextSalesData);
 
-      const chartRes = await adminAPI.getSalesChartData(selectedPeriod, activeMonthKey, activeDateKey);
+      const chartRes = await adminAPI.getSalesChartData(
+        selectedPeriod,
+        activeMonthKey,
+        null,
+        activeRangeStartKey,
+        activeRangeEndKey
+      );
       if (chartRes.error) throw chartRes.error;
 
       const allSales = chartRes.data || [];
       let labels = [];
       let data = [];
 
-      if (selectedPeriod === 'today' || selectedPeriod === 'date') {
-        labels = ['12AM', '4AM', '8AM', '12PM', '4PM', '8PM'];
-        data = Array(6).fill(0);
-
-        allSales.forEach((sale) => {
-          const saleDate = new Date(sale.sale_date);
-          const hour = saleDate.getHours();
-          const bucketIndex = Math.min(5, Math.max(0, Math.floor(hour / 4)));
-          data[bucketIndex] += parseFloat(sale.total_amount || 0);
-        });
-      } else if (selectedPeriod === 'week') {
-        const toDateString = (date) => {
-          const year = date.getFullYear();
-          const month = String(date.getMonth() + 1).padStart(2, '0');
-          const day = String(date.getDate()).padStart(2, '0');
-          return `${year}-${month}-${day}`;
-        };
-
-        const dailyData = new Map();
-        labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-        const today = new Date();
-        const dayOfWeek = today.getDay();
-        const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-        const monday = new Date(today);
-        monday.setDate(today.getDate() + diff);
-        monday.setHours(0, 0, 0, 0);
-
-        for (let i = 0; i < 7; i += 1) {
-          const day = new Date(monday);
-          day.setDate(monday.getDate() + i);
-          dailyData.set(toDateString(day), 0);
+      if (selectedPeriod === 'today' || (selectedPeriod === 'range' && selectedRangeDetails.totalDays === 1)) {
+        ({ labels, data } = buildHourlySalesSeries(allSales));
+      } else if (selectedPeriod === 'range') {
+        if (selectedRangeDetails.totalDays <= 31) {
+          ({ labels, data } = buildDailySalesSeries(allSales, selectedRangeDetails.start, selectedRangeDetails.end));
+        } else {
+          ({ labels, data } = buildWeeklySalesSeries(allSales, selectedRangeDetails.start, selectedRangeDetails.end));
         }
-
-        allSales.forEach((sale) => {
-          const saleDate = new Date(sale.sale_date);
-          const saleDateString = toDateString(saleDate);
-          if (dailyData.has(saleDateString)) {
-            dailyData.set(saleDateString, dailyData.get(saleDateString) + parseFloat(sale.total_amount || 0));
-          }
-        });
-        data = Array.from(dailyData.values());
+      } else if (selectedPeriod === 'week') {
+        ({ labels, data } = buildCurrentWeekSalesSeries(allSales));
       } else if (selectedPeriod === 'month' && selectedMonthRange) {
         const totalDays = Math.max(1, Math.ceil((selectedMonthRange.end - selectedMonthRange.start) / (1000 * 60 * 60 * 24)));
         const weekCount = Math.max(4, Math.ceil(totalDays / 7));
@@ -270,7 +533,7 @@ const SalesTab = () => {
           if (saleDate >= selectedMonthRange.start && saleDate < selectedMonthRange.end) {
             const diffDays = Math.floor((saleDate - selectedMonthRange.start) / (1000 * 60 * 60 * 24));
             const weekIndex = Math.min(weekCount - 1, Math.floor(diffDays / 7));
-            data[weekIndex] += parseFloat(sale.total_amount || 0);
+            data[weekIndex] += getSaleAmountValue(sale);
           }
         });
       } else {
@@ -282,7 +545,7 @@ const SalesTab = () => {
           const saleDate = new Date(sale.sale_date);
           if (saleDate.getFullYear() === currentYear) {
             const monthIndex = saleDate.getMonth();
-            monthTotals[monthIndex] += parseFloat(sale.total_amount || 0);
+            monthTotals[monthIndex] += getSaleAmountValue(sale);
           }
         });
         data = monthTotals;
@@ -334,7 +597,13 @@ const SalesTab = () => {
     }
 
     try {
-      const res = await adminAPI.getBestSellingProducts(selectedPeriod, activeMonthKey, activeDateKey);
+      const res = await adminAPI.getBestSellingProducts(
+        selectedPeriod,
+        activeMonthKey,
+        null,
+        activeRangeStartKey,
+        activeRangeEndKey
+      );
       const nextBestSellers = res.data || [];
       setBestSellers(nextBestSellers);
       setSectionLoadKey((prev) => ({
@@ -367,7 +636,13 @@ const SalesTab = () => {
     }
 
     try {
-      const res = await adminAPI.getTransactionHistory(selectedPeriod, activeMonthKey, activeDateKey);
+      const res = await adminAPI.getTransactionHistory(
+        selectedPeriod,
+        activeMonthKey,
+        null,
+        activeRangeStartKey,
+        activeRangeEndKey
+      );
       const nextTransactions = res.data || [];
       setTransactions(nextTransactions);
       setSectionLoadKey((prev) => ({
@@ -491,9 +766,42 @@ const SalesTab = () => {
     }
 
     return (
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12, paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' }}>
-        <Text style={{ flex: 1, color: '#6B7280', fontSize: 12, fontWeight: '600' }}>{label}</Text>
-        <Text style={{ flex: 1.4, color: '#111827', fontSize: 12, fontWeight: '700', textAlign: 'right' }}>
+      <View
+        style={{
+          flexDirection: isCompactSalesSheet ? 'column' : 'row',
+          justifyContent: 'space-between',
+          alignItems: isCompactSalesSheet ? 'flex-start' : 'flex-start',
+          gap: isCompactSalesSheet ? 4 : 12,
+          paddingVertical: 7,
+          borderBottomWidth: 1,
+          borderBottomColor: '#F3F4F6',
+        }}
+      >
+        <Text
+          style={{
+            flex: isCompactSalesSheet ? 0 : 1,
+            minWidth: 0,
+            flexShrink: 1,
+            color: '#6B7280',
+            fontSize: 12,
+            fontWeight: '600',
+          }}
+        >
+          {label}
+        </Text>
+        <Text
+          style={{
+            flex: isCompactSalesSheet ? 0 : 1.4,
+            minWidth: 0,
+            flexShrink: 1,
+            color: '#111827',
+            fontSize: 12,
+            fontWeight: '700',
+            textAlign: isCompactSalesSheet ? 'left' : 'right',
+            alignSelf: isCompactSalesSheet ? 'stretch' : 'auto',
+            lineHeight: 18,
+          }}
+        >
           {value}
         </Text>
       </View>
@@ -509,11 +817,11 @@ const SalesTab = () => {
 
     return (
       <View key={`${item?.name || 'item'}-${index}`} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
-          <Text style={{ flex: 1, color: '#111827', fontSize: 13, fontWeight: '700' }}>
+        <View style={{ flexDirection: isCompactSalesSheet ? 'column' : 'row', justifyContent: 'space-between', gap: isCompactSalesSheet ? 4 : 10 }}>
+          <Text style={{ flex: isCompactSalesSheet ? 0 : 1, minWidth: 0, flexShrink: 1, color: '#111827', fontSize: 13, fontWeight: '700', lineHeight: 19 }}>
             {item?.name || `Item ${index + 1}`} x {safeQuantity}
           </Text>
-          <Text style={{ color: '#16A34A', fontSize: 13, fontWeight: '700' }}>
+          <Text style={{ color: '#16A34A', fontSize: 13, fontWeight: '700', textAlign: isCompactSalesSheet ? 'left' : 'right' }}>
             {formatCurrency(lineTotal)}
           </Text>
         </View>
@@ -587,16 +895,7 @@ const SalesTab = () => {
   };
 
   const openExportModal = () => {
-    setExportOptions((prev) => ({ ...prev, period: selectedPeriod }));
     setExportModalVisible(true);
-  };
-
-  const applyDateInput = (value) => {
-    const normalized = String(value || '').replace(/[^\d-]/g, '').slice(0, 10);
-    setDateInputValue(normalized);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-      setSelectedDateKey(normalized);
-    }
   };
 
   const handleExportReport = async () => {
@@ -614,11 +913,7 @@ const SalesTab = () => {
         ? (historyLoaded ? transactions : await loadTransactions({ force: true, background: true }))
         : transactions;
       const exportCurrentSales = exportSalesState.cashSales;
-      const periodLabel = selectedPeriod === 'month' && selectedMonthOption
-        ? selectedMonthOption.fullLabel
-        : selectedPeriod === 'date'
-          ? getDateLabel(selectedDateKey)
-          : selectedPeriod.charAt(0).toUpperCase() + selectedPeriod.slice(1);
+      const periodLabel = currentPeriodLabel;
       const dateGenerated = new Date().toLocaleDateString('en-PH', {
         weekday: 'long',
         year: 'numeric',
@@ -651,8 +946,9 @@ const SalesTab = () => {
         <tr>
           <td style="padding: 8px; text-align: center; font-weight: ${index === 0 ? 'bold' : 'normal'}; color: ${index === 0 ? '#D97706' : '#333'};">#${index + 1}</td>
           <td style="padding: 8px;">${product.name}</td>
+          <td style="padding: 8px;">${product.source_label || 'Item'}</td>
           <td style="padding: 8px; text-align: center;">${product.total_sold}</td>
-          <td style="padding: 8px; text-align: right;">&#8369;${product.total_revenue.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+          <td style="padding: 8px; text-align: right;">&#8369;${Number(product.total_revenue || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
         </tr>
       `).join('');
 
@@ -748,7 +1044,7 @@ const SalesTab = () => {
             ${outstandingTable}
             <h3>Upcoming Items</h3>
             ${upcomingTable}` : ''}
-          ${exportOptions.products ? `<h2>Products</h2>${exportBestSellers.length > 0 ? `<table><thead><tr><th style="text-align: center;">Rank</th><th>Product</th><th style="text-align: center;">Units Sold</th><th style="text-align: right;">Revenue</th></tr></thead><tbody>${bestSellerRows}</tbody></table>` : `<p class="empty-note">No best-selling products for this filter.</p>`}` : ''}
+          ${exportOptions.products ? `<h2>Products</h2>${exportBestSellers.length > 0 ? `<table><thead><tr><th style="text-align: center;">Rank</th><th>Product</th><th>Type</th><th style="text-align: center;">Units Sold</th><th style="text-align: right;">Revenue</th></tr></thead><tbody>${bestSellerRows}</tbody></table>` : `<p class="empty-note">No best-selling products for this filter.</p>`}` : ''}
           ${exportOptions.history ? `<h2>History</h2>${exportTransactions.length > 0 ? `<table><thead><tr><th>Date</th><th>Reference</th><th>Type</th><th>Customer</th><th style="text-align: right;">Amount</th></tr></thead><tbody>${transactionRows}</tbody></table>` : `<p class="empty-note">No payment history for this filter.</p>`}` : ''}
         </body></html>
       `;
@@ -903,12 +1199,14 @@ const SalesTab = () => {
 
     return (
       <View>
-        <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 12 }}>Top selling catalogue products for the selected sales period.</Text>
+        <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 12 }}>
+          Top sellers across catalog products, custom orders, and Customizer Studio for the selected sales period.
+        </Text>
         <FlatList
           horizontal
           showsHorizontalScrollIndicator={false}
           data={bestSellers}
-          keyExtractor={(item) => String(item.product_id)}
+          keyExtractor={(item) => String(item.item_key || item.product_id || item.name)}
           renderItem={({ item, index }) => (
             <View style={{ backgroundColor: '#fff', borderRadius: 14, padding: 12, marginRight: 12, width: 148, alignItems: 'center', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 4, borderWidth: index === 0 ? 2 : 0, borderColor: index === 0 ? '#D97706' : 'transparent' }}>
               <View style={{ position: 'absolute', top: 8, left: 8, backgroundColor: index === 0 ? '#D97706' : index === 1 ? '#9CA3AF' : index === 2 ? '#B45309' : '#D1D5DB', borderRadius: 10, width: 22, height: 22, justifyContent: 'center', alignItems: 'center' }}>
@@ -922,6 +1220,9 @@ const SalesTab = () => {
                 </View>
               )}
               <Text style={{ fontSize: 13, fontWeight: '600', color: '#333', textAlign: 'center' }} numberOfLines={2}>{item.name}</Text>
+              <View style={{ backgroundColor: '#F3F4F6', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, marginTop: 6 }}>
+                <Text style={{ fontSize: 10, color: '#4B5563', fontWeight: '700' }}>{item.source_label || 'Item'}</Text>
+              </View>
               <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#ec4899', marginTop: 4 }}>{item.total_sold}</Text>
               <Text style={{ fontSize: 10, color: '#888' }}>units sold</Text>
               <Text style={{ fontSize: 11, color: '#4CAF50', fontWeight: '600', marginTop: 2 }}>{formatCurrency(item.total_revenue)}</Text>
@@ -989,29 +1290,51 @@ const SalesTab = () => {
 
   const renderSalesDetailSheet = ({ visible, onClose, title, subtitle, children }) => (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={[styles.modalContainer, !isWeb && { justifyContent: 'center', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 12 }]}>
+      <View
+        style={[
+          styles.modalContainer,
+          !isWeb && {
+            justifyContent: 'center',
+            alignItems: 'center',
+            paddingHorizontal: isCompactSalesSheet ? 10 : 14,
+            paddingVertical: 12,
+          },
+        ]}
+      >
         <View style={[
           styles.modalContent,
           isWeb
             ? { width: 580, maxHeight: '92%', padding: 0, borderRadius: 18, overflow: 'hidden' }
-            : { width: '94%', maxWidth: 540, height: '92%', maxHeight: '92%', padding: 0, borderRadius: 24, overflow: 'hidden' },
+            : {
+              width: salesSheetWidth,
+              maxWidth: salesSheetWidth,
+              maxHeight: '92%',
+              padding: 0,
+              borderRadius: isCompactSalesSheet ? 18 : 22,
+              overflow: 'hidden',
+              alignSelf: 'center',
+            },
         ]}>
-          <View style={{ paddingHorizontal: 20, paddingTop: 18, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <View style={{ paddingHorizontal: salesSheetHorizontalPadding, paddingTop: 18, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
             <View style={{ flex: 1 }}>
               <Text style={styles.modalTitle}>{title}</Text>
-              {subtitle ? <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 4 }}>{subtitle}</Text> : null}
+              {subtitle ? <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 4, lineHeight: 18 }}>{subtitle}</Text> : null}
             </View>
             <TouchableOpacity onPress={onClose} style={{ padding: 8 }}>
               <Ionicons name="close" size={24} color="#374151" />
             </TouchableOpacity>
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 24 }}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            style={{ flex: 1, minHeight: 0 }}
+            contentContainerStyle={{ paddingHorizontal: salesSheetHorizontalPadding, paddingTop: 16, paddingBottom: 24 }}
+          >
             {children}
           </ScrollView>
 
-          <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: isWeb ? 18 : 24, borderTopWidth: 1, borderTopColor: '#F3F4F6', backgroundColor: '#fff' }}>
-            <TouchableOpacity style={{ backgroundColor: '#ec4899', borderRadius: 14, minHeight: 52, alignItems: 'center', justifyContent: 'center' }} onPress={onClose}>
+          <View style={{ paddingHorizontal: salesSheetHorizontalPadding, paddingTop: 12, paddingBottom: isWeb ? 18 : 22, borderTopWidth: 1, borderTopColor: '#F3F4F6', backgroundColor: '#fff' }}>
+            <TouchableOpacity style={{ backgroundColor: '#ec4899', borderRadius: 14, minHeight: 48, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' }} onPress={onClose}>
               <Text style={styles.buttonText}>Close</Text>
             </TouchableOpacity>
           </View>
@@ -1049,41 +1372,54 @@ const SalesTab = () => {
         <View style={filterBlockStyle}>
           <Text style={styles.filterLabel}>Period:</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
-            {['today', 'date', 'week', 'month', 'all'].map((period) => (
-              <TouchableOpacity key={period} style={[styles.categoryChip, selectedPeriod === period && styles.categoryChipActive]} onPress={() => setSelectedPeriod(period)}>
+            {['today', 'range', 'week', 'month', 'all'].map((period) => (
+              <TouchableOpacity key={period} style={[styles.categoryChip, selectedPeriod === period && styles.categoryChipActive]} onPress={() => handlePeriodSelect(period)}>
                 <Text style={[styles.categoryChipText, selectedPeriod === period && styles.categoryChipTextActive]}>
-                  {period === 'date' ? 'Date' : period.charAt(0).toUpperCase() + period.slice(1)}
+                  {period.charAt(0).toUpperCase() + period.slice(1)}
                 </Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
         </View>
 
-        {selectedPeriod === 'date' ? (
+        {selectedPeriod === 'range' ? (
           <View style={filterBlockStyle}>
-            <Text style={styles.filterLabel}>Specific date:</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-              <TextInput
-                value={dateInputValue}
-                onChangeText={applyDateInput}
-                placeholder="YYYY-MM-DD"
-                keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'numeric'}
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={[styles.input, { flex: 1, marginTop: 0, marginBottom: 0 }]}
-              />
+            <Text style={styles.filterLabel}>Date range:</Text>
+            <View style={{ flexDirection: isCompactSalesSheet ? 'column' : 'row', gap: 10, marginBottom: 10 }}>
               <TouchableOpacity
-                style={{ backgroundColor: '#ec4899', paddingHorizontal: 14, paddingVertical: 12, borderRadius: 10 }}
-                onPress={() => {
-                  const todayKey = formatDateKey(new Date());
-                  setDateInputValue(todayKey);
-                  setSelectedDateKey(todayKey);
+                style={{
+                  flex: 1,
+                  backgroundColor: '#fff',
+                  borderWidth: 1,
+                  borderColor: '#FBCFE8',
+                  borderRadius: 12,
+                  paddingHorizontal: 14,
+                  paddingVertical: 12,
                 }}
+                onPress={() => openCalendar('start')}
               >
-                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Today</Text>
+                <Text style={{ fontSize: 11, color: '#9CA3AF', fontWeight: '700', textTransform: 'uppercase', marginBottom: 4 }}>From</Text>
+                <Text style={{ color: '#111827', fontWeight: '700', fontSize: 13 }}>{getDateLabel(selectedRangeDetails.startKey)}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  backgroundColor: '#fff',
+                  borderWidth: 1,
+                  borderColor: '#FBCFE8',
+                  borderRadius: 12,
+                  paddingHorizontal: 14,
+                  paddingVertical: 12,
+                }}
+                onPress={() => openCalendar('end')}
+              >
+                <Text style={{ fontSize: 11, color: '#9CA3AF', fontWeight: '700', textTransform: 'uppercase', marginBottom: 4 }}>To</Text>
+                <Text style={{ color: '#111827', fontWeight: '700', fontSize: 13 }}>{getDateLabel(selectedRangeDetails.endKey)}</Text>
               </TouchableOpacity>
             </View>
-            <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>Use the format YYYY-MM-DD. The filter updates once the full date is entered.</Text>
+            <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
+              Pick the same day in both fields if you want a one-day report.
+            </Text>
           </View>
         ) : null}
 
@@ -1197,6 +1533,108 @@ const SalesTab = () => {
         ) : null,
       })}
 
+      <Modal visible={calendarModalVisible} animationType="fade" transparent onRequestClose={() => setCalendarModalVisible(false)}>
+        <View style={styles.modalContainer}>
+          <View style={[styles.modalContent, { width: isWeb ? 420 : Math.min(width - 24, 420) }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={styles.modalTitle}>{calendarTarget === 'end' ? 'Select end date' : 'Select start date'}</Text>
+                <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 4 }}>
+                  Future dates are disabled. We will keep the selected range valid automatically.
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setCalendarModalVisible(false)} style={{ padding: 6 }}>
+                <Ionicons name="close" size={22} color="#374151" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <TouchableOpacity onPress={() => changeCalendarMonth(-1)} style={{ padding: 8 }}>
+                <Ionicons name="chevron-back" size={20} color="#111827" />
+              </TouchableOpacity>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: '#111827' }}>
+                {calendarMonthDate.toLocaleDateString('en-PH', { month: 'long', year: 'numeric' })}
+              </Text>
+              <TouchableOpacity onPress={() => changeCalendarMonth(1)} disabled={!canGoToNextCalendarMonth} style={{ padding: 8, opacity: canGoToNextCalendarMonth ? 1 : 0.35 }}>
+                <Ionicons name="chevron-forward" size={20} color="#111827" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+              {DAY_LABELS.map((label) => (
+                <View key={label} style={{ width: '14.2857%', alignItems: 'center', paddingVertical: 4 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#9CA3AF' }}>{label}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 16 }}>
+              {calendarDays.map((day, index) => {
+                if (!day) {
+                  return <View key={`empty-${index}`} style={{ width: '14.2857%', padding: 4 }} />;
+                }
+
+                const isSelectedTarget = day.key === (calendarTarget === 'end' ? selectedRangeDetails.endKey : selectedRangeDetails.startKey);
+                const isBoundary = day.key === selectedRangeDetails.startKey || day.key === selectedRangeDetails.endKey;
+                const isInRange = day.key >= selectedRangeDetails.startKey && day.key <= selectedRangeDetails.endKey;
+                const isToday = day.key === todayKey;
+                const backgroundColor = isSelectedTarget
+                  ? '#EC4899'
+                  : isBoundary
+                    ? '#F9A8D4'
+                    : isInRange
+                      ? '#FDF2F8'
+                      : '#fff';
+                const borderColor = isToday
+                  ? '#EC4899'
+                  : isBoundary
+                    ? '#F472B6'
+                    : '#E5E7EB';
+
+                return (
+                  <View key={day.key} style={{ width: '14.2857%', padding: 4 }}>
+                    <TouchableOpacity
+                      activeOpacity={0.82}
+                      disabled={day.isDisabled}
+                      onPress={() => handleCalendarPick(day.key)}
+                      style={{
+                        minHeight: 42,
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor,
+                        backgroundColor,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        opacity: day.isDisabled ? 0.35 : 1,
+                      }}
+                    >
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: isSelectedTarget ? '#fff' : '#111827' }}>
+                        {day.label}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => setCalendarModalVisible(false)}
+              >
+                <Text style={styles.buttonText}>Close</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.saveButton]}
+                onPress={() => handleCalendarPick(todayKey)}
+              >
+                <Text style={styles.buttonText}>Pick Today</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={exportModalVisible} animationType="fade" transparent>
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
@@ -1204,7 +1642,7 @@ const SalesTab = () => {
             <Text style={{ marginTop: 10, marginBottom: 10, color: '#6B7280' }}>
               Exporting the current dashboard filter:{' '}
               <Text style={{ fontWeight: '700', color: '#111827' }}>
-                {selectedPeriod === 'month' && selectedMonthOption ? selectedMonthOption.fullLabel : selectedPeriod}
+                {currentPeriodLabel}
               </Text>
             </Text>
             <Text style={{ marginTop: 15, marginBottom: 5, fontWeight: 'bold' }}>Include Sections</Text>
