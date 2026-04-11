@@ -13,7 +13,7 @@ import {
     getUserFullName,
 } from '../utils/customerProfile';
 import InfoModal from '../components/InfoModal';
-import qrCodeImage from '../assets/qr-code-1.jpg';
+import CustomOrderQuotePaymentModal from '../components/CustomOrderQuotePaymentModal';
 import { insertUserNotification } from '../utils/notificationApi';
 import {
     applyRequestItemCancellation,
@@ -293,91 +293,9 @@ const Profile = ({ user, logout }) => {
     const [profileForm, setProfileForm] = useState(() => buildCustomerProfileFormState({}, user));
     const [profileData, setProfileData] = useState(null); // New state for fetched profile data
     const [status, setStatus] = useState(null);
-    const [showQRModal, setShowQRModal] = useState(false);
-    const [orderForPayment, setOrderForPayment] = useState(null);
-    const [receiptFile, setReceiptFile] = useState(null);
-    const [receiptPreview, setReceiptPreview] = useState(null);
-    const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+    const [quotePaymentOrder, setQuotePaymentOrder] = useState(null);
     const fallbackProfileName = getUserFullName(profileData || {}, user) || user?.email || '';
     const fallbackProfilePhone = getUserContactNumber(profileData || {}, user);
-
-    const handleReceiptUpload = (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            setReceiptFile(file);
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setReceiptPreview(reader.result);
-            };
-            reader.readAsDataURL(file);
-        }
-    };
-
-    const handleConfirmPayment = async () => {
-        if (!receiptFile) {
-            setInfoModal({ show: true, title: 'Notice', message: 'Please upload your payment receipt before confirming.' });
-            return;
-        }
-        if (!orderForPayment) return;
-
-        setIsProcessingPayment(true);
-
-        let uploadedReceiptUrl = null;
-        try {
-            const fileExt = receiptFile.name.split('.').pop();
-            const fileName = `${user.id}-request-${orderForPayment.request_id}-${Date.now()}.${fileExt}`;
-            const filePath = `public/${fileName}`;
-
-            const { error: uploadError } = await supabase.storage
-                .from('receipts')
-                .upload(filePath, receiptFile);
-
-            if (uploadError) throw uploadError;
-
-            const { data: urlData } = supabase.storage
-                .from('receipts')
-                .getPublicUrl(filePath);
-
-            if (!urlData || !urlData.publicUrl) throw new Error('Could not retrieve receipt URL.');
-
-            uploadedReceiptUrl = urlData.publicUrl;
-
-            // Now update the request
-            const { error: updateError } = await supabase
-                .from('requests')
-                .update({
-                    status: 'accepted',
-                    payment_status: 'waiting_for_confirmation',
-                    receipt_url: uploadedReceiptUrl,
-                })
-                .eq('id', orderForPayment.request_id);
-
-            if (updateError) throw updateError;
-
-            // Success
-            setShowQRModal(false);
-            setOrderForPayment(null);
-            setReceiptFile(null);
-            setReceiptPreview(null);
-
-            setModalContent({
-                type: 'info',
-                title: 'Payment Submitted',
-                message: 'Your payment is now being confirmed. Thank you!',
-                confirmText: 'Great!',
-                onConfirm: () => {
-                    loadOrders(user.id);
-                    setModalContent(null);
-                }
-            });
-
-        } catch (error) {
-            console.error('Error confirming payment:', error);
-            setInfoModal({ show: true, title: 'Error', message: 'There was an error submitting your payment. Please try again. ' + error.message });
-        } finally {
-            setIsProcessingPayment(false);
-        }
-    };
 
     useEffect(() => {
         const fetchProfile = async () => {
@@ -1168,6 +1086,39 @@ const Profile = ({ user, logout }) => {
         }
     };
 
+    const handleTrackRequest = (order) => {
+        if (!order?.type) return;
+
+        const requestIdentifier = order.request_number
+            || order.request_id
+            || (typeof order.id === 'string' && order.id.startsWith('request-') ? order.id.replace(/^request-/, '') : order.id);
+
+        if (!requestIdentifier) return;
+
+        navigate(
+            order.type === 'customized'
+                ? `/customized-request-tracking/${requestIdentifier}`
+                : `/request-tracking/${requestIdentifier}`,
+        );
+    };
+
+    const handleQuotePaymentSuccess = async () => {
+        await loadOrders(user?.id);
+        setInfoModal({
+            show: true,
+            title: 'Payment Submitted',
+            message: 'Your payment is now being confirmed. Thank you!',
+        });
+    };
+
+    const handleQuotePaymentError = (error) => {
+        setInfoModal({
+            show: true,
+            title: 'Error',
+            message: error?.message || 'There was an error submitting your payment. Please try again.',
+        });
+    };
+
     const handleAcceptQuote = (order) => {
         setModalContent({
             type: 'confirm',
@@ -1175,23 +1126,24 @@ const Profile = ({ user, logout }) => {
             message: `You are about to accept a quote of ₱${(order.total || 0).toLocaleString()}. You will be directed to payment after confirming.`,
             confirmText: 'Accept & Pay',
             onConfirm: () => {
-                setOrderForPayment(order);
-                setShowQRModal(true);
+                setQuotePaymentOrder(order);
                 setModalContent(null);
             }
         });
     };
 
     const handleRequestAdjustment = (order) => {
-        setModalContent({
-            type: 'info',
+        const requestLabel = order?.request_number
+            || order?.request_id
+            || (typeof order?.id === 'string' && order.id.startsWith('request-') ? order.id.replace(/^request-/, '') : order?.id)
+            || '';
+
+        setInfoModal({
+            show: true,
             title: 'Request Price Adjustment',
-            message: `To request an adjustment for request #${order.request_number}, please proceed to the "Messages" tab to chat with our staff.`,
-            confirmText: 'Go to Messages',
-            onConfirm: () => {
-                openProfileMenu('messages');
-                setModalContent(null);
-            }
+            message: `To request an adjustment for request #${requestLabel}, please proceed to the "Messages" tab to chat with our staff.`,
+            linkTo: buildProfileMenuPath('messages'),
+            linkText: 'Go to Messages',
         });
     };
 
@@ -1531,8 +1483,14 @@ const Profile = ({ user, logout }) => {
                                         <>Order Total: <span>₱{(order.total || order.price || 0).toLocaleString()}</span></>
                                     )}                                </div>
                                 <div className="order-actions">
-                                    {order.status === 'quoted' ? (
-                                        <div className="d-flex gap-2">
+                                    {order.type === 'booking' && order.status === 'quoted' ? (
+                                        <div className="d-flex gap-2 flex-wrap">
+                                            <button
+                                                className="btn-order-action primary"
+                                                onClick={() => handleTrackRequest(order)}
+                                            >
+                                                Track Request
+                                            </button>
                                             <button className="btn-order-action" style={{ backgroundColor: 'var(--shop-pink)', color: 'white', border: 'none' }} onClick={() => handleAcceptQuote(order)}>Accept</button>
                                             <button className="btn-order-action" style={{ backgroundColor: 'transparent', color: 'var(--shop-pink)', border: '1px solid var(--shop-pink)' }} onClick={() => handleRequestAdjustment(order)}>Adjust</button>
                                             {getCancellableItems(order).length > 0 && (
@@ -1554,11 +1512,7 @@ const Profile = ({ user, logout }) => {
                                             {order.status !== 'declined' && order.type && (
                                                 <button
                                                     className="btn-order-action primary"
-                                                    onClick={() => navigate(
-                                                        order.type === 'customized'
-                                                            ? `/customized-request-tracking/${order.request_number}`
-                                                            : `/request-tracking/${order.request_number}`
-                                                    )}
+                                                    onClick={() => handleTrackRequest(order)}
                                                 >
                                                     Track Request
                                                 </button>
@@ -2383,77 +2337,22 @@ const Profile = ({ user, logout }) => {
                 </div>
             )}
 
-            {showQRModal && orderForPayment && (
-                <div className="modal-overlay" onClick={() => !isProcessingPayment && setShowQRModal(false)}>
-                    <div className="modal-content-custom" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
-                        <div className="modal-header-custom">
-                            <h4>GCash Payment</h4>
-                            <button className="modal-close" disabled={isProcessingPayment} onClick={() => setShowQRModal(false)}>
-                                <i className="fas fa-times"></i>
-                            </button>
-                        </div>
-                        <div className="modal-body-custom text-center">
-                            <p>Please scan the QR code to pay for request #{orderForPayment.request_number}.</p>
-                            <div className="mb-3">
-                                <img
-                                    src={qrCodeImage}
-                                    alt="GCash QR Code"
-                                    style={{ width: '100%', height: 'auto', maxWidth: '250px', margin: '0 auto', borderRadius: '10px' }}
-                                />
-                            </div>
-                            <div className="p-3 rounded mb-3" style={{ background: '#f8f9fa' }}>
-                                <h6 className="fw-bold mb-2">Payment Instructions:</h6>
-                                <ol className="text-start small" style={{ paddingLeft: '20px' }}>
-                                    <li>Open your GCash app and tap "Scan QR".</li>
-                                    <li>Scan this QR code.</li>
-                                    <li>Enter the amount: <strong>₱{(orderForPayment.total || 0).toLocaleString()}</strong></li>
-                                    <li>Complete the payment and take a screenshot.</li>
-                                    <li>Upload the screenshot below for confirmation.</li>
-                                </ol>
-                            </div>
-
-                            <div className="mt-3">
-                                <label className="form-label fw-bold small">
-                                    <i className="fas fa-receipt me-2" style={{ color: 'var(--shop-pink)' }}></i>
-                                    Upload Payment Receipt
-                                </label>
-                                <input
-                                    type="file"
-                                    className="form-control form-control-sm"
-                                    accept="image/*"
-                                    onChange={handleReceiptUpload}
-                                    disabled={isProcessingPayment}
-                                />
-                                {receiptPreview && (
-                                    <div className="mt-2">
-                                        <img src={receiptPreview} alt="Receipt Preview" style={{ maxWidth: '100px', maxHeight: '100px', borderRadius: '8px' }} />
-                                    </div>
-                                )}
-                            </div>
-
-                            <button
-                                className="btn w-100 mt-3"
-                                style={{ background: 'var(--shop-pink)', color: 'white' }}
-                                onClick={handleConfirmPayment}
-                                disabled={isProcessingPayment || !receiptFile}
-                            >
-                                {isProcessingPayment ? (
-                                    <>
-                                        <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
-                                        Submitting...
-                                    </>
-                                ) : 'Submit for Confirmation'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <CustomOrderQuotePaymentModal
+                visible={Boolean(quotePaymentOrder)}
+                order={quotePaymentOrder}
+                userId={user?.id}
+                onClose={() => setQuotePaymentOrder(null)}
+                onSuccess={handleQuotePaymentSuccess}
+                onError={handleQuotePaymentError}
+            />
 
             <InfoModal
                 show={infoModal.show}
                 onClose={() => setInfoModal({ show: false, title: '', message: '' })}
                 title={infoModal.title}
                 message={infoModal.message}
+                linkTo={infoModal.linkTo}
+                linkText={infoModal.linkText}
             />
 
 

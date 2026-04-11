@@ -4,9 +4,15 @@ import { supabase } from '../config/supabase';
 import TrackingPaymentDetails from '../components/TrackingPaymentDetails';
 import DeliveryDestinationsSummary from '../components/DeliveryDestinationsSummary';
 import InfoModal from '../components/InfoModal';
+import CustomOrderQuotePaymentModal from '../components/CustomOrderQuotePaymentModal';
 import { buildTimelineTimestampMap, formatTimelineTimestamp } from '../utils/timelineTimestamps';
 import { formatCustomOrderV4Currency, getSelectedEstimateFromItem, isCustomOrderV4Item } from '../utils/customOrderV4';
-import { summarizeCancellationItems } from '../utils/orderCancellation';
+import {
+    applyRequestItemCancellation,
+    getCancellationItemDisplayLabel,
+    normalizeCancellationItem,
+    summarizeCancellationItems,
+} from '../utils/orderCancellation';
 import {
     canRequestRefund,
     createRefundRequest,
@@ -213,6 +219,32 @@ const formatBookingEventTime = (value) => {
 
 const roundCurrency = (value) => Math.round((Number.parseFloat(String(value ?? 0)) || 0) * 100) / 100;
 
+const parseJsonObject = (value) => {
+    if (!value) return {};
+    if (typeof value === 'string') {
+        try {
+            return JSON.parse(value);
+        } catch (error) {
+            return {};
+        }
+    }
+    return typeof value === 'object' ? value : {};
+};
+
+const buildStatusTimestamps = (existingValue, status, reason = '') => {
+    const next = {
+        ...parseJsonObject(existingValue),
+        [status]: new Date().toISOString(),
+    };
+
+    if (status === 'cancelled' && reason) {
+        next.cancellation_reason = reason;
+        next.cancel_reason = reason;
+    }
+
+    return next;
+};
+
 const buildBookingOverview = (requestData = {}) => {
     const items = getBookingItems(requestData);
     const uniqueValues = (values = []) => Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
@@ -279,6 +311,12 @@ const OrderBookingTracking = () => {
     const [additionalFile, setAdditionalFile] = useState(null);
     const [uploadingReceipt, setUploadingReceipt] = useState(false);
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
+    const [quotePaymentRequest, setQuotePaymentRequest] = useState(null);
+    const [showCancelModal, setShowCancelModal] = useState(false);
+    const [cancelTargetItemKey, setCancelTargetItemKey] = useState('');
+    const [cancelQuantity, setCancelQuantity] = useState(1);
+    const [cancelReason, setCancelReason] = useState('');
+    const [cancelReasonError, setCancelReasonError] = useState('');
     const [refundRequest, setRefundRequest] = useState(null);
     const [refundReason, setRefundReason] = useState('');
     const [submittingRefundRequest, setSubmittingRefundRequest] = useState(false);
@@ -288,168 +326,166 @@ const OrderBookingTracking = () => {
     const [feedbackMessage, setFeedbackMessage] = useState('');
     const [submittingFeedback, setSubmittingFeedback] = useState(false);
 
-    useEffect(() => {
-        const fetchRequest = async () => {
-            if (!requestNumber) {
-                setLoading(false);
-                return;
-            }
+    const loadRequest = async (showLoader = true) => {
+        if (!requestNumber) {
+            setLoading(false);
+            return;
+        }
 
+        if (showLoader) {
             setLoading(true);
-            // Step 1: Fetch the request from the 'requests' table
-            const { data: foundRequest, error: dbError } = await supabase
-                .from('requests')
+        }
+
+        const { data: foundRequest, error: dbError } = await supabase
+            .from('requests')
+            .select('*')
+            .eq('request_number', requestNumber)
+            .single();
+
+        if (dbError || !foundRequest) {
+            console.error('Error fetching request:', dbError);
+            setRequest(null);
+            setLoading(false);
+            return;
+        }
+
+        let normalizedRequestData = foundRequest.data;
+        if (typeof normalizedRequestData === 'string') {
+            try {
+                normalizedRequestData = JSON.parse(normalizedRequestData);
+            } catch {
+                normalizedRequestData = {};
+            }
+        }
+
+        let finalAddress = null;
+        if (normalizedRequestData?.address_id) {
+            const { data: foundAddress, error: addressError } = await supabase
+                .from('addresses')
                 .select('*')
-                .eq('request_number', requestNumber)
+                .eq('id', normalizedRequestData.address_id)
                 .single();
 
-            if (dbError || !foundRequest) {
-                console.error('Error fetching request:', dbError);
-                setRequest(null);
-                setLoading(false);
-                return;
-            }
-
-            let normalizedRequestData = foundRequest.data;
-            if (typeof normalizedRequestData === 'string') {
-                try {
-                    normalizedRequestData = JSON.parse(normalizedRequestData);
-                } catch {
-                    normalizedRequestData = {};
-                }
-            }
-
-            let finalAddress = null;
-            // Step 2: If the request has an address_id, fetch the address
-            if (normalizedRequestData?.address_id) {
-                const { data: foundAddress, error: addressError } = await supabase
-                    .from('addresses')
-                    .select('*')
-                    .eq('id', normalizedRequestData.address_id)
-                    .single();
-
-                if (addressError) {
-                    console.error('Error fetching address:', addressError);
-                    // Continue without address if it fails to load
-                } else {
-                    finalAddress = foundAddress;
-                }
-            }
-
-            let riderDetails = null;
-            if (foundRequest.assigned_rider && ['processing', 'ready_for_delivery', 'out_for_delivery', 'completed', 'claimed'].includes(foundRequest.status)) {
-                const { data: rider, error: riderError } = await supabase
-                    .from('users')
-                    .select('name, phone')
-                    .eq('id', foundRequest.assigned_rider)
-                    .single();
-                if (riderError) {
-                    console.error('Error fetching rider for request:', riderError);
-                } else {
-                    riderDetails = rider;
-                }
-            } else if (foundRequest.third_party_rider_name) {
-                // Third-party rider assigned by admin
-                riderDetails = {
-                    name: foundRequest.third_party_rider_name,
-                    phone: foundRequest.third_party_rider_info || null
-                };
-            }
-
-            const bookingItems = getBookingItems(normalizedRequestData);
-            const bookingSummary = summarizeCancellationItems(bookingItems);
-            const primaryBookingItem = bookingItems[0] || null;
-            const quoteBreakdown = normalizedRequestData?.quote_breakdown || null;
-            const quoteSummary = quoteBreakdown
-                ? summarizeCustomOrderQuoteBreakdown(quoteBreakdown, foundRequest.shipping_fee || normalizedRequestData?.shipping_fee || 0)
-                : null;
-            const nextShippingFee = bookingSummary.allCancelled
-                ? 0
-                : (
-                    quoteSummary
-                        ? Number(quoteSummary.shipping || 0)
-                        : Number(foundRequest.shipping_fee || normalizedRequestData?.shipping_fee || 0)
-                );
-            const nextFinalPrice = quoteSummary
-                ? roundCurrency(quoteSummary.total)
-                : (
-                    Number(foundRequest.final_price || 0) > 0
-                        ? Number(foundRequest.final_price || 0)
-                        : (
-                            bookingSummary.hasItems
-                                ? (bookingSummary.allCancelled ? 0 : roundCurrency(bookingSummary.remainingSubtotal + nextShippingFee))
-                                : Number(foundRequest.final_price || 0)
-                        )
-                );
-
-            const transformedRequest = {
-                ...foundRequest,
-                rider: riderDetails,
-                date: foundRequest.created_at,
-                deliveryMethod: foundRequest.delivery_method, // Changed from foundRequest.data?.delivery_method
-                pickupTime: foundRequest.pickup_time,         // Changed from foundRequest.data?.pickup_time
-                address: finalAddress, // Attach the fetched address
-                type: foundRequest.type,
-                requestData: {
-                    ...(normalizedRequestData && typeof normalizedRequestData === 'object' ? normalizedRequestData : {}),
-                    items: bookingItems,
-                },
-                imageUrl: foundRequest.image_url || primaryBookingItem?.image_url || null,
-                finalPrice: nextFinalPrice,
-                shipping_fee: nextShippingFee,
-                status: bookingSummary.allCancelled ? 'cancelled' : foundRequest.status,
-            };
-            setRequest(transformedRequest);
-
-            try {
-                const existingRefund = await getRefundRequestForEntity({
-                    entityType: 'request',
-                    entityId: foundRequest.id,
-                });
-                setRefundRequest(existingRefund);
-                setGcashName(existingRefund?.gcash_name || '');
-                setGcashNumber(existingRefund?.gcash_number || '');
-            } catch (refundError) {
-                console.error('Error fetching refund request:', refundError);
-                setRefundRequest(null);
-            }
-
-            const steps = transformedRequest.deliveryMethod === 'pickup' ? requestPickupSteps : requestDeliverySteps;
-            const finalRequestStatuses = ['completed', 'claimed', 'declined', 'cancelled'];
-
-            if (finalRequestStatuses.includes(transformedRequest.status)) {
-                if (transformedRequest.status === 'completed' || transformedRequest.status === 'claimed') {
-                    setCurrentStep(steps.length + 1);
-                } else {
-                    setCurrentStep(-1); // Special indicator for declined/cancelled
-                }
+            if (addressError) {
+                console.error('Error fetching address:', addressError);
             } else {
-                const statusMap = {
-                    'pending': 'pending',
-                    'quoted': 'quoted',
-                    'accepted': 'processing',
-                    'processing': 'processing',
-                    'ready_for_delivery': 'ready_for_delivery',
-                    'out_for_delivery': 'out_for_delivery',
-                    'ready_for_pickup': 'ready_for_pickup',
-                };
+                finalAddress = foundAddress;
+            }
+        }
 
-                const currentTimelineStatus = statusMap[transformedRequest.status] || 'pending';
-                let stepIndex = steps.findIndex(step => step.status === currentTimelineStatus);
+        let riderDetails = null;
+        if (foundRequest.assigned_rider && ['processing', 'ready_for_delivery', 'out_for_delivery', 'completed', 'claimed'].includes(foundRequest.status)) {
+            const { data: rider, error: riderError } = await supabase
+                .from('users')
+                .select('name, phone')
+                .eq('id', foundRequest.assigned_rider)
+                .single();
+            if (riderError) {
+                console.error('Error fetching rider for request:', riderError);
+            } else {
+                riderDetails = rider;
+            }
+        } else if (foundRequest.third_party_rider_name) {
+            riderDetails = {
+                name: foundRequest.third_party_rider_name,
+                phone: foundRequest.third_party_rider_info || null,
+            };
+        }
 
-                if (stepIndex === -1) {
-                    stepIndex = 0;
-                }
+        const bookingItems = getBookingItems(normalizedRequestData);
+        const bookingSummary = summarizeCancellationItems(bookingItems);
+        const primaryBookingItem = bookingItems[0] || null;
+        const quoteBreakdown = normalizedRequestData?.quote_breakdown || null;
+        const quoteSummary = quoteBreakdown
+            ? summarizeCustomOrderQuoteBreakdown(quoteBreakdown, foundRequest.shipping_fee || normalizedRequestData?.shipping_fee || 0)
+            : null;
+        const nextShippingFee = bookingSummary.allCancelled
+            ? 0
+            : (
+                quoteSummary
+                    ? Number(quoteSummary.shipping || 0)
+                    : Number(foundRequest.shipping_fee || normalizedRequestData?.shipping_fee || 0)
+            );
+        const nextFinalPrice = quoteSummary
+            ? roundCurrency(quoteSummary.total)
+            : (
+                Number(foundRequest.final_price || 0) > 0
+                    ? Number(foundRequest.final_price || 0)
+                    : (
+                        bookingSummary.hasItems
+                            ? (bookingSummary.allCancelled ? 0 : roundCurrency(bookingSummary.remainingSubtotal + nextShippingFee))
+                            : Number(foundRequest.final_price || 0)
+                    )
+            );
 
-                setCurrentStep(stepIndex + 1);
+        const transformedRequest = {
+            ...foundRequest,
+            rider: riderDetails,
+            date: foundRequest.created_at,
+            deliveryMethod: foundRequest.delivery_method,
+            pickupTime: foundRequest.pickup_time,
+            address: finalAddress,
+            type: foundRequest.type,
+            requestData: {
+                ...(normalizedRequestData && typeof normalizedRequestData === 'object' ? normalizedRequestData : {}),
+                items: bookingItems,
+            },
+            imageUrl: foundRequest.image_url || primaryBookingItem?.image_url || null,
+            finalPrice: nextFinalPrice,
+            shipping_fee: nextShippingFee,
+            status: bookingSummary.allCancelled ? 'cancelled' : foundRequest.status,
+        };
+        setRequest(transformedRequest);
+
+        try {
+            const existingRefund = await getRefundRequestForEntity({
+                entityType: 'request',
+                entityId: foundRequest.id,
+            });
+            setRefundRequest(existingRefund);
+            setGcashName(existingRefund?.gcash_name || '');
+            setGcashNumber(existingRefund?.gcash_number || '');
+        } catch (refundError) {
+            console.error('Error fetching refund request:', refundError);
+            setRefundRequest(null);
+        }
+
+        const steps = transformedRequest.deliveryMethod === 'pickup' ? requestPickupSteps : requestDeliverySteps;
+        const finalRequestStatuses = ['completed', 'claimed', 'declined', 'cancelled'];
+
+        if (finalRequestStatuses.includes(transformedRequest.status)) {
+            if (transformedRequest.status === 'completed' || transformedRequest.status === 'claimed') {
+                setCurrentStep(steps.length + 1);
+            } else {
+                setCurrentStep(-1);
+            }
+        } else {
+            const statusMap = {
+                pending: 'pending',
+                quoted: 'quoted',
+                accepted: 'processing',
+                processing: 'processing',
+                ready_for_delivery: 'ready_for_delivery',
+                out_for_delivery: 'out_for_delivery',
+                ready_for_pickup: 'ready_for_pickup',
+            };
+
+            const currentTimelineStatus = statusMap[transformedRequest.status] || 'pending';
+            let stepIndex = steps.findIndex((step) => step.status === currentTimelineStatus);
+
+            if (stepIndex === -1) {
+                stepIndex = 0;
             }
 
-            setLoading(false);
-        };
+            setCurrentStep(stepIndex + 1);
+        }
 
-        fetchRequest();
+        setLoading(false);
+    };
 
-        // Real-time subscription for request updates
+    useEffect(() => {
+        loadRequest();
+
         const channel = supabase
             .channel(`requests:${requestNumber}`)
             .on(
@@ -457,12 +493,11 @@ const OrderBookingTracking = () => {
                 {
                     event: 'UPDATE',
                     schema: 'public',
-                    table: 'requests'
+                    table: 'requests',
                 },
                 (payload) => {
-                    // Check if the updated record matches our request
                     if (payload.new && payload.new.request_number === requestNumber) {
-                        fetchRequest();
+                        loadRequest(false);
                     }
                 }
             )
@@ -559,21 +594,7 @@ const OrderBookingTracking = () => {
 
             setInfoModal({ show: true, title: 'Success', message: 'Receipt uploaded successfully!' });
             setAdditionalFile(null);
-            // Refresh request data manually since realtime might have delay
-            const { data: updatedRequest } = await supabase
-                .from('requests')
-                .select('*')
-                .eq('id', request.id)
-                .single();
-
-            if (updatedRequest) {
-                setRequest(prev => ({
-                    ...prev,
-                    receipt_url: updatedRequest.receipt_url,
-                    payment_status: updatedRequest.payment_status,
-                    additional_receipts: updatedRequest.additional_receipts || []
-                }));
-            }
+            await loadRequest(false);
         } catch (error) {
             console.error('Error uploading receipt:', error);
             setInfoModal({ show: true, title: 'Upload Failed', message: error.message || 'Failed to upload receipt. Please try again.' });
@@ -607,6 +628,226 @@ const OrderBookingTracking = () => {
             weekday: 'long',
             month: 'long',
             day: 'numeric'
+        });
+    };
+
+    const getCancellableItems = (currentRequest) => {
+        const sourceItems = Array.isArray(currentRequest?.requestData?.items)
+            ? currentRequest.requestData.items
+            : [];
+
+        return sourceItems
+            .map((item, index) => normalizeCancellationItem(item, index))
+            .filter((item) => item.remainingQuantity > 0);
+    };
+
+    const closeCancelModal = () => {
+        setShowCancelModal(false);
+        setCancelTargetItemKey('');
+        setCancelQuantity(1);
+        setCancelReason('');
+        setCancelReasonError('');
+    };
+
+    const handleCancelClick = () => {
+        const cancellableItems = getCancellableItems(request);
+        if (!cancellableItems.length) {
+            return;
+        }
+
+        setCancelTargetItemKey(cancellableItems[0].cancellationKey || '');
+        setCancelQuantity(1);
+        setCancelReason('');
+        setCancelReasonError('');
+        setShowCancelModal(true);
+    };
+
+    const updateRequestCancellation = async (itemKey, quantityToCancel, reason) => {
+        if (!request?.id) {
+            throw new Error('This request could not be found.');
+        }
+
+        const { data: currentRequest, error: requestFetchError } = await supabase
+            .from('requests')
+            .select('*')
+            .eq('id', request.id)
+            .single();
+
+        if (requestFetchError) {
+            throw requestFetchError;
+        }
+
+        const requestData = parseJsonObject(currentRequest?.data);
+        const requestItems = Array.isArray(requestData?.items) && requestData.items.length
+            ? requestData.items
+            : [requestData].filter((item) => item && typeof item === 'object' && Object.keys(item).length > 0);
+        const normalizedItems = requestItems.map((item, index) => normalizeCancellationItem(item, index));
+        const selectedItem = normalizedItems.find((item) => item.cancellationKey === String(itemKey));
+
+        if (!selectedItem || selectedItem.remainingQuantity < quantityToCancel) {
+            throw new Error('That quantity is no longer available to cancel.');
+        }
+
+        const updatedItems = requestItems.map((item, index) => {
+            const normalizedItem = normalizedItems[index];
+            return normalizedItem?.cancellationKey === String(itemKey)
+                ? applyRequestItemCancellation(item, quantityToCancel, reason)
+                : item;
+        });
+
+        const summary = summarizeCancellationItems(updatedItems);
+        const nextShippingFee = summary.allCancelled ? 0 : Number(currentRequest.shipping_fee || requestData?.shipping_fee || 0);
+        const nextSubtotal = summary.remainingSubtotal;
+        const nextTotal = summary.allCancelled ? 0 : roundCurrency(nextSubtotal + nextShippingFee);
+        const nextStatus = summary.allCancelled ? 'cancelled' : currentRequest.status;
+        const nextItemCount = summary.remainingQuantityTotal || summary.activeItems.length;
+        const nextCancellationReason = summary.allCancelled
+            ? reason
+            : (requestData?.cancellation_reason || currentRequest?.cancellation_reason || null);
+        const nextData = {
+            ...(requestData && typeof requestData === 'object' ? requestData : {}),
+            items: updatedItems,
+            item_count: nextItemCount,
+            itemCount: nextItemCount,
+            subtotal: nextSubtotal,
+            shipping_fee: nextShippingFee,
+            shippingFee: nextShippingFee,
+            estimated_total: nextTotal,
+            estimatedTotal: nextTotal,
+            final_price: nextTotal,
+            finalPrice: nextTotal,
+            cancellation_reason: nextCancellationReason,
+            last_cancellation: {
+                item_key: String(itemKey),
+                quantity: quantityToCancel,
+                reason,
+                cancelled_at: new Date().toISOString(),
+            },
+        };
+
+        const updatePayload = {
+            data: nextData,
+            shipping_fee: nextShippingFee,
+            status: nextStatus,
+            status_timestamps: summary.allCancelled
+                ? buildStatusTimestamps(currentRequest?.status_timestamps, 'cancelled', reason)
+                : currentRequest?.status_timestamps,
+            cancellation_reason: summary.allCancelled
+                ? (reason || currentRequest?.cancellation_reason || null)
+                : currentRequest?.cancellation_reason || null,
+        };
+
+        if (Object.prototype.hasOwnProperty.call(currentRequest || {}, 'final_price')) {
+            updatePayload.final_price = nextTotal;
+        }
+
+        const { error: updateRequestError } = await supabase
+            .from('requests')
+            .update(updatePayload)
+            .eq('id', request.id);
+
+        if (updateRequestError) {
+            throw updateRequestError;
+        }
+
+        const { data: linkedOrder, error: linkedOrderFetchError } = await supabase
+            .from('orders')
+            .select('id, status_timestamps, cancellation_reason')
+            .eq('request_id', request.id)
+            .maybeSingle();
+
+        if (!linkedOrderFetchError && linkedOrder) {
+            const { error: updateLinkedOrderError } = await supabase
+                .from('orders')
+                .update({
+                    request_data: nextData,
+                    subtotal: nextSubtotal,
+                    shipping_fee: nextShippingFee,
+                    total: nextTotal,
+                    status: nextStatus,
+                    cancellation_reason: summary.allCancelled
+                        ? (reason || linkedOrder.cancellation_reason || null)
+                        : linkedOrder.cancellation_reason || null,
+                    status_timestamps: summary.allCancelled
+                        ? buildStatusTimestamps(linkedOrder.status_timestamps, 'cancelled', reason)
+                        : linkedOrder.status_timestamps,
+                })
+                .eq('id', linkedOrder.id);
+
+            if (updateLinkedOrderError) {
+                throw updateLinkedOrderError;
+            }
+        }
+    };
+
+    const handleConfirmCancel = async () => {
+        const trimmedCancelReason = cancelReason.trim();
+        if (!trimmedCancelReason) {
+            setCancelReasonError('Please tell us why you want to cancel this item.');
+            return;
+        }
+
+        const selectedItem = getCancellableItems(request).find(
+            (item) => item.cancellationKey === String(cancelTargetItemKey),
+        );
+
+        if (!selectedItem) {
+            setCancelReasonError('Please select the item you want to cancel.');
+            return;
+        }
+
+        const quantityToCancel = Math.min(
+            selectedItem.remainingQuantity,
+            Math.max(1, Number.parseInt(String(cancelQuantity || 1), 10) || 1),
+        );
+
+        try {
+            await updateRequestCancellation(cancelTargetItemKey, quantityToCancel, trimmedCancelReason);
+            await loadRequest(false);
+            closeCancelModal();
+            setInfoModal({
+                show: true,
+                title: 'Request Updated',
+                message: 'The selected quantity was cancelled successfully.',
+            });
+        } catch (error) {
+            console.error('Error cancelling request item:', error);
+            setInfoModal({
+                show: true,
+                title: 'Error',
+                message: error.message || 'Failed to cancel the selected quantity. Please try again.',
+            });
+        }
+    };
+
+    const handleAcceptQuote = () => {
+        setQuotePaymentRequest(request);
+    };
+
+    const handleRequestAdjustment = () => {
+        setInfoModal({
+            show: true,
+            title: 'Request Price Adjustment',
+            message: `To request an adjustment for request #${request?.request_number}, please proceed to Messages to chat with our staff.`,
+            linkTo: '/profile?menu=messages',
+            linkText: 'Go to Messages',
+        });
+    };
+
+    const handleQuotePaymentSuccess = async () => {
+        await loadRequest(false);
+        setInfoModal({
+            show: true,
+            title: 'Payment Submitted',
+            message: 'Your payment is now being confirmed. Thank you!',
+        });
+    };
+
+    const handleQuotePaymentError = (error) => {
+        setInfoModal({
+            show: true,
+            title: 'Error',
+            message: error?.message || 'There was an error submitting your payment. Please try again.',
         });
     };
 
@@ -824,6 +1065,10 @@ const OrderBookingTracking = () => {
     const shouldShowFinalPrice = Boolean(request)
         && String(request?.status || '').toLowerCase() !== 'pending'
         && Number(request?.finalPrice || 0) > 0;
+    const cancellableItems = getCancellableItems(request);
+    const selectedCancelItem = cancellableItems.find((item) => item.cancellationKey === String(cancelTargetItemKey))
+        || cancellableItems[0]
+        || null;
 
     if (loading) {
         return (
@@ -1410,6 +1655,38 @@ const OrderBookingTracking = () => {
                                     </span>
                                 </div>
                             </div>
+                            {request.type === 'booking' && request.status === 'quoted' && (
+                                <div className="mt-4 pt-4 border-top">
+                                    <div className="d-flex flex-wrap gap-2">
+                                        <button
+                                            className="btn"
+                                            style={{ background: 'var(--shop-pink)', color: 'white' }}
+                                            onClick={handleAcceptQuote}
+                                        >
+                                            Accept & Pay
+                                        </button>
+                                        <button
+                                            className="btn"
+                                            style={{ background: 'transparent', color: 'var(--shop-pink)', border: '1px solid var(--shop-pink)' }}
+                                            onClick={handleRequestAdjustment}
+                                        >
+                                            Request Adjustment
+                                        </button>
+                                        {cancellableItems.length > 0 && (
+                                            <button
+                                                className="btn"
+                                                style={{ background: '#dc3545', color: 'white' }}
+                                                onClick={handleCancelClick}
+                                            >
+                                                Cancel
+                                            </button>
+                                        )}
+                                    </div>
+                                    <div className="small text-muted mt-2">
+                                        You can review, accept, adjust, or cancel your quoted request right here without leaving tracking.
+                                    </div>
+                                </div>
+                            )}
                             <div className="mt-4 pt-4 border-top">
                                 <div className="d-flex align-items-start gap-2 mb-2">
                                     <i className="fas fa-comment-dots mt-1" style={{ color: 'var(--shop-pink)' }}></i>
@@ -1460,11 +1737,179 @@ const OrderBookingTracking = () => {
                 </div>
             </div>
 
+            {showCancelModal && (
+                <div
+                    className="modal-overlay"
+                    onClick={closeCancelModal}
+                    style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                        display: 'flex',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        zIndex: 1000,
+                    }}
+                >
+                    <div
+                        className="modal-content-custom"
+                        onClick={(event) => event.stopPropagation()}
+                        style={{
+                            backgroundColor: 'white',
+                            padding: '2rem',
+                            borderRadius: '1rem',
+                            textAlign: 'center',
+                            maxWidth: '400px',
+                            width: '90%',
+                            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+                        }}
+                    >
+                        <div style={{ fontSize: '3rem', color: '#dc3545', marginBottom: '1rem' }}>
+                            <i className="fas fa-exclamation-triangle"></i>
+                        </div>
+                        <h3 style={{ marginBottom: '1rem', color: '#333' }}>Cancel item from this request?</h3>
+                        <p style={{ marginBottom: '1.5rem', color: '#4b5563' }}>
+                            Choose the item and quantity you want to cancel. We will keep the rest of your request active.
+                        </p>
+                        <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
+                            <label htmlFor="cancelItemTracking" style={{ display: 'block', fontWeight: '600', color: '#333', marginBottom: '0.5rem' }}>
+                                Item to cancel
+                            </label>
+                            <select
+                                id="cancelItemTracking"
+                                value={selectedCancelItem?.cancellationKey || ''}
+                                onChange={(event) => {
+                                    const nextItem = cancellableItems.find((item) => item.cancellationKey === event.target.value);
+                                    setCancelTargetItemKey(event.target.value);
+                                    setCancelQuantity(1);
+                                    if (!nextItem && cancelReasonError) setCancelReasonError('');
+                                }}
+                                style={{
+                                    width: '100%',
+                                    borderRadius: '0.75rem',
+                                    border: '1px solid #d1d5db',
+                                    padding: '0.75rem 0.9rem',
+                                    color: '#111827',
+                                    backgroundColor: 'white',
+                                }}
+                            >
+                                {cancellableItems.map((item) => (
+                                    <option key={item.cancellationKey} value={item.cancellationKey}>
+                                        {getCancellationItemDisplayLabel(item)}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                        {selectedCancelItem && (
+                            <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
+                                <label htmlFor="cancelQuantityTracking" style={{ display: 'block', fontWeight: '600', color: '#333', marginBottom: '0.5rem' }}>
+                                    Quantity to cancel
+                                </label>
+                                <select
+                                    id="cancelQuantityTracking"
+                                    value={String(cancelQuantity)}
+                                    onChange={(event) => setCancelQuantity(Number.parseInt(event.target.value, 10) || 1)}
+                                    style={{
+                                        width: '100%',
+                                        borderRadius: '0.75rem',
+                                        border: '1px solid #d1d5db',
+                                        padding: '0.75rem 0.9rem',
+                                        color: '#111827',
+                                        backgroundColor: 'white',
+                                    }}
+                                >
+                                    {Array.from({ length: selectedCancelItem.remainingQuantity }, (_, index) => index + 1).map((quantity) => (
+                                        <option key={quantity} value={quantity}>
+                                            {quantity}
+                                        </option>
+                                    ))}
+                                </select>
+                                <div style={{ marginTop: '0.5rem', color: '#6b7280', fontSize: '0.9rem' }}>
+                                    Remaining after this cancellation: {Math.max(0, selectedCancelItem.remainingQuantity - cancelQuantity)} of {selectedCancelItem.originalQuantity}
+                                </div>
+                            </div>
+                        )}
+                        <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
+                            <label htmlFor="cancelReasonTracking" style={{ display: 'block', fontWeight: '600', color: '#333', marginBottom: '0.5rem' }}>
+                                Reason for cancellation
+                            </label>
+                            <textarea
+                                id="cancelReasonTracking"
+                                value={cancelReason}
+                                onChange={(event) => {
+                                    setCancelReason(event.target.value);
+                                    if (cancelReasonError) setCancelReasonError('');
+                                }}
+                                placeholder="Tell us why you want to cancel."
+                                rows={4}
+                                style={{
+                                    width: '100%',
+                                    borderRadius: '0.75rem',
+                                    border: `1px solid ${cancelReasonError ? '#dc3545' : '#d1d5db'}`,
+                                    padding: '0.75rem 0.9rem',
+                                    resize: 'vertical',
+                                    outline: 'none',
+                                    color: '#111827',
+                                }}
+                            />
+                            {cancelReasonError && (
+                                <div style={{ marginTop: '0.5rem', color: '#dc3545', fontSize: '0.9rem' }}>
+                                    {cancelReasonError}
+                                </div>
+                            )}
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+                            <button
+                                onClick={closeCancelModal}
+                                style={{
+                                    backgroundColor: 'transparent',
+                                    color: '#4b5563',
+                                    border: '1px solid #d1d5db',
+                                    padding: '0.5rem 1.5rem',
+                                    borderRadius: '9999px',
+                                    cursor: 'pointer',
+                                    fontWeight: '600',
+                                }}
+                            >
+                                Keep Request
+                            </button>
+                            <button
+                                onClick={handleConfirmCancel}
+                                style={{
+                                    backgroundColor: '#dc3545',
+                                    color: 'white',
+                                    border: 'none',
+                                    padding: '0.5rem 1.5rem',
+                                    borderRadius: '9999px',
+                                    cursor: 'pointer',
+                                    fontWeight: '600',
+                                }}
+                            >
+                                Cancel Selected Quantity
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            <CustomOrderQuotePaymentModal
+                visible={Boolean(quotePaymentRequest)}
+                order={quotePaymentRequest}
+                onClose={() => setQuotePaymentRequest(null)}
+                onSuccess={handleQuotePaymentSuccess}
+                onError={handleQuotePaymentError}
+            />
+
             <InfoModal
                 show={infoModal.show}
                 onClose={() => setInfoModal({ ...infoModal, show: false })}
                 title={infoModal.title}
                 message={infoModal.message}
+                linkTo={infoModal.linkTo}
+                linkText={infoModal.linkText}
             />
         </div>
     );

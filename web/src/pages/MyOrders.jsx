@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabase';
 import InfoModal from '../components/InfoModal';
+import CustomOrderQuotePaymentModal from '../components/CustomOrderQuotePaymentModal';
 import CustomizedBouquetPreview from '../components/CustomizedBouquetPreview';
 import { insertStaffNotifications, insertUserNotification } from '../utils/notificationApi';
 import {
@@ -109,6 +110,8 @@ const MyOrders = () => {
     const [orderMessages, setOrderMessages] = useState({}); // Store message info for each order
     const [totalUnreadMessages, setTotalUnreadMessages] = useState(0);
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null });
+    const [currentUserId, setCurrentUserId] = useState(null);
+    const [quotePaymentOrder, setQuotePaymentOrder] = useState(null);
 
     useEffect(() => {
         const checkUser = async () => {
@@ -117,6 +120,7 @@ const MyOrders = () => {
                 navigate('/login');
                 return;
             }
+            setCurrentUserId(session.user.id);
             loadOrders(session.user.id); // Pass user ID to loadOrders
         };
         checkUser();
@@ -426,21 +430,82 @@ const MyOrders = () => {
         navigate(`/order-tracking/${orderNum}`);
     };
 
+    const handleTrackRequest = (order) => {
+        if (!order?.type) return;
+
+        const id = order.request_number
+            || order.request_id
+            || (typeof order.id === 'string' && order.id.startsWith('request-') ? order.id.replace(/^request-/, '') : order.id);
+
+        if (!id) return;
+
+        if (order.type === 'customized') {
+            navigate(`/customized-request-tracking/${id}`);
+            return;
+        }
+
+        navigate(`/request-tracking/${id}`);
+    };
+
     const handleTrackStatus = (order) => {
         // Show waiting for approval modal for pending requests
         if (order.status === 'pending' && order.type) {
             setShowWaitingModal(true);
         } else {
-            const id = order.order_number || order.request_number || (typeof order.id === 'string' && order.id.startsWith('request-') ? order.id.replace('request-', '') : order.id);
-
-            if (order.type === 'customized') {
-                navigate(`/customized-request-tracking/${id}`);
-            } else if (order.type === 'booking' || order.type === 'special_order') {
-                navigate(`/request-tracking/${id}`);
-            } else {
-                navigate(`/order-tracking/${id}`);
+            if (order.type) {
+                handleTrackRequest(order);
+                return;
             }
+
+            const id = order.order_number || order.id;
+            navigate(`/order-tracking/${id}`);
         }
+    };
+
+    const handleAcceptQuote = (order) => {
+        setQuotePaymentOrder(order);
+    };
+
+    const handleRequestAdjustment = (order) => {
+        const requestLabel = order?.request_number
+            || order?.request_id
+            || (typeof order?.id === 'string' && order.id.startsWith('request-') ? order.id.replace(/^request-/, '') : order?.id)
+            || '';
+
+        setInfoModal({
+            show: true,
+            title: 'Request Price Adjustment',
+            message: `To request an adjustment for request #${requestLabel}, please proceed to Messages to chat with our staff.`,
+            linkTo: '/profile?menu=messages',
+            linkText: 'Go to Messages',
+        });
+    };
+
+    const handleQuotePaymentSuccess = async () => {
+        let nextUserId = currentUserId;
+        if (!nextUserId) {
+            const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+            if (sessionError) throw sessionError;
+            nextUserId = session?.user?.id || null;
+        }
+
+        if (nextUserId) {
+            await loadOrders(nextUserId);
+        }
+
+        setInfoModal({
+            show: true,
+            title: 'Payment Submitted',
+            message: 'Your payment is now being confirmed. Thank you!',
+        });
+    };
+
+    const handleQuotePaymentError = (error) => {
+        setInfoModal({
+            show: true,
+            title: 'Error',
+            message: error?.message || 'There was an error submitting your payment. Please try again.',
+        });
     };
 
     const closeCancelModal = () => {
@@ -1370,22 +1435,53 @@ const MyOrders = () => {
                                                 Buy Again
                                             </button>
                                         )}
-                                        {order.status === 'pending' && order.type && (
+                                        {order.type === 'booking' && order.status === 'quoted' ? (
+                                            <div className="d-flex gap-2 flex-wrap">
+                                                <button
+                                                    className="btn-order-action primary"
+                                                    onClick={() => handleTrackRequest(order)}
+                                                >
+                                                    Track Request
+                                                </button>
+                                                <button
+                                                    className="btn-order-action"
+                                                    style={{ backgroundColor: 'var(--shop-pink)', color: 'white', border: 'none' }}
+                                                    onClick={() => handleAcceptQuote(order)}
+                                                >
+                                                    Accept
+                                                </button>
+                                                <button
+                                                    className="btn-order-action"
+                                                    style={{ backgroundColor: 'transparent', color: 'var(--shop-pink)', border: '1px solid var(--shop-pink)' }}
+                                                    onClick={() => handleRequestAdjustment(order)}
+                                                >
+                                                    Adjust
+                                                </button>
+                                                {getCancellableItems(order).length > 0 && (
+                                                    <button
+                                                        className="btn-order-action"
+                                                        style={{ backgroundColor: '#dc3545', color: 'white', border: '1px solid #dc3545' }}
+                                                        onClick={() => handleCancelClick(order)}
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                )}
+                                            </div>
+                                        ) : order.status === 'pending' && order.type ? (
                                             <button
                                                 className="btn-order-action primary"
                                                 onClick={() => handleTrackStatus(order)}
                                             >
                                                 Track Status
                                             </button>
-                                        )}
-                                        {order.status !== 'cancelled' && order.status !== 'completed' && !(order.status === 'pending' && order.type) && (
+                                        ) : order.status !== 'cancelled' && order.status !== 'completed' && !(order.status === 'pending' && order.type) ? (
                                             <button
                                                 className="btn-order-action primary"
-                                                onClick={() => handleTrackOrder(order.order_number || order.request_number || order.id)}
+                                                onClick={() => (order.type ? handleTrackRequest(order) : handleTrackOrder(order.order_number || order.id))}
                                             >
-                                                Track Order
+                                                {order.type ? 'Track Request' : 'Track Order'}
                                             </button>
-                                        )}
+                                        ) : null}
                                         <button
                                             className="btn-order-action primary"
                                             onClick={() => {
@@ -2012,6 +2108,15 @@ const MyOrders = () => {
                     </div>
                 </div>
             )}
+
+            <CustomOrderQuotePaymentModal
+                visible={Boolean(quotePaymentOrder)}
+                order={quotePaymentOrder}
+                userId={currentUserId}
+                onClose={() => setQuotePaymentOrder(null)}
+                onSuccess={handleQuotePaymentSuccess}
+                onError={handleQuotePaymentError}
+            />
 
             <InfoModal
                 show={infoModal.show}
