@@ -1,7 +1,5 @@
 import React, { useMemo, useState } from 'react';
 
-const normalizeText = (value) => String(value || '').trim().toLowerCase();
-
 const previewContainerStyle = (size, zoomable = false) => ({
   width: size,
   height: size,
@@ -177,9 +175,6 @@ const CustomizedBouquetPreview = ({ item, size = 96, zoomable = false }) => {
     () => normalizePreviewComposition(item?.previewComposition || item?.preview_composition),
     [item?.previewComposition, item?.preview_composition]
   );
-  const isPalmHaloWrap = normalizeText(
-    item?.wrapper?.name || item?.wrapper?.groupName || item?.wrapper?.wrapper_group_name
-  ) === 'palm halo wrap';
 
   const previewFlowers = useMemo(
     () => buildPreviewFlowers(item?.flowers, item?.bundleSize),
@@ -191,10 +186,6 @@ const CustomizedBouquetPreview = ({ item, size = 96, zoomable = false }) => {
     [previewFlowers.length]
   );
 
-  const hasLayeredPreview = Boolean(
-    !isPalmHaloWrap
-      && (wrapperSrc || ribbonSrc || previewFlowers.some((flower) => flower?.stemImg || flower?.layerImg || flower?.img))
-  );
   const hasSavedComposition = Boolean(savedPreviewComposition);
 
   const renderSavedCompositionPreview = (renderSize) => (
@@ -337,13 +328,17 @@ const CustomizedBouquetPreview = ({ item, size = 96, zoomable = false }) => {
     </div>
   );
 
-  const renderPreview = (renderSize) => (
-    hasSavedComposition
-      ? renderSavedCompositionPreview(renderSize)
-      : ((snapshotSrc && isPalmHaloWrap) || !hasLayeredPreview)
-      ? renderSnapshotPreview(renderSize)
-      : renderLayeredPreview(renderSize)
-  );
+  const renderPreview = (renderSize) => {
+    if (snapshotSrc) {
+      return renderSnapshotPreview(renderSize);
+    }
+
+    if (hasSavedComposition) {
+      return renderSavedCompositionPreview(renderSize);
+    }
+
+    return renderLayeredPreview(renderSize);
+  };
 
   return (
     <>
@@ -392,10 +387,10 @@ const CustomizedBouquetPreview = ({ item, size = 96, zoomable = false }) => {
             >
               x
             </button>
-            {hasSavedComposition
-              ? renderSavedCompositionPreview('min(82vw, 360px)')
-              : snapshotSrc
+            {snapshotSrc
               ? renderSnapshotPreview('min(82vw, 360px)')
+              : hasSavedComposition
+              ? renderSavedCompositionPreview('min(82vw, 360px)')
               : renderLayeredPreview('min(82vw, 360px)')}
           </div>
         </div>

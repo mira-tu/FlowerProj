@@ -19,6 +19,70 @@ const toNonNegativeNumber = (value, fallback = 0) => {
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 };
 
+const normalizeLabelText = (value) => String(value || '').trim();
+
+const getNamedValue = (value) => {
+    if (!value) return '';
+
+    if (typeof value === 'string') {
+        return normalizeLabelText(value);
+    }
+
+    if (typeof value === 'object') {
+        return normalizeLabelText(
+            value.name
+            || value.label
+            || value.value
+            || value.groupName
+            || value.wrapper_group_name
+            || value.wrapperName
+            || value.wrapper_name
+        );
+    }
+
+    return normalizeLabelText(value);
+};
+
+const getFlowerNames = (item = {}) => {
+    const rawFlowers = Array.isArray(item?.flowers)
+        ? item.flowers
+        : item?.flower
+            ? [item.flower]
+            : [];
+
+    return rawFlowers
+        .map((flower) => getNamedValue(flower))
+        .filter(Boolean);
+};
+
+const getCustomizerCancellationTitle = (item = {}, fallbackValue = '') => {
+    const displayIndex = Number.isFinite(Number(item?.displayIndex))
+        ? Number(item.displayIndex)
+        : (Number.isFinite(Number(item?.itemIndex)) ? Number(item.itemIndex) + 1 : null);
+    const bouquetLabel = displayIndex ? `Bouquet ${displayIndex}` : 'Bouquet';
+    const flowersLabel = getFlowerNames(item).join(', ');
+    const wrapperLabel = getNamedValue(item?.wrapper);
+    const bundleLabel = item?.bundleSize ? `${item.bundleSize} stems` : '';
+    const descriptor = [flowersLabel, wrapperLabel || bundleLabel].filter(Boolean).join(' - ');
+
+    return descriptor ? `${bouquetLabel} - ${descriptor}` : (fallbackValue || bouquetLabel);
+};
+
+const isCustomizerCancellationItem = (item = {}) => {
+    const rawName = normalizeLabelText(item?.name || item?.title).toLowerCase();
+    return Boolean(
+        Array.isArray(item?.flowers)
+        || item?.flower
+        || item?.bundleSize
+        || item?.wrapper
+        || item?.ribbon
+        || item?.previewComposition
+        || item?.preview_composition
+        || rawName.startsWith('customizer studio')
+        || rawName.startsWith('customized bouquet')
+    );
+};
+
 export const buildCancellationItemKey = (item = {}, index = 0) => (
     String(
         item.cancellation_key
@@ -188,6 +252,8 @@ export const normalizeCancellationItem = (item = {}, index = 0) => {
     return {
         ...item,
         cancellationKey: buildCancellationItemKey(item, index),
+        itemIndex: index,
+        displayIndex: index + 1,
         originalQuantity,
         cancelledQuantity,
         remainingQuantity,
@@ -205,7 +271,9 @@ export const getCancellationItemDisplayLabel = (item = {}) => {
     const cancelledQuantity = getCancelledItemQuantity(item);
     const rawName = String(item?.name || item?.title || 'Item').trim();
     const nameWithoutQuantitySuffix = rawName.replace(/\s+x\d+\s*$/i, '').trim();
-    const baseName = nameWithoutQuantitySuffix || rawName;
+    const baseName = isCustomizerCancellationItem(item)
+        ? getCustomizerCancellationTitle(item, nameWithoutQuantitySuffix || rawName)
+        : (nameWithoutQuantitySuffix || rawName);
 
     if (cancelledQuantity > 0 && remainingQuantity < originalQuantity) {
         return `${baseName} - ${remainingQuantity} remaining of ${originalQuantity}`;

@@ -1030,14 +1030,23 @@ const Profile = ({ user, logout }) => {
         const nextSubtotal = summary.remainingSubtotal;
         const nextTotal = summary.allCancelled ? 0 : roundCurrency(nextSubtotal + nextShippingFee);
         const nextStatus = summary.allCancelled ? 'cancelled' : currentRequest.status;
+        const nextItemCount = summary.remainingQuantityTotal || summary.activeItems.length;
+        const nextCancellationReason = summary.allCancelled
+            ? reason
+            : (requestData?.cancellation_reason || currentRequest?.cancellation_reason || null);
         const nextData = {
             ...(requestData && typeof requestData === 'object' ? requestData : {}),
             items: updatedItems,
-            item_count: summary.remainingQuantityTotal || summary.activeItems.length,
+            item_count: nextItemCount,
+            itemCount: nextItemCount,
             subtotal: nextSubtotal,
             shipping_fee: nextShippingFee,
-            estimated_total: nextSubtotal,
-            cancellation_reason: summary.allCancelled ? reason : requestData?.cancellation_reason,
+            shippingFee: nextShippingFee,
+            estimated_total: nextTotal,
+            estimatedTotal: nextTotal,
+            final_price: nextTotal,
+            finalPrice: nextTotal,
+            cancellation_reason: nextCancellationReason,
             last_cancellation: {
                 item_key: String(itemKey),
                 quantity: quantityToCancel,
@@ -1058,7 +1067,7 @@ const Profile = ({ user, logout }) => {
                 : currentRequest?.cancellation_reason || null,
         };
 
-        if (currentRequest.final_price != null) {
+        if (Object.prototype.hasOwnProperty.call(currentRequest || {}, 'final_price')) {
             updatePayload.final_price = nextTotal;
         }
 

@@ -137,6 +137,11 @@ const toPositiveInt = (value, fallback = 0) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
+const toNonNegativeInt = (value, fallback = 0) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+};
+
 const getRemainingRequestItemQuantity = (item = {}) => {
   const fallbackQuantity = toPositiveInt(
     item?.quantity
@@ -146,11 +151,16 @@ const getRemainingRequestItemQuantity = (item = {}) => {
     0
   );
 
-  return toPositiveInt(item?.remaining_quantity ?? item?.remainingQuantity, fallbackQuantity);
+  const explicitRemainingQuantity = toNonNegativeInt(
+    item?.remaining_quantity ?? item?.remainingQuantity,
+    -1
+  );
+
+  return explicitRemainingQuantity >= 0 ? explicitRemainingQuantity : fallbackQuantity;
 };
 
 const getCancelledRequestItemQuantity = (item = {}) => (
-  toPositiveInt(item?.cancelled_quantity ?? item?.cancelledQuantity, 0)
+  toNonNegativeInt(item?.cancelled_quantity ?? item?.cancelledQuantity, 0)
 );
 
 const normalizeFreeTextList = (value) => {
@@ -959,10 +969,71 @@ const getNormalizedCustomizedPreviewComposition = (value) => {
   return { wrapper, ribbon, stems };
 };
 
+const buildLayeredPreviewFlowers = (flowers = [], bundleSize = 0) => {
+  const safeFlowers = (Array.isArray(flowers) ? flowers : []).filter(Boolean);
+  if (!safeFlowers.length) {
+    return [];
+  }
+
+  const targetCount = Math.max(
+    safeFlowers.length,
+    Math.min(4, Math.max(1, Number.parseInt(bundleSize, 10) || safeFlowers.length))
+  );
+
+  return Array.from({ length: targetCount }, (_, index) => safeFlowers[index % safeFlowers.length]);
+};
+
+const getLayeredPreviewPlacements = (count) => {
+  if (count <= 1) {
+    return [
+      { left: '35%', top: '12%', width: '30%', height: '34%', rotate: '-3deg' },
+    ];
+  }
+
+  if (count === 2) {
+    return [
+      { left: '22%', top: '16%', width: '28%', height: '32%', rotate: '-10deg' },
+      { left: '50%', top: '12%', width: '28%', height: '32%', rotate: '9deg' },
+    ];
+  }
+
+  if (count === 3) {
+    return [
+      { left: '36%', top: '6%', width: '28%', height: '32%', rotate: '-1deg' },
+      { left: '16%', top: '20%', width: '24%', height: '28%', rotate: '-11deg' },
+      { left: '58%', top: '18%', width: '24%', height: '28%', rotate: '11deg' },
+    ];
+  }
+
+  return [
+    { left: '37%', top: '5%', width: '26%', height: '30%', rotate: '-1deg' },
+    { left: '12%', top: '16%', width: '23%', height: '27%', rotate: '-13deg' },
+    { left: '64%', top: '16%', width: '23%', height: '27%', rotate: '13deg' },
+    { left: '38%', top: '24%', width: '22%', height: '25%', rotate: '2deg' },
+  ];
+};
+
 const CustomizedBouquetPreview = ({ item, style, fallbackResizeMode = 'cover' }) => {
+  const snapshotUri = toAbsoluteImageUrl(
+    item?.imageUri || item?.image_url || item?.image || item?.photo
+  );
   const composition = getNormalizedCustomizedPreviewComposition(
     item?.previewComposition || item?.preview_composition
   );
+  const wrapperUri = toAbsoluteImageUrl(item?.wrapper?.layerImg || item?.wrapper?.img);
+  const ribbonUri = toAbsoluteImageUrl(item?.ribbon?.layerImg || item?.ribbon?.img);
+  const previewFlowers = buildLayeredPreviewFlowers(item?.flowers, item?.bundleSize);
+  const flowerPlacements = getLayeredPreviewPlacements(previewFlowers.length);
+
+  if (snapshotUri) {
+    return (
+      <Image
+        source={{ uri: snapshotUri }}
+        style={style}
+        resizeMode={fallbackResizeMode}
+      />
+    );
+  }
 
   if (composition) {
     return (
@@ -1025,13 +1096,64 @@ const CustomizedBouquetPreview = ({ item, style, fallbackResizeMode = 'cover' })
     );
   }
 
-  if (item?.imageUri) {
+  if (wrapperUri || ribbonUri || previewFlowers.length) {
     return (
-      <Image
-        source={{ uri: item.imageUri }}
-        style={style}
-        resizeMode={fallbackResizeMode}
-      />
+      <View style={[{ position: 'relative', overflow: 'hidden', backgroundColor: '#fff' }, style]}>
+        {wrapperUri ? (
+          <Image
+            source={{ uri: wrapperUri }}
+            style={{
+              position: 'absolute',
+              left: '5%',
+              bottom: '-2%',
+              width: '90%',
+              height: '94%',
+            }}
+            resizeMode="contain"
+          />
+        ) : null}
+
+        {previewFlowers.map((flower, index) => {
+          const sourceUri = toAbsoluteImageUrl(flower?.stemImg || flower?.layerImg || flower?.img);
+          const placement = flowerPlacements[index] || flowerPlacements[flowerPlacements.length - 1];
+
+          if (!sourceUri || !placement) {
+            return null;
+          }
+
+          return (
+            <Image
+              key={`${flower?.id || flower?.name || index}-${index}`}
+              source={{ uri: sourceUri }}
+              style={{
+                position: 'absolute',
+                left: placement.left,
+                top: placement.top,
+                width: placement.width,
+                height: placement.height,
+                zIndex: 2 + index,
+                transform: [{ rotate: placement.rotate }],
+              }}
+              resizeMode="contain"
+            />
+          );
+        })}
+
+        {ribbonUri ? (
+          <Image
+            source={{ uri: ribbonUri }}
+            style={{
+              position: 'absolute',
+              left: '36%',
+              top: '54%',
+              width: '28%',
+              height: '24%',
+              zIndex: 8,
+            }}
+            resizeMode="contain"
+          />
+        ) : null}
+      </View>
     );
   }
 
@@ -1040,6 +1162,27 @@ const CustomizedBouquetPreview = ({ item, style, fallbackResizeMode = 'cover' })
       <Ionicons name="image-outline" size={24} color="#666" />
     </View>
   );
+};
+
+const getCustomizedItemTotalPrice = (item = {}) => {
+  const priceCandidates = [
+    item?.price,
+    item?.total_price,
+    item?.line_total,
+    item?.lineTotal,
+    item?.total,
+    item?.final_price,
+  ];
+
+  for (const candidate of priceCandidates) {
+    if (candidate === null || candidate === undefined || candidate === '') {
+      continue;
+    }
+
+    return parseCurrencyNumber(candidate);
+  }
+
+  return null;
 };
 
 const formatAddressParts = (address = {}) => (
@@ -1272,7 +1415,15 @@ const getCustomizedRequestItems = (request) => {
       ? formatAddressParts(primaryDestination.address_snapshot || {})
       : sharedAddressText;
     const destinationSummary = [recipientName, addressText].filter(Boolean).join(' - ');
-    const price = parseCurrencyNumber(item?.price);
+    const originalQuantity = toPositiveInt(
+      item?.original_quantity ?? item?.quantity ?? item?.qty,
+      1
+    );
+    const remainingQuantity = getRemainingRequestItemQuantity(item);
+    const totalPrice = getCustomizedItemTotalPrice(item);
+    const remainingPrice = totalPrice !== null && originalQuantity > 0
+      ? totalPrice * (remainingQuantity / originalQuantity)
+      : null;
     const title = String(item?.name || '').trim() || (
       bundleSize ? `Customized Bouquet (${bundleSize} stems)` : `Customized Bouquet ${index + 1}`
     );
@@ -1295,7 +1446,7 @@ const getCustomizedRequestItems = (request) => {
       ribbonName,
       bundleSize,
       bundleSizeText: bundleSize ? `${bundleSize} stems` : null,
-      priceText: price > 0 ? `PHP ${price.toFixed(2)}` : null,
+      priceText: remainingPrice !== null ? `PHP ${remainingPrice.toFixed(2)}` : null,
       recipientName,
       addressText,
       destinationSummary,
@@ -1746,7 +1897,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
               <DetailSection label="Event Time:" value={getBookingEventTimeText(item, getBookingEventTimeText(requestData))} />
               <DetailSection label="Venue:" value={getBookingVenueText(item, sharedAddressText)} />
               <DetailSection label="Arrangement:" value={arrangementType} />
-              <DetailSection label="Quantity:" value={remainingQuantity ? String(remainingQuantity) : (arrangementQuantity ? String(arrangementQuantity) : null)} />
+              <DetailSection label="Quantity:" value={String(remainingQuantity)} />
               <DetailSection label="Cancelled Quantity:" value={cancelledQuantity ? String(cancelledQuantity) : null} />
               {tentativeBreakdown.lineItems.length ? (
                 <View style={styles.detailSection}>
@@ -1838,7 +1989,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
           <View key={item.key} style={styles.customizedRequestDetailCard}>
             <Text style={styles.customizedRequestItemMeta}>{item.label}</Text>
             <Text style={styles.customizedRequestDetailTitle}>{item.title}</Text>
-            <DetailSection label="Quantity:" value={remainingQuantity ? String(remainingQuantity) : null} />
+            <DetailSection label="Quantity:" value={String(remainingQuantity)} />
             <DetailSection label="Cancelled Quantity:" value={cancelledQuantity ? String(cancelledQuantity) : null} />
             <DetailSection label="Bundle Size:" value={item.bundleSizeText} />
             <DetailSection label="Flowers:" value={item.flowersText} />
@@ -3353,6 +3504,16 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                         .join(', ')}
                     />
                   ) : null}
+                  <DetailSection
+                    label="Remaining Quantity:"
+                    value={String(getRemainingRequestItemQuantity(selectedCustomizedItem.item))}
+                  />
+                  <DetailSection
+                    label="Cancelled Quantity:"
+                    value={getCancelledRequestItemQuantity(selectedCustomizedItem.item)
+                      ? String(getCancelledRequestItemQuantity(selectedCustomizedItem.item))
+                      : null}
+                  />
                   <DetailSection label="Bundle Size:" value={selectedCustomizedItem.item.bundleSizeText} />
                   <DetailSection label="Flowers:" value={selectedCustomizedItem.item.flowersText} />
                   <DetailSection label="Wrapper:" value={selectedCustomizedItem.item.wrapperName} />

@@ -872,6 +872,95 @@ const getRequestShippingFeeAmount = (request = {}) => {
     ].map(parseMoney).find((amount) => amount > 0) || 0;
 };
 
+const parseRequestQuantity = (value, fallback = 0) => {
+    const parsed = Number.parseInt(String(value ?? '').replace(/[^\d-]/g, ''), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const getRequestItemOriginalQuantity = (item = {}) => {
+    const quantityCandidates = [
+        item?.original_quantity,
+        item?.quantity,
+        item?.qty,
+        item?.arrangementQuantity,
+        item?.arrangement_quantity,
+    ];
+
+    for (const candidate of quantityCandidates) {
+        const parsed = parseRequestQuantity(candidate, 0);
+        if (parsed > 0) {
+            return parsed;
+        }
+    }
+
+    return 1;
+};
+
+const getRequestItemCancelledQuantity = (item = {}) => {
+    const originalQuantity = getRequestItemOriginalQuantity(item);
+    const cancelledQuantity = parseRequestQuantity(
+        item?.cancelled_quantity ?? item?.cancelledQuantity,
+        0
+    );
+
+    return Math.min(originalQuantity, cancelledQuantity);
+};
+
+const getRequestItemRemainingQuantity = (item = {}) => (
+    Math.max(0, getRequestItemOriginalQuantity(item) - getRequestItemCancelledQuantity(item))
+);
+
+const isCustomizedRequestItem = (item = {}, request = {}) => Boolean(
+    request?.type === 'customized'
+    || item?.bundleSize
+    || Array.isArray(item?.flowers)
+    || item?.flower
+    || item?.wrapper
+    || item?.ribbon
+    || item?.previewComposition
+    || item?.preview_composition
+);
+
+const getRequestItemUnitAmount = (item = {}, request = {}) => {
+    const originalQuantity = Math.max(getRequestItemOriginalQuantity(item), 1);
+    const totalPriceCandidates = [
+        item?.total_price,
+        item?.line_total,
+        item?.lineTotal,
+        item?.total,
+        item?.estimatedPrice,
+        item?.estimated_price,
+        item?.final_price,
+        isCustomizedRequestItem(item, request) ? item?.price : null,
+    ];
+
+    for (const candidate of totalPriceCandidates) {
+        const parsed = parseMoney(candidate);
+        if (parsed > 0) {
+            return parsed / originalQuantity;
+        }
+    }
+
+    const unitPriceCandidates = [
+        item?.unit_price,
+        item?.unitPrice,
+        item?.price,
+    ];
+
+    for (const candidate of unitPriceCandidates) {
+        if (candidate === null || candidate === undefined || candidate === '') {
+            continue;
+        }
+
+        const parsed = parseMoney(candidate);
+        if (parsed >= 0) {
+            return parsed;
+        }
+    }
+
+    return 0;
+};
+
 const getRequestSourceSubtotal = (request = {}) => {
     const requestData = parseJsonObject(request?.data);
     const quoteBreakdown = parseJsonObject(requestData?.quote_breakdown || requestData?.quoteBreakdown);
@@ -892,18 +981,16 @@ const getRequestSourceSubtotal = (request = {}) => {
         : [];
 
     if (sourceItems.length) {
+        const hasCancelledItems = sourceItems.some((item) => getRequestItemCancelledQuantity(item) > 0);
+        const hasActiveItems = sourceItems.some((item) => getRequestItemRemainingQuantity(item) > 0);
+
+        if (hasCancelledItems && !hasActiveItems) {
+            return 0;
+        }
+
         return sourceItems.reduce((sum, item) => {
-            const quantity = getTransactionQuantity(
-                item?.quantity ?? item?.qty ?? item?.arrangementQuantity ?? item?.arrangement_quantity
-            );
-            const price = parseMoney(
-                item?.price
-                ?? item?.unit_price
-                ?? item?.unitPrice
-                ?? item?.final_price
-                ?? item?.estimatedPrice
-                ?? item?.estimated_price
-            );
+            const quantity = getRequestItemRemainingQuantity(item);
+            const price = getRequestItemUnitAmount(item, request);
             return sum + (price * quantity);
         }, 0);
     }
@@ -914,18 +1001,32 @@ const getRequestSourceSubtotal = (request = {}) => {
 const getRequestTotalAmount = (request, options = {}) => {
     const requestData = parseJsonObject(request?.data);
     const quoteBreakdown = parseJsonObject(requestData?.quote_breakdown || requestData?.quoteBreakdown);
+    const sourceItems = Array.isArray(requestData?.items)
+        ? requestData.items.filter(Boolean)
+        : [];
+    const hasCancelledItems = sourceItems.some((item) => getRequestItemCancelledQuantity(item) > 0);
+    const hasActiveItems = sourceItems.some((item) => getRequestItemRemainingQuantity(item) > 0);
+    const sourceSubtotal = getRequestSourceSubtotal(request);
+    const shippingFee = getRequestShippingFeeAmount(request);
+
+    if (hasCancelledItems) {
+        if (!hasActiveItems) {
+            return 0;
+        }
+
+        return sourceSubtotal + shippingFee;
+    }
+
     const finalPrice = [
-        request?.final_price,
-        requestData?.final_price,
-        requestData?.finalPrice,
+        hasCancelledItems ? null : request?.final_price,
+        hasCancelledItems ? null : requestData?.final_price,
+        hasCancelledItems ? null : requestData?.finalPrice,
         quoteBreakdown?.computed_total,
     ].map(parseMoney).find((amount) => amount > 0) || 0;
     if (finalPrice > 0) {
         return finalPrice;
     }
 
-    const sourceSubtotal = getRequestSourceSubtotal(request);
-    const shippingFee = getRequestShippingFeeAmount(request);
     if (sourceSubtotal > 0) {
         return sourceSubtotal + shippingFee;
     }
@@ -1019,12 +1120,8 @@ const getRequestTransactionItems = (request = {}, saleAmount = 0) => {
 
     if (sourceItems.length) {
         return sourceItems.map((item, index) => {
-            const quantity = getTransactionQuantity(
-                item?.quantity ?? item?.qty ?? item?.arrangementQuantity ?? item?.arrangement_quantity
-            );
-            const price = parseMoney(
-                item?.price ?? item?.unit_price ?? item?.unitPrice ?? item?.final_price ?? item?.estimatedPrice ?? item?.estimated_price
-            );
+            const quantity = getRequestItemRemainingQuantity(item);
+            const price = getRequestItemUnitAmount(item, request);
             const fallbackName = request?.type === 'customized'
                 ? `Customizer Studio ${index + 1}`
                 : `Custom Order ${index + 1}`;
@@ -1043,7 +1140,7 @@ const getRequestTransactionItems = (request = {}, saleAmount = 0) => {
                 lineTotal: price * quantity,
                 description: buildRequestItemDescription(item),
             };
-        });
+        }).filter((item) => item.quantity > 0);
     }
 
     const fallbackName = getFirstTransactionText(
@@ -1074,6 +1171,12 @@ const getRequestTransactionDetails = (request = {}) => {
     const address = parseJsonObject(requestData?.address);
     const finalPrice = getRequestTotalAmount(request);
     const shippingFee = getRequestShippingFeeAmount(request);
+    const storedItemCount = parseMoney(requestData?.item_count ?? requestData?.itemCount);
+    const hasCancelledItems = sourceItems.some((item) => getRequestItemCancelledQuantity(item) > 0);
+    const derivedItemCount = sourceItems.reduce(
+        (sum, item) => sum + getRequestItemRemainingQuantity(item),
+        0
+    );
 
     return {
         status: request?.status || requestData?.status || '',
@@ -1084,7 +1187,9 @@ const getRequestTransactionDetails = (request = {}) => {
         shippingFee,
         deliveryMethod: request?.delivery_method || requestData?.delivery_method || '',
         pickupTime: request?.pickup_time || requestData?.pickup_time || '',
-        itemCount: parseMoney(requestData?.item_count) || sourceItems.length || null,
+        itemCount: sourceItems.length
+            ? (hasCancelledItems ? derivedItemCount : (storedItemCount > 0 ? storedItemCount : derivedItemCount))
+            : null,
         recipientName: getFirstTransactionText(
             firstItem?.recipientName,
             firstItem?.recipient_name,
