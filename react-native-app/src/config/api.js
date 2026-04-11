@@ -806,6 +806,27 @@ const UPCOMING_REQUEST_STATUSES = new Set(['pending', 'quoted', 'accepted', 'pro
 const CLOSED_ORDER_STATUSES = new Set(['cancelled']);
 const CLOSED_REQUEST_STATUSES = new Set(['cancelled', 'declined']);
 
+const buildRequestSelectColumns = (baseColumns = [], optionalColumns = [], includeUsers = false) => {
+    const columns = [...baseColumns];
+
+    optionalColumns.forEach(({ enabled, column }) => {
+        if (enabled !== false && column) {
+            columns.push(column);
+        }
+    });
+
+    if (includeUsers) {
+        columns.push(`
+            users (
+                name,
+                email
+            )
+        `);
+    }
+
+    return columns.join(', ');
+};
+
 const parseMoney = (value) => {
     if (value === null || value === undefined || value === '') {
         return 0;
@@ -2678,23 +2699,18 @@ export const adminAPI = {
 
         const buildSalesRequestsQuery = (options = {}) => supabase
             .from('requests')
-            .select(`
-                id,
-                request_number,
-                type,
-                created_at,
-                status,
-                ${options.includePaymentStatus !== false ? 'payment_status,' : ''}
-                ${options.includeAmountReceived !== false ? 'amount_received,' : ''}
-                ${options.includeFinalPrice !== false ? 'final_price,' : ''}
-                ${options.includeEstimatedPrice !== false ? 'estimated_price,' : ''}
-                ${options.includeDeliveryMethod !== false ? 'delivery_method,' : ''}
-                ${options.includePickupTime !== false ? 'pickup_time,' : ''}
-                users (
-                    name,
-                    email
-                )
-            `)
+            .select(buildRequestSelectColumns(
+                ['id', 'request_number', 'type', 'created_at', 'status'],
+                [
+                    { enabled: options.includePaymentStatus, column: 'payment_status' },
+                    { enabled: options.includeAmountReceived, column: 'amount_received' },
+                    { enabled: options.includeFinalPrice, column: 'final_price' },
+                    { enabled: options.includeEstimatedPrice, column: 'estimated_price' },
+                    { enabled: options.includeDeliveryMethod, column: 'delivery_method' },
+                    { enabled: options.includePickupTime, column: 'pickup_time' },
+                ],
+                true
+            ))
             .order('created_at', { ascending: false });
 
         ordersQuery = applyDateRangeToQuery(ordersQuery, 'created_at', periodRange);
@@ -2927,15 +2943,15 @@ export const adminAPI = {
 
         const buildChartRequestsQuery = (options = {}) => supabase
             .from('requests')
-            .select(`
-                id,
-                created_at,
-                status,
-                ${options.includePaymentStatus !== false ? 'payment_status,' : ''}
-                ${options.includeAmountReceived !== false ? 'amount_received,' : ''}
-                ${options.includeFinalPrice !== false ? 'final_price,' : ''}
-                ${options.includeEstimatedPrice !== false ? 'estimated_price,' : ''}
-            `)
+            .select(buildRequestSelectColumns(
+                ['id', 'created_at', 'status'],
+                [
+                    { enabled: options.includePaymentStatus, column: 'payment_status' },
+                    { enabled: options.includeAmountReceived, column: 'amount_received' },
+                    { enabled: options.includeFinalPrice, column: 'final_price' },
+                    { enabled: options.includeEstimatedPrice, column: 'estimated_price' },
+                ]
+            ))
             .order('created_at', { ascending: true });
 
         ordersQuery = applyDateRangeToQuery(ordersQuery, 'created_at', periodRange);
@@ -3107,26 +3123,21 @@ export const adminAPI = {
 
         const buildTransactionRequestsQuery = (options = {}) => supabase
             .from('requests')
-            .select(`
-                id,
-                request_number,
-                type,
-                created_at,
-                status,
-                ${options.includeStatusTimestamps !== false ? 'status_timestamps,' : ''}
-                ${options.includePaymentStatus !== false ? 'payment_status,' : ''}
-                ${options.includePaymentMethod !== false ? 'payment_method,' : ''}
-                ${options.includeAmountReceived !== false ? 'amount_received,' : ''}
-                ${options.includeEstimatedPrice !== false ? 'estimated_price,' : ''}
-                ${options.includeFinalPrice !== false ? 'final_price,' : ''}
-                ${options.includeShippingFee !== false ? 'shipping_fee,' : ''}
-                ${options.includeDeliveryMethod !== false ? 'delivery_method,' : ''}
-                ${options.includePickupTime !== false ? 'pickup_time,' : ''}
-                users (
-                    name,
-                    email
-                )
-            `)
+            .select(buildRequestSelectColumns(
+                ['id', 'request_number', 'type', 'created_at', 'status'],
+                [
+                    { enabled: options.includeStatusTimestamps, column: 'status_timestamps' },
+                    { enabled: options.includePaymentStatus, column: 'payment_status' },
+                    { enabled: options.includePaymentMethod, column: 'payment_method' },
+                    { enabled: options.includeAmountReceived, column: 'amount_received' },
+                    { enabled: options.includeEstimatedPrice, column: 'estimated_price' },
+                    { enabled: options.includeFinalPrice, column: 'final_price' },
+                    { enabled: options.includeShippingFee, column: 'shipping_fee' },
+                    { enabled: options.includeDeliveryMethod, column: 'delivery_method' },
+                    { enabled: options.includePickupTime, column: 'pickup_time' },
+                ],
+                true
+            ))
             .order('created_at', { ascending: false })
             .limit(500);
         let requestQueryOptions = {
