@@ -838,6 +838,58 @@ const getRequestTentativeAmount = (request) => {
     return candidates.length ? Math.max(...candidates) : 0;
 };
 
+const getRequestShippingFeeAmount = (request = {}) => {
+    const requestData = parseJsonObject(request?.data);
+    const quoteBreakdown = parseJsonObject(requestData?.quote_breakdown || requestData?.quoteBreakdown);
+
+    return [
+        quoteBreakdown?.shipping_fee,
+        quoteBreakdown?.shippingFee,
+        request?.shipping_fee,
+        requestData?.shipping_fee,
+        requestData?.shippingFee,
+    ].map(parseMoney).find((amount) => amount > 0) || 0;
+};
+
+const getRequestSourceSubtotal = (request = {}) => {
+    const requestData = parseJsonObject(request?.data);
+    const quoteBreakdown = parseJsonObject(requestData?.quote_breakdown || requestData?.quoteBreakdown);
+    const quoteLineItems = Array.isArray(quoteBreakdown?.line_items)
+        ? quoteBreakdown.line_items
+        : [];
+
+    if (quoteLineItems.length) {
+        return quoteLineItems.reduce((sum, row) => {
+            const quantity = getTransactionQuantity(row?.quantity);
+            const price = parseMoney(row?.price ?? row?.unit_price ?? row?.unitPrice);
+            return sum + (price * quantity);
+        }, 0);
+    }
+
+    const sourceItems = Array.isArray(requestData?.items)
+        ? requestData.items.filter(Boolean)
+        : [];
+
+    if (sourceItems.length) {
+        return sourceItems.reduce((sum, item) => {
+            const quantity = getTransactionQuantity(
+                item?.quantity ?? item?.qty ?? item?.arrangementQuantity ?? item?.arrangement_quantity
+            );
+            const price = parseMoney(
+                item?.price
+                ?? item?.unit_price
+                ?? item?.unitPrice
+                ?? item?.final_price
+                ?? item?.estimatedPrice
+                ?? item?.estimated_price
+            );
+            return sum + (price * quantity);
+        }, 0);
+    }
+
+    return 0;
+};
+
 const getRequestTotalAmount = (request, options = {}) => {
     const requestData = parseJsonObject(request?.data);
     const quoteBreakdown = parseJsonObject(requestData?.quote_breakdown || requestData?.quoteBreakdown);
@@ -849,6 +901,12 @@ const getRequestTotalAmount = (request, options = {}) => {
     ].map(parseMoney).find((amount) => amount > 0) || 0;
     if (finalPrice > 0) {
         return finalPrice;
+    }
+
+    const sourceSubtotal = getRequestSourceSubtotal(request);
+    const shippingFee = getRequestShippingFeeAmount(request);
+    if (sourceSubtotal > 0) {
+        return sourceSubtotal + shippingFee;
     }
 
     const estimatedPrice = [
@@ -990,15 +1048,11 @@ const getRequestTransactionItems = (request = {}, saleAmount = 0) => {
 
 const getRequestTransactionDetails = (request = {}) => {
     const requestData = parseJsonObject(request?.data);
-    const quoteBreakdown = parseJsonObject(requestData?.quote_breakdown);
     const sourceItems = Array.isArray(requestData?.items) ? requestData.items.filter(Boolean) : [];
     const firstItem = sourceItems[0] || {};
     const address = parseJsonObject(requestData?.address);
-    const finalPrice = [
-        request?.final_price,
-        requestData?.final_price,
-        quoteBreakdown?.computed_total,
-    ].map(parseMoney).find((amount) => amount > 0) || 0;
+    const finalPrice = getRequestTotalAmount(request);
+    const shippingFee = getRequestShippingFeeAmount(request);
 
     return {
         status: request?.status || requestData?.status || '',
@@ -1006,7 +1060,7 @@ const getRequestTransactionDetails = (request = {}) => {
         paymentMethod: request?.payment_method || requestData?.payment_method || '',
         amountReceived: parseMoney(request?.amount_received ?? requestData?.amount_received),
         finalPrice,
-        shippingFee: parseMoney(quoteBreakdown?.shipping_fee ?? request?.shipping_fee ?? requestData?.shipping_fee),
+        shippingFee,
         deliveryMethod: request?.delivery_method || requestData?.delivery_method || '',
         pickupTime: request?.pickup_time || requestData?.pickup_time || '',
         itemCount: parseMoney(requestData?.item_count) || sourceItems.length || null,
@@ -3404,11 +3458,22 @@ export const adminAPI = {
                     : null)
                 || requestData?.image_url
                 || null;
+            const requestWithParsedData = {
+                ...req,
+                data: requestData,
+            };
+            const derivedShippingFee = getRequestShippingFeeAmount(requestWithParsedData);
+            const derivedTotal = getRequestTotalAmount(requestWithParsedData);
+            const derivedSubtotal = Math.max(0, derivedTotal - derivedShippingFee);
 
             return {
                 ...req,
                 status: req.status,
                 image_url: derivedPrimaryImage,
+                final_price: derivedTotal,
+                total: derivedTotal,
+                subtotal: derivedSubtotal,
+                shipping_fee: derivedShippingFee,
                 payment_status: paymentStatusToUse,
                 payment_method: paymentMethodToUse,
                 receipt_url: receiptUrlToUse,
