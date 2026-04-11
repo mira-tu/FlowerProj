@@ -1179,9 +1179,9 @@ const SalesTab = () => {
         onRequestClose={() => setSelectedTransaction(null)}
       >
         <View style={styles.modalContainer}>
-          <View style={[styles.modalContent, { width: isWeb ? 560 : '92%', maxHeight: '85%' }]}>
+          <View style={[styles.modalContent, { width: isWeb ? 560 : '92%', maxHeight: '85%', paddingBottom: 16 }]}>
             {selectedTransaction ? (
-              <>
+              <View style={{ flexShrink: 1 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.modalTitle}>Payment Details</Text>
@@ -1194,7 +1194,11 @@ const SalesTab = () => {
                   </TouchableOpacity>
                 </View>
 
-                <ScrollView showsVerticalScrollIndicator={false}>
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  style={{ flexShrink: 1 }}
+                  contentContainerStyle={{ paddingBottom: 4 }}
+                >
                   <View style={{
                     backgroundColor: '#FDF2F8',
                     borderRadius: 14,
@@ -1258,12 +1262,12 @@ const SalesTab = () => {
                 </ScrollView>
 
                 <TouchableOpacity
-                  style={[styles.modalButton, styles.saveButton, { marginTop: 12 }]}
+                  style={[styles.modalButton, styles.saveButton, { marginTop: 8, marginBottom: 0 }]}
                   onPress={() => setSelectedTransaction(null)}
                 >
                   <Text style={styles.buttonText}>Close</Text>
                 </TouchableOpacity>
-              </>
+              </View>
             ) : null}
           </View>
         </View>
@@ -1277,9 +1281,9 @@ const SalesTab = () => {
         onRequestClose={() => setSelectedPipelineItem(null)}
       >
         <View style={styles.modalContainer}>
-          <View style={[styles.modalContent, { width: isWeb ? 520 : '92%', maxHeight: '85%' }]}>
+          <View style={[styles.modalContent, { width: isWeb ? 520 : '92%', maxHeight: '85%', paddingBottom: 16 }]}>
             {selectedPipelineItem ? (
-              <>
+              <View style={{ flexShrink: 1 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.modalTitle}>
@@ -1294,7 +1298,11 @@ const SalesTab = () => {
                   </TouchableOpacity>
                 </View>
 
-                <ScrollView showsVerticalScrollIndicator={false}>
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  style={{ flexShrink: 1 }}
+                  contentContainerStyle={{ paddingBottom: 4 }}
+                >
                   <View style={{
                     backgroundColor: selectedPipelineItem.section === 'unpaid' ? '#FEF2F2' : '#ECFDF5',
                     borderRadius: 14,
@@ -1342,12 +1350,12 @@ const SalesTab = () => {
                 </ScrollView>
 
                 <TouchableOpacity
-                  style={[styles.modalButton, styles.saveButton, { marginTop: 12 }]}
+                  style={[styles.modalButton, styles.saveButton, { marginTop: 8, marginBottom: 0 }]}
                   onPress={() => setSelectedPipelineItem(null)}
                 >
                   <Text style={styles.buttonText}>Close</Text>
                 </TouchableOpacity>
-              </>
+              </View>
             ) : null}
           </View>
         </View>

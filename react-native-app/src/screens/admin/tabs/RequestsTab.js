@@ -922,6 +922,126 @@ const toAbsoluteImageUrl = (value) => {
   return `${BASE_URL}${text.startsWith('/') ? text : `/${text}`}`;
 };
 
+const clampPreviewRatio = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.min(1, Math.max(0, parsed));
+};
+
+const toPreviewPercent = (value) => `${clampPreviewRatio(value) * 100}%`;
+
+const getNormalizedCustomizedPreviewComposition = (value) => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const stems = Array.isArray(value?.stems)
+    ? value.stems
+      .map((stem, index) => ({
+        ...stem,
+        id: stem?.id || `stem-${index}`,
+        src: toAbsoluteImageUrl(stem?.src),
+      }))
+      .filter((stem) => stem.src)
+    : [];
+
+  const wrapper = value?.wrapper?.src
+    ? { ...value.wrapper, src: toAbsoluteImageUrl(value.wrapper.src) }
+    : null;
+  const ribbon = value?.ribbon?.src
+    ? { ...value.ribbon, src: toAbsoluteImageUrl(value.ribbon.src) }
+    : null;
+
+  if (!wrapper && !ribbon && stems.length === 0) {
+    return null;
+  }
+
+  return { wrapper, ribbon, stems };
+};
+
+const CustomizedBouquetPreview = ({ item, style, fallbackResizeMode = 'cover' }) => {
+  const composition = getNormalizedCustomizedPreviewComposition(
+    item?.previewComposition || item?.preview_composition
+  );
+
+  if (composition) {
+    return (
+      <View style={[{ position: 'relative', overflow: 'hidden', backgroundColor: '#fff' }, style]}>
+        {composition.wrapper ? (
+          <Image
+            source={{ uri: composition.wrapper.src }}
+            style={{
+              position: 'absolute',
+              left: toPreviewPercent(composition.wrapper.leftRatio),
+              top: toPreviewPercent(composition.wrapper.topRatio),
+              width: toPreviewPercent(composition.wrapper.widthRatio),
+              height: toPreviewPercent(composition.wrapper.heightRatio),
+              zIndex: composition.wrapper.zIndex || 1,
+            }}
+            resizeMode="contain"
+          />
+        ) : null}
+
+        {composition.stems.map((stem) => (
+          <View
+            key={stem.id}
+            style={{
+              position: 'absolute',
+              left: toPreviewPercent(stem.leftRatio),
+              top: toPreviewPercent(stem.topRatio),
+              width: toPreviewPercent(stem.widthRatio),
+              height: toPreviewPercent(stem.heightRatio),
+              zIndex: stem.zIndex || 2,
+              transform: [{ scale: Number(stem.scale || 1) }],
+            }}
+          >
+            <Image
+              source={{ uri: stem.src }}
+              style={{
+                width: '100%',
+                height: '100%',
+                transform: [{ rotate: `${Number(stem.rotation || 0)}deg` }],
+              }}
+              resizeMode="contain"
+            />
+          </View>
+        ))}
+
+        {composition.ribbon ? (
+          <Image
+            source={{ uri: composition.ribbon.src }}
+            style={{
+              position: 'absolute',
+              left: toPreviewPercent(composition.ribbon.leftRatio),
+              top: toPreviewPercent(composition.ribbon.topRatio),
+              width: toPreviewPercent(composition.ribbon.widthRatio),
+              height: toPreviewPercent(composition.ribbon.heightRatio),
+              zIndex: composition.ribbon.zIndex || 8,
+            }}
+            resizeMode="contain"
+          />
+        ) : null}
+      </View>
+    );
+  }
+
+  if (item?.imageUri) {
+    return (
+      <Image
+        source={{ uri: item.imageUri }}
+        style={style}
+        resizeMode={fallbackResizeMode}
+      />
+    );
+  }
+
+  return (
+    <View style={[{ justifyContent: 'center', alignItems: 'center' }, style]}>
+      <Ionicons name="image-outline" size={24} color="#666" />
+    </View>
+  );
+};
+
 const formatAddressParts = (address = {}) => (
   [address?.street, address?.barangay, address?.city, address?.province, address?.zip]
     .map((part) => String(part || '').trim())
@@ -1169,6 +1289,7 @@ const getCustomizedRequestItems = (request) => {
       label: `Bouquet ${index + 1}`,
       title,
       imageUri: toAbsoluteImageUrl(item?.image_url || item?.image || item?.photo || request?.image_url),
+      previewComposition: item?.previewComposition || item?.preview_composition || null,
       flowersText,
       wrapperName,
       ribbonName,
@@ -2623,14 +2744,11 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                 onPress={() => onOpenCustomizedItem(item, customizedItem)}
               >
                 <View style={styles.eoItemImage}>
-                  {customizedItem.imageUri ? (
-                    <Image
-                      source={{ uri: customizedItem.imageUri }}
-                      style={{ width: '100%', height: '100%', resizeMode: 'cover' }}
-                    />
-                  ) : (
-                    <Ionicons name="image-outline" size={24} color="#666" />
-                  )}
+                  <CustomizedBouquetPreview
+                    item={customizedItem}
+                    style={StyleSheet.absoluteFillObject}
+                    fallbackResizeMode="cover"
+                  />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.customizedRequestItemMeta}>{customizedItem.label}</Text>
@@ -3213,15 +3331,15 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
 
             {selectedCustomizedItem?.item ? (
               <ScrollView showsVerticalScrollIndicator={false}>
-                {selectedCustomizedItem.item.imageUri ? (
-                  <View style={styles.imageSection}>
-                    <Image
-                      source={{ uri: selectedCustomizedItem.item.imageUri }}
-                      style={styles.fullImage}
-                      resizeMode="contain"
+                <View style={styles.imageSection}>
+                  <View style={styles.fullImage}>
+                    <CustomizedBouquetPreview
+                      item={selectedCustomizedItem.item}
+                      style={StyleSheet.absoluteFillObject}
+                      fallbackResizeMode="contain"
                     />
                   </View>
-                ) : null}
+                </View>
 
                 <View style={styles.customizedRequestDetailCard}>
                   <Text style={styles.customizedRequestItemMeta}>{selectedCustomizedItem.item.label}</Text>

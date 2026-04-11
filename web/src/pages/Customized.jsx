@@ -199,6 +199,98 @@ const cropCanvasToContent = (sourceCanvas, padding = 24) => {
   return croppedCanvas;
 };
 
+const clampPreviewRatio = (value) => {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(1, Math.max(0, value));
+};
+
+const getRelativeElementBounds = (stageRect, element) => {
+  if (!stageRect || !element) return null;
+
+  const elementRect = element.getBoundingClientRect();
+  if (!elementRect.width || !elementRect.height || !stageRect.width || !stageRect.height) {
+    return null;
+  }
+
+  return {
+    leftRatio: clampPreviewRatio((elementRect.left - stageRect.left) / stageRect.width),
+    topRatio: clampPreviewRatio((elementRect.top - stageRect.top) / stageRect.height),
+    widthRatio: clampPreviewRatio(elementRect.width / stageRect.width),
+    heightRatio: clampPreviewRatio(elementRect.height / stageRect.height),
+  };
+};
+
+const buildSavedPreviewComposition = ({
+  stageElement,
+  wrapperElement,
+  ribbonElement,
+  stemLayouts,
+  flowerZoneLayouts,
+  selection,
+  stemScale,
+}) => {
+  if (!stageElement) return null;
+
+  const stageRect = stageElement.getBoundingClientRect();
+  if (!stageRect.width || !stageRect.height) {
+    return null;
+  }
+
+  const stageWidth = stageRect.width;
+  const stageHeight = stageRect.height;
+  const stemNodes = Array.from(stageElement.querySelectorAll('[data-stem-id]'));
+  const stemNodeMap = new Map(
+    stemNodes.map((node) => [String(node.dataset.stemId || ''), node])
+  );
+
+  const wrapperSrc = selection?.wrapper?.layerImg || selection?.wrapper?.img || null;
+  const ribbonSrc = selection?.ribbon?.layerImg || selection?.ribbon?.img || null;
+  const wrapperBounds = getRelativeElementBounds(stageRect, wrapperElement);
+  const ribbonBounds = getRelativeElementBounds(stageRect, ribbonElement);
+
+  const stems = (Array.isArray(stemLayouts) ? stemLayouts : []).map((slot, index) => {
+    const zoneLayout = resolveZoneLayout(flowerZoneLayouts, slot?.zoneKey, slot?.zoneIndex ?? 0);
+    const flowerIndex = selection?.flowers?.length ? index % selection.flowers.length : 0;
+    const flower = selection?.flowers?.[flowerIndex];
+    const src = flower?.stemImg || flower?.layerImg || flower?.img || null;
+
+    if (!zoneLayout || !src) {
+      return null;
+    }
+
+    const stemNode = stemNodeMap.get(String(slot?.id || ''));
+    const measuredWidth = stemNode?.offsetWidth || STEM_HANDLE_SIZE;
+    const measuredHeight = stemNode?.offsetHeight || STEM_HANDLE_SIZE;
+
+    return {
+      id: slot?.id || `stem-${index}`,
+      src,
+      leftRatio: clampPreviewRatio((zoneLayout.left + Number(slot?.x || 0)) / stageWidth),
+      topRatio: clampPreviewRatio((zoneLayout.top + Number(slot?.y || 0)) / stageHeight),
+      widthRatio: clampPreviewRatio(measuredWidth / stageWidth),
+      heightRatio: clampPreviewRatio(measuredHeight / stageHeight),
+      rotation: Number(slot?.rotate || 0),
+      scale: Number(stemScale || 1),
+      zIndex: Number(slot?.zIndex || (2 + index)),
+    };
+  }).filter(Boolean);
+
+  if (!wrapperBounds && !ribbonBounds && stems.length === 0) {
+    return null;
+  }
+
+  return {
+    version: 1,
+    wrapper: wrapperBounds && wrapperSrc
+      ? { src: wrapperSrc, zIndex: 1, ...wrapperBounds }
+      : null,
+    ribbon: ribbonBounds && ribbonSrc
+      ? { src: ribbonSrc, zIndex: 3, ...ribbonBounds }
+      : null,
+    stems,
+  };
+};
+
 const isOptionSelectable = (item) => item.is_available !== false && (item.quantity || 0) > 0;
 const isLikelyColorVariant = (value) => COLOR_VARIANT_NAMES.has(String(value || '').trim().toLowerCase());
 const getWrapperSwatch = (value) => WRAPPER_COLOR_SWATCH_MAP[String(value || '').trim()] || '#94a3b8';
@@ -434,6 +526,7 @@ const Customized = ({ addToCart }) => {
   const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null }); // State for InfoModal
   const previewRef = useRef(null);
   const wrapperLayerRef = useRef(null);
+  const ribbonLayerRef = useRef(null);
   const dragStateRef = useRef(null);
   const stemIdRef = useRef(0);
 
@@ -1102,6 +1195,15 @@ const Customized = ({ addToCart }) => {
       }
 
       let photoBase64 = null;
+      const previewComposition = buildSavedPreviewComposition({
+        stageElement: previewRef.current,
+        wrapperElement: wrapperLayerRef.current,
+        ribbonElement: ribbonLayerRef.current,
+        stemLayouts,
+        flowerZoneLayouts,
+        selection,
+        stemScale,
+      });
       if (previewRef.current) {
         try {
           const canvas = await html2canvas(previewRef.current, {
@@ -1157,6 +1259,7 @@ const Customized = ({ addToCart }) => {
           quantity: selection.ribbon.quantity || 0,
           is_available: selection.ribbon.is_available !== false,
         } : null,
+        previewComposition,
         price: totalPrice,
         qty: 1
       };
@@ -1562,6 +1665,7 @@ const Customized = ({ addToCart }) => {
                       <div
                         key={slot.id}
                         className={`drag-handle ${draggingStemId === slot.id ? 'is-dragging' : ''}`}
+                        data-stem-id={slot.id}
                         style={{
                           position: 'absolute',
                           left: slot.x,
@@ -1587,6 +1691,7 @@ const Customized = ({ addToCart }) => {
 
               {selection.ribbon && (
                 <img
+                  ref={ribbonLayerRef}
                   src={selection.ribbon.layerImg || selection.ribbon.img || placeholderImg}
                   alt="Ribbon"
                   className="layer"

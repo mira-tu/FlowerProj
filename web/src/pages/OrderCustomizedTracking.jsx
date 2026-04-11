@@ -4,6 +4,7 @@ import { supabase } from '../config/supabase';
 import TrackingPaymentDetails from '../components/TrackingPaymentDetails';
 import DeliveryDestinationsSummary from '../components/DeliveryDestinationsSummary';
 import InfoModal from '../components/InfoModal';
+import CustomizedBouquetPreview from '../components/CustomizedBouquetPreview';
 import { insertStaffNotifications } from '../utils/notificationApi';
 import { buildTimelineTimestampMap, formatTimelineTimestamp } from '../utils/timelineTimestamps';
 import {
@@ -47,6 +48,7 @@ const getCustomizedTrackingItems = (request) => {
             key: item.id || item.listId || `${request?.id || 'customized'}-${index}`,
             name: item.name || (item.bundleSize ? `Customizer Studio (${item.bundleSize} stems)` : `Customizer Studio ${index + 1}`),
             image: item.image_url || item.image || request?.imageUrl || null,
+            previewComposition: item.previewComposition || item.preview_composition || null,
             quantity: item.remainingQuantity,
             price: item.unitPrice,
         }));
@@ -62,6 +64,7 @@ const getCustomizedTrackingItems = (request) => {
             ? `Customizer Studio (${request.requestData.bundleSize} stems)`
             : 'Customizer Studio',
         image: request?.imageUrl || null,
+        previewComposition: request?.requestData?.previewComposition || request?.requestData?.preview_composition || null,
         quantity: 1,
         price: Number(request?.finalPrice || 0),
     }];
@@ -986,13 +989,9 @@ const OrderCustomizedTracking = ({ user }) => {
 
                             {customizedTrackingItems.slice(0, 2).map((item) => (
                                 <div key={item.key} className="d-flex align-items-center mb-3 pb-3 border-bottom">
-                                    <img
-                                        src={item.image || 'https://via.placeholder.com/56'}
-                                        alt={item.name}
-                                        className="rounded-3 shadow-sm me-3"
-                                        style={{ width: '56px', height: '56px', objectFit: 'cover' }}
-                                        onError={(e) => e.target.src = 'https://via.placeholder.com/56'}
-                                    />
+                                    <div className="me-3">
+                                        <CustomizedBouquetPreview item={item} size={56} zoomable />
+                                    </div>
                                     <div className="flex-grow-1">
                                         <div className="fw-bold">{item.name}</div>
                                                     <div className="text-muted small">

@@ -2690,7 +2690,6 @@ export const adminAPI = {
                 ${options.includeEstimatedPrice !== false ? 'estimated_price,' : ''}
                 ${options.includeDeliveryMethod !== false ? 'delivery_method,' : ''}
                 ${options.includePickupTime !== false ? 'pickup_time,' : ''}
-                data,
                 users (
                     name,
                     email
@@ -2936,7 +2935,6 @@ export const adminAPI = {
                 ${options.includeAmountReceived !== false ? 'amount_received,' : ''}
                 ${options.includeFinalPrice !== false ? 'final_price,' : ''}
                 ${options.includeEstimatedPrice !== false ? 'estimated_price,' : ''}
-                data
             `)
             .order('created_at', { ascending: true });
 
@@ -3124,7 +3122,6 @@ export const adminAPI = {
                 ${options.includeShippingFee !== false ? 'shipping_fee,' : ''}
                 ${options.includeDeliveryMethod !== false ? 'delivery_method,' : ''}
                 ${options.includePickupTime !== false ? 'pickup_time,' : ''}
-                data,
                 users (
                     name,
                     email

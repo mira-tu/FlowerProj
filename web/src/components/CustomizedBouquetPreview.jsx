@@ -17,6 +17,28 @@ const previewContainerStyle = (size, zoomable = false) => ({
   cursor: zoomable ? 'zoom-in' : 'default',
 });
 
+const toPercent = (ratio) => `${Math.max(0, Math.min(1, Number(ratio) || 0)) * 100}%`;
+
+const normalizePreviewComposition = (value) => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const stems = Array.isArray(value.stems)
+    ? value.stems.filter((stem) => stem?.src)
+    : [];
+
+  if (!value.wrapper && !value.ribbon && stems.length === 0) {
+    return null;
+  }
+
+  return {
+    wrapper: value.wrapper?.src ? value.wrapper : null,
+    ribbon: value.ribbon?.src ? value.ribbon : null,
+    stems,
+  };
+};
+
 const buildPreviewFlowers = (flowers = [], bundleSize = 0) => {
   const safeFlowers = (Array.isArray(flowers) ? flowers : []).filter(Boolean);
   if (!safeFlowers.length) {
@@ -151,6 +173,10 @@ const CustomizedBouquetPreview = ({ item, size = 96, zoomable = false }) => {
   const wrapperSrc = item?.wrapper?.layerImg || item?.wrapper?.img || null;
   const ribbonSrc = item?.ribbon?.layerImg || item?.ribbon?.img || null;
   const snapshotSrc = item?.image || item?.image_url || null;
+  const savedPreviewComposition = useMemo(
+    () => normalizePreviewComposition(item?.previewComposition || item?.preview_composition),
+    [item?.previewComposition, item?.preview_composition]
+  );
   const isPalmHaloWrap = normalizeText(
     item?.wrapper?.name || item?.wrapper?.groupName || item?.wrapper?.wrapper_group_name
   ) === 'palm halo wrap';
@@ -168,6 +194,70 @@ const CustomizedBouquetPreview = ({ item, size = 96, zoomable = false }) => {
   const hasLayeredPreview = Boolean(
     !isPalmHaloWrap
       && (wrapperSrc || ribbonSrc || previewFlowers.some((flower) => flower?.stemImg || flower?.layerImg || flower?.img))
+  );
+  const hasSavedComposition = Boolean(savedPreviewComposition);
+
+  const renderSavedCompositionPreview = (renderSize) => (
+    <div style={previewContainerStyle(renderSize, zoomable)}>
+      {savedPreviewComposition?.wrapper ? (
+        <img
+          src={savedPreviewComposition.wrapper.src}
+          alt="Wrapper preview"
+          style={{
+            position: 'absolute',
+            left: toPercent(savedPreviewComposition.wrapper.leftRatio),
+            top: toPercent(savedPreviewComposition.wrapper.topRatio),
+            width: toPercent(savedPreviewComposition.wrapper.widthRatio),
+            height: toPercent(savedPreviewComposition.wrapper.heightRatio),
+            objectFit: 'contain',
+            zIndex: savedPreviewComposition.wrapper.zIndex || 1,
+            pointerEvents: 'none',
+          }}
+        />
+      ) : null}
+
+      {savedPreviewComposition?.stems?.map((stem) => (
+        <div
+          key={stem.id}
+          style={{
+            position: 'absolute',
+            left: toPercent(stem.leftRatio),
+            top: toPercent(stem.topRatio),
+            width: toPercent(stem.widthRatio),
+            height: toPercent(stem.heightRatio),
+            transform: `scale(${Number(stem.scale || 1)})`,
+            transformOrigin: 'center center',
+            zIndex: stem.zIndex || 2,
+            pointerEvents: 'none',
+          }}
+        >
+          <div style={{ transform: `rotate(${Number(stem.rotation || 0)}deg)`, width: '100%', height: '100%' }}>
+            <img
+              src={stem.src}
+              alt="Flower preview"
+              style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }}
+            />
+          </div>
+        </div>
+      ))}
+
+      {savedPreviewComposition?.ribbon ? (
+        <img
+          src={savedPreviewComposition.ribbon.src}
+          alt="Ribbon preview"
+          style={{
+            position: 'absolute',
+            left: toPercent(savedPreviewComposition.ribbon.leftRatio),
+            top: toPercent(savedPreviewComposition.ribbon.topRatio),
+            width: toPercent(savedPreviewComposition.ribbon.widthRatio),
+            height: toPercent(savedPreviewComposition.ribbon.heightRatio),
+            objectFit: 'contain',
+            zIndex: savedPreviewComposition.ribbon.zIndex || 8,
+            pointerEvents: 'none',
+          }}
+        />
+      ) : null}
+    </div>
   );
 
   const renderLayeredPreview = (renderSize) => (
@@ -248,7 +338,9 @@ const CustomizedBouquetPreview = ({ item, size = 96, zoomable = false }) => {
   );
 
   const renderPreview = (renderSize) => (
-    (snapshotSrc && isPalmHaloWrap) || !hasLayeredPreview
+    hasSavedComposition
+      ? renderSavedCompositionPreview(renderSize)
+      : ((snapshotSrc && isPalmHaloWrap) || !hasLayeredPreview)
       ? renderSnapshotPreview(renderSize)
       : renderLayeredPreview(renderSize)
   );
@@ -300,7 +392,9 @@ const CustomizedBouquetPreview = ({ item, size = 96, zoomable = false }) => {
             >
               x
             </button>
-            {snapshotSrc
+            {hasSavedComposition
+              ? renderSavedCompositionPreview('min(82vw, 360px)')
+              : snapshotSrc
               ? renderSnapshotPreview('min(82vw, 360px)')
               : renderLayeredPreview('min(82vw, 360px)')}
           </div>
