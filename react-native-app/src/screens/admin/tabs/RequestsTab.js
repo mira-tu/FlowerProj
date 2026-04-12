@@ -2139,7 +2139,7 @@ const RequestSummaryCard = React.memo(({
           </View>
         ) : null}
 
-        {item.type === 'booking' && !['completed', 'cancelled', 'declined', 'out_for_delivery', 'ready_for_pickup', 'ready_for_pick_up', 'claimed'].includes(item.status) ? (
+        {item.type === 'booking' && !['completed', 'cancelled', 'declined', 'ready_for_delivery', 'out_for_delivery', 'ready_for_pickup', 'ready_for_pick_up', 'claimed'].includes(item.status) ? (
           <>
             <TouchableOpacity
               style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#F59E0B', marginTop: 10 }]}
@@ -2797,7 +2797,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   }, [requests, riders]);
 
   const riderScopedRequests = React.useMemo(() => {
-    if (currentUser?.role !== 'employee') {
+    if (currentUser?.role !== 'rider') {
       return requestsWithRiderDetails;
     }
 
@@ -2848,7 +2848,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
           case 'Pending': return status === 'pending';
           case 'Quoted / Acc': return status === 'quoted' || status === 'accepted';
           case 'Processing': return status === 'processing' || status === 'partial';
-          case 'Delivery/Pickup': return status === 'out_for_delivery' || status === 'ready_for_pickup';
+          case 'Delivery/Pickup': return status === 'ready_for_delivery' || status === 'out_for_delivery' || status === 'ready_for_pickup' || status === 'ready_for_pick_up';
           case 'Completed': return status === 'completed' || status === 'claimed';
           case 'Cancelled': return status === 'cancelled' || status === 'declined';
           default: return true;
@@ -2875,6 +2875,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   const requestDeliveryStepperStatuses = [
     { id: 'pending', label: 'Pending', description: 'Request received' },
     { id: 'processing', label: 'Processing', description: 'Being prepared' },
+    { id: 'ready_for_delivery', label: 'Ready for Delivery', description: 'Packed and queued' },
     { id: 'out_for_delivery', label: 'Out for Delivery', description: 'On the way' },
     { id: 'completed', label: 'Completed', description: 'Delivered successfully' }
   ];
@@ -3589,7 +3590,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
         }
       }
 
-      const isMovingToDelivery = ['out_for_delivery', 'ready_for_pickup', 'ready_for_pick_up', 'completed'].includes(selectedRequestStatus);
+      const isMovingToDelivery = ['ready_for_delivery', 'out_for_delivery', 'ready_for_pickup', 'ready_for_pick_up', 'completed'].includes(selectedRequestStatus);
       const isNotPaid = requestToUpdate.payment_status !== 'paid';
       const isNotCOD = requestToUpdate.payment_method?.toLowerCase() !== 'cod';
 
@@ -4665,7 +4666,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
             </View>
           )}
 
-          {item.type === 'booking' && !['completed', 'cancelled', 'declined', 'out_for_delivery', 'ready_for_pickup', 'ready_for_pick_up', 'claimed'].includes(item.status) && (
+          {item.type === 'booking' && !['completed', 'cancelled', 'declined', 'ready_for_delivery', 'out_for_delivery', 'ready_for_pickup', 'ready_for_pick_up', 'claimed'].includes(item.status) && (
             <>
               <TouchableOpacity
                 style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#F59E0B', marginTop: 10 }]}

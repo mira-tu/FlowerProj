@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import '../styles/Shop.css';
+import InfoModal from '../components/InfoModal';
 import { buildTentativePricingSummary, getTentativeBreakdownFromItem } from '../utils/customOrderTentativePricing';
 import { fetchCustomOrderCatalog } from '../utils/customOrderCatalog';
 
@@ -8,7 +9,9 @@ const BookingCart = ({ user }) => {
     const navigate = useNavigate();
     const [inquiryItems, setInquiryItems] = useState([]);
     const [catalogArrangements, setCatalogArrangements] = useState([]);
+    const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
     const bookingCheckoutKey = `bookingCheckoutItems_${user?.id || 'guest'}`;
+    const bookingSelectionKey = `bookSelection_${user?.id || 'guest'}`;
 
     const normalizeInquiryItem = (item = {}) => ({
         ...item,
@@ -19,11 +22,33 @@ const BookingCart = ({ user }) => {
         const cartKey = `bookingCart_${user?.id || 'guest'}`;
         const savedInquiry = localStorage.getItem(cartKey) || localStorage.getItem('bookingCart');
         if (savedInquiry) {
-            setInquiryItems(JSON.parse(savedInquiry).map(normalizeInquiryItem));
+            const savedSelection = (() => {
+                try {
+                    const parsed = JSON.parse(localStorage.getItem(bookingSelectionKey) || '{}');
+                    return parsed && typeof parsed === 'object' ? parsed : {};
+                } catch (error) {
+                    return {};
+                }
+            })();
+
+            const parsedItems = JSON.parse(savedInquiry).map((item, index) => {
+                const normalizedItem = normalizeInquiryItem(item);
+                const listId = normalizedItem?.listId || `book-${index}`;
+                const selected = Object.prototype.hasOwnProperty.call(savedSelection, listId)
+                    ? Boolean(savedSelection[listId])
+                    : true;
+
+                return {
+                    ...normalizedItem,
+                    listId,
+                    selected,
+                };
+            });
+            setInquiryItems(parsedItems);
         } else {
             navigate('/');
         }
-    }, [navigate, user]);
+    }, [bookingSelectionKey, navigate, user]);
 
     useEffect(() => {
         let isMounted = true;
@@ -49,10 +74,16 @@ const BookingCart = ({ user }) => {
 
         if (updatedItems.length === 0) {
             localStorage.removeItem(cartKey);
+            localStorage.removeItem(bookingSelectionKey);
             navigate(getOriginPage());
         } else {
             setInquiryItems(updatedItems);
             localStorage.setItem(cartKey, JSON.stringify(updatedItems));
+            const selectionMap = {};
+            updatedItems.forEach((item) => {
+                selectionMap[item.listId] = Boolean(item.selected);
+            });
+            localStorage.setItem(bookingSelectionKey, JSON.stringify(selectionMap));
         }
     };
 
@@ -60,12 +91,39 @@ const BookingCart = ({ user }) => {
         navigate(getOriginPage());
     };
 
+    const handleToggleSelection = (listId) => {
+        setInquiryItems((prevItems) => {
+            const nextItems = prevItems.map((item) => (
+                item.listId === listId
+                    ? { ...item, selected: !item.selected }
+                    : item
+            ));
+            const selectionMap = {};
+            nextItems.forEach((item) => {
+                selectionMap[item.listId] = Boolean(item.selected);
+            });
+            localStorage.setItem(bookingSelectionKey, JSON.stringify(selectionMap));
+            return nextItems;
+        });
+    };
+
     const handleProceedToCheckout = () => {
-        localStorage.setItem(bookingCheckoutKey, JSON.stringify(inquiryItems));
+        const selectedInquiryItems = inquiryItems.filter((item) => item.selected);
+        if (!selectedInquiryItems.length) {
+            setInfoModal({
+                show: true,
+                title: 'Select a Custom Order',
+                message: 'Please select at least one custom-order draft before proceeding to checkout.',
+            });
+            return;
+        }
+
+        localStorage.setItem(bookingCheckoutKey, JSON.stringify(selectedInquiryItems));
         navigate('/booking-checkout');
     };
 
-    const itemTentativeBreakdowns = inquiryItems.map((item) => getTentativeBreakdownFromItem(item, catalogArrangements));
+    const selectedInquiryItems = inquiryItems.filter((item) => item.selected);
+    const itemTentativeBreakdowns = selectedInquiryItems.map((item) => getTentativeBreakdownFromItem(item, catalogArrangements));
     const tentativePricingSummary = buildTentativePricingSummary({
         tentativeBreakdowns: itemTentativeBreakdowns,
     });
@@ -99,13 +157,22 @@ const BookingCart = ({ user }) => {
                     </div>
 
                     {inquiryItems.map((item, index) => {
-                        const tentativeBreakdown = itemTentativeBreakdowns[index];
+                        const tentativeBreakdown = getTentativeBreakdownFromItem(item, catalogArrangements);
 
                         return (
                         <div key={item.id} className="card border-0 shadow-sm mb-3">
                             <div className="card-body">
                                 <div className="row align-items-center g-0">
                                     <div className="col-md-5 d-flex align-items-center mb-3 mb-md-0">
+                                        <div className="form-check me-3">
+                                            <input
+                                                className="form-check-input"
+                                                type="checkbox"
+                                                checked={Boolean(item.selected)}
+                                                onChange={() => handleToggleSelection(item.listId)}
+                                                aria-label={`Select ${item.occasion || item.arrangementSummary || 'custom order'}`}
+                                            />
+                                        </div>
                                         <img
                                             src={item.inspirationImageBase64 || 'https://via.placeholder.com/80?text=No+Ref'}
                                             alt={item.serviceType}
@@ -160,8 +227,8 @@ const BookingCart = ({ user }) => {
                         <div className="card-body">
                             <h5 className="fw-bold mb-3">Inquiry Summary</h5>
                             <div className="d-flex justify-content-between mb-2">
-                                <span className="text-muted">Total Items</span>
-                                <span>{inquiryItems.length}</span>
+                                <span className="text-muted">Selected Items</span>
+                                <span>{selectedInquiryItems.length}</span>
                             </div>
                             <hr />
                             <div className="d-flex justify-content-between mb-4">
@@ -187,6 +254,12 @@ const BookingCart = ({ user }) => {
                     </div>
                 </div>
             </div>
+            <InfoModal
+                show={infoModal.show}
+                title={infoModal.title}
+                message={infoModal.message}
+                onClose={() => setInfoModal({ show: false, title: '', message: '' })}
+            />
         </div>
     );
 };

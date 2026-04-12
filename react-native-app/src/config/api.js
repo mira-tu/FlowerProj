@@ -1278,6 +1278,55 @@ const parseMoney = (value) => {
     return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const normalizeGcashReferenceValue = (value) => String(value || '').trim();
+
+const normalizeAdditionalReceiptEntriesForAdmin = (value) => (
+    Array.isArray(value)
+        ? value
+            .map((entry) => {
+                if (!entry) return null;
+                if (typeof entry === 'string') {
+                    return {
+                        url: entry,
+                        reference_number: '',
+                        uploaded_at: null,
+                    };
+                }
+
+                return {
+                    ...entry,
+                    url: entry.url || entry.receipt_url || '',
+                    reference_number: normalizeGcashReferenceValue(
+                        entry.reference_number || entry.referenceNumber || ''
+                    ),
+                    uploaded_at: entry.uploaded_at || entry.uploadedAt || null,
+                };
+            })
+            .filter((entry) => entry?.url)
+        : []
+);
+
+const getOrderPaymentMetadataFromNotes = (notes) => {
+    const parsedNotes = parseMultiDeliveryNotes(notes);
+    const paymentMetadata = parsedNotes?.metadata?.payment;
+
+    if (!paymentMetadata || typeof paymentMetadata !== 'object' || Array.isArray(paymentMetadata)) {
+        return {
+            gcash_reference_number: '',
+            additional_receipts: [],
+        };
+    }
+
+    return {
+        gcash_reference_number: normalizeGcashReferenceValue(
+            paymentMetadata.gcash_reference_number || paymentMetadata.gcashReferenceNumber || ''
+        ),
+        additional_receipts: normalizeAdditionalReceiptEntriesForAdmin(
+            paymentMetadata.additional_receipts || paymentMetadata.additionalReceipts || []
+        ),
+    };
+};
+
 const getRequestTentativeAmount = (request) => {
     const requestData = parseJsonObject(request?.data);
     const breakdown = requestData?.tentativeBreakdown || requestData?.tentative_breakdown || {};
@@ -1756,6 +1805,37 @@ const buildFlowerImageLookup = (flowers = []) => {
     return imageLookup;
 };
 
+const mergeFlowerImageLookups = (...lookups) => {
+    const mergedLookup = new Map();
+
+    lookups.forEach((lookup) => {
+        if (!(lookup instanceof Map)) {
+            return;
+        }
+
+        lookup.forEach((value, key) => {
+            if (key && value && !mergedLookup.has(key)) {
+                mergedLookup.set(key, value);
+            }
+        });
+    });
+
+    return mergedLookup;
+};
+
+const buildFlowerImageLookupFromCatalogRows = (rows = []) => buildFlowerImageLookup(
+    (Array.isArray(rows) ? rows : []).map((row) => ({
+        name: row?.name,
+        image_url: row?.image_url
+            || row?.preview_image_url
+            || row?.stem_image_url
+            || row?.layer_image_url,
+        img: row?.img,
+        stemImg: row?.stemImg,
+        layerImg: row?.layerImg,
+    }))
+);
+
 const addFlowerBreakdownEntry = (breakdownMap, name, quantity, imageUrl = null) => {
     const normalizedName = normalizeBestSellerName(name);
     const safeQuantity = parseMoney(quantity);
@@ -1890,14 +1970,17 @@ const getRequestBestSellerItems = (request = {}) => {
     return hasLegacyItemData ? [requestData] : [];
 };
 
-const buildCustomizedFlowerBreakdown = (item = {}) => {
+const buildCustomizedFlowerBreakdown = (item = {}, fallbackImageLookup = new Map()) => {
     const breakdownMap = new Map();
     const flowerEntries = Array.isArray(item?.flowers)
         ? item.flowers
         : item?.flower
             ? [item.flower]
             : [];
-    const imageLookup = buildFlowerImageLookup(flowerEntries);
+    const imageLookup = mergeFlowerImageLookups(
+        buildFlowerImageLookup(flowerEntries),
+        fallbackImageLookup
+    );
     const flowerAllocations = Array.isArray(item?.flowerAllocations)
         ? item.flowerAllocations
         : (Array.isArray(item?.flower_allocations) ? item.flower_allocations : []);
@@ -1946,9 +2029,12 @@ const buildCustomizedFlowerBreakdown = (item = {}) => {
     return Array.from(breakdownMap.values());
 };
 
-const buildBookingFlowerBreakdown = (item = {}) => {
+const buildBookingFlowerBreakdown = (item = {}, fallbackImageLookup = new Map()) => {
     const breakdownMap = new Map();
-    const imageLookup = buildFlowerImageLookup(Array.isArray(item?.flowers) ? item.flowers : []);
+    const imageLookup = mergeFlowerImageLookups(
+        buildFlowerImageLookup(Array.isArray(item?.flowers) ? item.flowers : []),
+        fallbackImageLookup
+    );
 
     addFlowerBreakdownFromObject(
         breakdownMap,
@@ -2025,7 +2111,7 @@ const getRequestItemLineAmount = (item = {}, request = {}) => {
     return 0;
 };
 
-const getRequestBestSellerFlowerEntries = (request = {}, saleAmount = 0) => {
+const getRequestBestSellerFlowerEntries = (request = {}, saleAmount = 0, fallbackImageLookup = new Map()) => {
     const requestType = String(request?.type || '').trim().toLowerCase();
     if (!['booking', 'customized'].includes(requestType)) {
         return [];
@@ -2044,8 +2130,8 @@ const getRequestBestSellerFlowerEntries = (request = {}, saleAmount = 0) => {
 
     return sourceItems.flatMap((item) => {
         const flowerEntries = requestType === 'customized'
-            ? buildCustomizedFlowerBreakdown(item)
-            : buildBookingFlowerBreakdown(item);
+            ? buildCustomizedFlowerBreakdown(item, fallbackImageLookup)
+            : buildBookingFlowerBreakdown(item, fallbackImageLookup);
         const totalFlowerQuantity = flowerEntries.reduce((sum, entry) => sum + parseMoney(entry.quantity), 0);
 
         if (totalFlowerQuantity <= 0) {
@@ -3565,6 +3651,7 @@ export const adminAPI = {
 
         const formattedOrders = orders.map(order => {
             const parsedNotes = parseMultiDeliveryNotes(order.notes);
+            const orderNotesPaymentMetadata = getOrderPaymentMetadataFromNotes(order.notes);
             const customerName = order.users ? order.users.name : 'N/A';
             const customerEmail = order.users ? order.users.email : 'N/A';
             const customerPhone = order.users ? order.users.phone : 'N/A';
@@ -3602,7 +3689,14 @@ export const adminAPI = {
                 customer_name: customerName,
                 customer_email: customerEmail,
                 customer_phone: customerPhone,
-                gcash_reference_number: order.gcash_reference_number || null,
+                gcash_reference_number: order.gcash_reference_number
+                    || orderNotesPaymentMetadata.gcash_reference_number
+                    || null,
+                additional_receipts: normalizeAdditionalReceiptEntriesForAdmin(
+                    Array.isArray(order.additional_receipts) && order.additional_receipts.length
+                        ? order.additional_receipts
+                        : orderNotesPaymentMetadata.additional_receipts
+                ),
                 items: items,
                 multi_delivery_destinations: parsedNotes.destinations,
                 order_items: undefined, // Remove the raw order_items object
@@ -4254,6 +4348,8 @@ export const adminAPI = {
         };
         let requests = [];
         let requestsError = null;
+        let stockFlowers = [];
+        let productFlowers = [];
 
         if (requestIds.length) {
             const requestsResult = await buildBestSellerRequestsQuery(requestQueryOptions);
@@ -4286,6 +4382,23 @@ export const adminAPI = {
                 requestsError = retryResult.error;
                 shouldRetryBestSellerRequests = Boolean(requestsError);
             }
+
+            const [stockFlowerResult, productFlowerResult] = await Promise.all([
+                supabase
+                    .from('stock_products')
+                    .select('name, image_url, preview_image_url, stem_image_url, layer_image_url'),
+                supabase
+                    .from('products')
+                    .select('name, image_url'),
+            ]);
+
+            if (!stockFlowerResult.error) {
+                stockFlowers = stockFlowerResult.data || [];
+            }
+
+            if (!productFlowerResult.error) {
+                productFlowers = productFlowerResult.data || [];
+            }
         }
 
         if (orderFetchError || requestsError) {
@@ -4296,6 +4409,10 @@ export const adminAPI = {
         const orderMap = new Map((orders || []).map((order) => [String(order.id), order]));
         const requestMap = new Map((requests || []).map((request) => [String(request.id), request]));
         const aggregateMap = new Map();
+        const supplementalFlowerImageLookup = mergeFlowerImageLookups(
+            buildFlowerImageLookupFromCatalogRows(stockFlowers),
+            buildFlowerImageLookupFromCatalogRows(productFlowers)
+        );
 
         (sales || []).forEach((sale) => {
             if (sale?.order_id) {
@@ -4324,7 +4441,7 @@ export const adminAPI = {
 
             if (sale?.request_id) {
                 const request = requestMap.get(String(sale.request_id));
-                getRequestBestSellerFlowerEntries(request, sale?.total_amount).forEach((entry) => {
+                getRequestBestSellerFlowerEntries(request, sale?.total_amount, supplementalFlowerImageLookup).forEach((entry) => {
                     const normalizedName = normalizeBestSellerName(entry?.name);
                     const requestType = String(entry?.request_type || request?.type || '').trim().toLowerCase();
                     const isCustomizedFlower = requestType === 'customized';

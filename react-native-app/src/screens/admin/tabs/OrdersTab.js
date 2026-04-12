@@ -218,7 +218,7 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
   }, [orders, riders]);
 
   const riderScopedOrders = React.useMemo(() => {
-    if (currentUser?.role !== 'employee') {
+    if (currentUser?.role !== 'rider') {
       return ordersWithRiderDetails;
     }
 
@@ -239,8 +239,8 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
         switch (statusFilter) {
           case 'Pending': return status === 'pending';
           case 'Processing': return status === 'processing' || status === 'accepted' || status === 'partial';
-          case 'To Deliver': return status === 'out_for_delivery';
-          case 'To Pick Up': return status === 'ready_for_pickup';
+          case 'To Deliver': return status === 'ready_for_delivery' || status === 'out_for_delivery';
+          case 'To Pick Up': return status === 'ready_for_pickup' || status === 'ready_for_pick_up';
           case 'Completed': return status === 'completed' || status === 'claimed';
           case 'Cancelled': return status === 'cancelled';
           default: return true;
@@ -264,9 +264,10 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
 
   const orderStatusFilters = ['All', 'Pending', 'Processing', 'To Deliver', 'To Pick Up', 'Completed', 'Cancelled'];
 
-  const deliveryStepperStatuses = [
+const deliveryStepperStatuses = [
     { id: 'pending', label: 'Pending', description: 'Order received' },
     { id: 'processing', label: 'Processing', description: 'Being prepared' },
+    { id: 'ready_for_delivery', label: 'Ready for Delivery', description: 'Packed and queued' },
     { id: 'out_for_delivery', label: 'Out for Delivery', description: 'On the way' },
     { id: 'completed', label: 'Completed', description: 'Delivered successfully' }
   ];
@@ -660,7 +661,7 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
         }
       }
 
-      const isMovingToDelivery = ['out_for_delivery', 'ready_for_pick_up', 'ready_for_pickup', 'completed', 'claimed'].includes(selectedStatus);
+      const isMovingToDelivery = ['ready_for_delivery', 'out_for_delivery', 'ready_for_pick_up', 'ready_for_pickup', 'completed', 'claimed'].includes(selectedStatus);
       const isNotPaid = orderToUpdate.payment_status !== 'paid';
       const isNotCOD = orderToUpdate.payment_method?.toLowerCase() !== 'cod';
 
@@ -712,6 +713,7 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
       case 'completed': return { backgroundColor: '#22C55E' };
       case 'claimed': return { backgroundColor: '#22C55E' };
       case 'ready_for_pickup': return { backgroundColor: '#6366F1' };
+      case 'ready_for_delivery': return { backgroundColor: '#6366F1' };
       case 'out_for_delivery': return { backgroundColor: '#8B5CF6' };
       case 'processing': return { backgroundColor: '#3B82F6' };
       case 'accepted': return { backgroundColor: '#0891B2' };
@@ -727,6 +729,7 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
       completed: '100%',
       claimed: '100%',
       ready_for_pickup: '75%',
+      ready_for_delivery: '60%',
       out_for_delivery: '75%',
       processing: '50%',
       accepted: '30%',

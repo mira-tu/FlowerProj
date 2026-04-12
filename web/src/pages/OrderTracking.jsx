@@ -24,7 +24,11 @@ import {
 } from '../utils/refundWorkflows';
 import {
     createAdditionalReceiptEntry,
+    getOrderAdditionalReceiptsFromNotes,
+    getOrderGcashReferenceFromNotes,
+    mergeOrderPaymentMetadataIntoNotes,
     normalizeGcashReferenceNumber,
+    normalizeAdditionalReceiptEntries,
     writeWithOptionalColumns,
 } from '../utils/gcashPayments';
 import { summarizeCancellationItems } from '../utils/orderCancellation';
@@ -129,6 +133,13 @@ const OrderTracking = ({ user }) => {
                 };
             }
 
+            const orderNotesGcashReference = getOrderGcashReferenceFromNotes(foundOrder.notes);
+            const orderNotesAdditionalReceipts = getOrderAdditionalReceiptsFromNotes(foundOrder.notes);
+            const normalizedAdditionalReceipts = normalizeAdditionalReceiptEntries(
+                Array.isArray(foundOrder.additional_receipts) && foundOrder.additional_receipts.length
+                    ? foundOrder.additional_receipts
+                    : orderNotesAdditionalReceipts
+            );
             const itemSummary = summarizeCancellationItems(foundOrder.order_items || []);
             const displayItems = itemSummary.items.map((item) => ({
                 ...item,
@@ -150,7 +161,8 @@ const OrderTracking = ({ user }) => {
                 total: itemSummary.hasItems
                     ? (itemSummary.allCancelled ? 0 : (itemSummary.remainingSubtotal + Number(foundOrder.shipping_fee || 0)))
                     : foundOrder.total,
-                gcash_reference_number: foundOrder.gcash_reference_number || null,
+                gcash_reference_number: foundOrder.gcash_reference_number || orderNotesGcashReference || null,
+                additional_receipts: normalizedAdditionalReceipts,
             };
             setOrder(transformedOrder);
 
@@ -290,24 +302,35 @@ const OrderTracking = ({ user }) => {
                 updatePayload = {
                     receipt_url: urlData.publicUrl,
                     gcash_reference_number: normalizedReference,
-                    payment_status: 'waiting_for_confirmation'
+                    payment_status: 'waiting_for_confirmation',
+                    notes: mergeOrderPaymentMetadataIntoNotes(order.notes, {
+                        gcash_reference_number: normalizedReference,
+                        additional_receipts: order.additional_receipts || [],
+                    }),
                 };
             } else {
                 const newReceipt = createAdditionalReceiptEntry({
                     url: urlData.publicUrl,
                     referenceNumber: normalizedReference,
                 });
-                const currentReceipts = order.additional_receipts || [];
+                const currentReceipts = normalizeAdditionalReceiptEntries(
+                    Array.isArray(order.additional_receipts) ? order.additional_receipts : []
+                );
+                const nextAdditionalReceipts = [...currentReceipts, newReceipt];
                 updatePayload = {
-                    additional_receipts: [...currentReceipts, newReceipt],
-                    payment_status: 'waiting_for_confirmation'
+                    additional_receipts: nextAdditionalReceipts,
+                    payment_status: 'waiting_for_confirmation',
+                    notes: mergeOrderPaymentMetadataIntoNotes(order.notes, {
+                        gcash_reference_number: order.gcash_reference_number || normalizedReference,
+                        additional_receipts: nextAdditionalReceipts,
+                    }),
                 };
             }
 
             const { error: updateError } = await writeWithOptionalColumns({
                 tableName: 'orders',
                 initialPayload: updatePayload,
-                optionalColumns: ['gcash_reference_number'],
+                optionalColumns: ['gcash_reference_number', 'notes'],
                 execute: (payload) => (
                     supabase
                         .from('orders')
@@ -330,12 +353,21 @@ const OrderTracking = ({ user }) => {
                 .single();
 
             if (updatedOrder) {
+                const fallbackReceipts = getOrderAdditionalReceiptsFromNotes(updatedOrder.notes);
                 setOrder(prev => ({
                     ...prev,
                     receipt_url: updatedOrder.receipt_url,
-                    gcash_reference_number: updatedOrder.gcash_reference_number || prev?.gcash_reference_number || null,
+                    gcash_reference_number: updatedOrder.gcash_reference_number
+                        || getOrderGcashReferenceFromNotes(updatedOrder.notes)
+                        || prev?.gcash_reference_number
+                        || null,
                     payment_status: updatedOrder.payment_status,
-                    additional_receipts: updatedOrder.additional_receipts || []
+                    notes: updatedOrder.notes,
+                    additional_receipts: normalizeAdditionalReceiptEntries(
+                        Array.isArray(updatedOrder.additional_receipts) && updatedOrder.additional_receipts.length
+                            ? updatedOrder.additional_receipts
+                            : fallbackReceipts
+                    ),
                 }));
             }
         } catch (error) {

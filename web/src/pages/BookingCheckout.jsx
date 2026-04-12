@@ -188,6 +188,18 @@ const parseStoredBookingItems = (value) => {
     }
 };
 
+const parseStoredSelectionMap = (value) => {
+    if (!value) return {};
+
+    try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (error) {
+        console.error('Error parsing stored booking selection map:', error);
+        return {};
+    }
+};
+
 const BookingCheckout = ({ user }) => {
     const navigate = useNavigate();
     const [inquiryItems, setInquiryItems] = useState([]);
@@ -218,17 +230,25 @@ const BookingCheckout = ({ user }) => {
     useEffect(() => {
         const cartKey = `bookingCart_${user?.id || 'guest'}`;
         const checkoutKey = getBookingCheckoutStorageKey(user?.id);
-        const checkoutSelectionItems = parseStoredBookingItems(localStorage.getItem(checkoutKey));
+        const checkoutStorageValue = localStorage.getItem(checkoutKey);
+        const hasScopedCheckoutSelection = checkoutStorageValue !== null;
+        const checkoutSelectionItems = parseStoredBookingItems(checkoutStorageValue);
         const legacySelectionItems = parseStoredBookingItems(localStorage.getItem('bookingCart'));
         const scopedCartItems = parseStoredBookingItems(localStorage.getItem(cartKey));
-        const sourceItems = checkoutSelectionItems.length
+        const scopedSelectionMap = parseStoredSelectionMap(localStorage.getItem(`bookSelection_${user?.id || 'guest'}`));
+        const selectedScopedCartItems = scopedCartItems.filter((item, index) => (
+            scopedSelectionMap[`book-${index}`] === true
+        ));
+        const sourceItems = hasScopedCheckoutSelection
             ? checkoutSelectionItems
-            : legacySelectionItems.length
+            : selectedScopedCartItems.length
+                ? selectedScopedCartItems
+                : legacySelectionItems.length
                 ? legacySelectionItems
                 : scopedCartItems;
 
         if (!sourceItems.length) {
-            navigate('/');
+            navigate('/booking-cart');
             return;
         }
 

@@ -3,6 +3,10 @@ import { supabase } from '../config/supabase';
 const REFUND_WORKFLOW_FUNCTION = 'manage-admin-workflows';
 const ACTIVE_REFUND_STATUSES = ['requested', 'approved', 'gcash_submitted', 'processing'];
 
+export const isActiveRefundRequest = (refundRequest) => (
+    ACTIVE_REFUND_STATUSES.includes(String(refundRequest?.status || '').trim().toLowerCase())
+);
+
 export const getRefundStatusLabel = (status) => {
     switch (String(status || '').trim().toLowerCase()) {
         case 'requested':
@@ -31,8 +35,32 @@ export const canRequestRefund = ({
     const normalizedPaymentStatus = String(paymentStatus || '').trim().toLowerCase();
     const hasPayment = Number(amountPaid || 0) > 0
         || (normalizedPaymentStatus === 'paid' && Number(fallbackAmount || 0) > 0);
-    const hasActiveRefund = ACTIVE_REFUND_STATUSES.includes(String(refundRequest?.status || '').trim().toLowerCase());
+    const hasActiveRefund = isActiveRefundRequest(refundRequest);
     return hasPayment && !hasActiveRefund;
+};
+
+export const requiresRefundReviewBeforeCancellation = ({
+    paymentStatus,
+    amountPaid = 0,
+    fallbackAmount = 0,
+    receiptUrl = '',
+    additionalReceipts = [],
+}) => {
+    const normalizedPaymentStatus = String(paymentStatus || '').trim().toLowerCase();
+    const normalizedAmountPaid = Number(amountPaid || 0);
+    const normalizedFallbackAmount = Number(fallbackAmount || 0);
+    const hasReceiptEvidence = Boolean(String(receiptUrl || '').trim())
+        || (Array.isArray(additionalReceipts) && additionalReceipts.some((entry) => Boolean(entry?.url || entry)));
+
+    if (normalizedAmountPaid > 0) {
+        return true;
+    }
+
+    if (['paid', 'partial', 'waiting_for_confirmation'].includes(normalizedPaymentStatus)) {
+        return normalizedFallbackAmount > 0 || hasReceiptEvidence;
+    }
+
+    return hasReceiptEvidence;
 };
 
 export const maskGcashNumber = (value) => {

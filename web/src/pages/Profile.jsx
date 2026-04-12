@@ -22,6 +22,13 @@ import {
     normalizeCancellationItem,
     summarizeCancellationItems,
 } from '../utils/orderCancellation';
+import {
+    createRefundRequest,
+    getRefundRequestForEntity,
+    isActiveRefundRequest,
+    requiresRefundReviewBeforeCancellation,
+} from '../utils/refundWorkflows';
+import { parseMultiDeliveryNotes } from '../utils/deliveryDestinations';
 import { summarizeCustomOrderQuoteBreakdown } from '../utils/customOrderQuoteBreakdown';
 
 const parseJsonObject = (value) => {
@@ -330,6 +337,7 @@ const Profile = ({ user, logout }) => {
             // Transform API orders to match the expected format
             const transformedOrders = (apiOrders || []).map((order) => {
                 const requestData = parseJsonObject(order.request_data);
+                const parsedOrderNotes = parseMultiDeliveryNotes(order.notes);
                 const orderItemSummary = summarizeCancellationItems(order.order_items || []);
                 const requestItemSummary = summarizeCancellationItems(requestData?.items || []);
                 const preferredSummary = orderItemSummary.hasItems ? orderItemSummary : requestItemSummary;
@@ -360,7 +368,7 @@ const Profile = ({ user, logout }) => {
                     subtotal: computedSubtotal,
                     shipping_fee: shippingFee,
                     delivery_fee: shippingFee,
-                    notes: order.notes,
+                    notes: parsedOrderNotes.note,
                     items: displayItems,
                     activeItems: preferredSummary.activeItems,
                     hasPartialCancellation: preferredSummary.hasCancellations,
@@ -770,6 +778,66 @@ const Profile = ({ user, logout }) => {
 
     const getCancellableItems = (order) => (order?.items || []).filter((item) => item.remainingQuantity > 0);
 
+    const getPaidCancellationRefundAmount = (order) => {
+        const requestData = parseJsonObject(order?.data);
+        const amountReceived = Number(order?.amount_received || requestData?.amount_received || 0);
+        if (amountReceived > 0) {
+            return amountReceived;
+        }
+
+        return Number(
+            order?.total
+            || order?.final_price
+            || requestData?.final_price
+            || requestData?.estimated_total
+            || 0
+        );
+    };
+
+    const shouldRouteCancellationToRefund = (order) => {
+        const requestData = parseJsonObject(order?.data);
+        return requiresRefundReviewBeforeCancellation({
+            paymentStatus: order?.payment_status || requestData?.payment_status,
+            amountPaid: order?.amount_received || requestData?.amount_received || 0,
+            fallbackAmount: getPaidCancellationRefundAmount(order),
+            receiptUrl: order?.receipt_url || requestData?.receipt_url || '',
+            additionalReceipts: order?.additional_receipts || requestData?.additional_receipts || [],
+        });
+    };
+
+    const createCancellationRefundReview = async ({ order, selectedItem, quantityToCancel, reason }) => {
+        const entityType = order?.type ? 'request' : 'order';
+        const entityId = entityType === 'request' ? getRequestIdFromOrder(order) : order?.id;
+        if (!entityId || !user?.id) {
+            throw new Error('We could not prepare your cancellation review right now. Please sign in again and try once more.');
+        }
+
+        const existingRefund = await getRefundRequestForEntity({ entityType, entityId });
+        if (isActiveRefundRequest(existingRefund)) {
+            return { refundRequest: existingRefund, reused: true };
+        }
+
+        const itemLabel = getCancellationItemDisplayLabel(selectedItem);
+        const detailedReason = [
+            `Cancellation request for ${itemLabel}`,
+            `Quantity: ${quantityToCancel}`,
+            `Customer reason: ${reason}`,
+        ].join('\n');
+
+        const result = await createRefundRequest({
+            entityType,
+            entityId,
+            customerId: user.id,
+            reason: detailedReason,
+            refundAmount: getPaidCancellationRefundAmount(order),
+        });
+
+        return {
+            refundRequest: result?.refundRequest || null,
+            reused: false,
+        };
+    };
+
     const updateRegularOrderCancellation = async (order, itemKey, quantityToCancel, reason) => {
         const { data: currentOrder, error: orderFetchError } = await supabase
             .from('orders')
@@ -1009,6 +1077,26 @@ const Profile = ({ user, logout }) => {
                 selectedItem.remainingQuantity,
                 Math.max(1, Number.parseInt(String(cancelQuantity || 1), 10) || 1),
             );
+
+            if (shouldRouteCancellationToRefund(orderToCancel)) {
+                const refundResult = await createCancellationRefundReview({
+                    order: orderToCancel,
+                    selectedItem,
+                    quantityToCancel,
+                    reason: trimmedCancelReason,
+                });
+
+                closeCancelModal();
+                setInfoModal({
+                    show: true,
+                    title: refundResult.reused ? 'Refund Review Already Pending' : 'Cancellation Request Submitted',
+                    message: refundResult.reused
+                        ? 'This paid order already has a refund review in progress. Please wait for the admin decision before cancelling again.'
+                        : 'Because payment was already submitted or received, we sent your cancellation through refund review first. We will finalize the cancellation after that review is resolved.',
+                });
+                await loadOrders(user?.id);
+                return;
+            }
 
             if (orderToCancel.type) {
                 await updateRequestCancellation(orderToCancel, cancelTargetItemKey, quantityToCancel, trimmedCancelReason);

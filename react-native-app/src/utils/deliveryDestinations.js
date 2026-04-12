@@ -8,11 +8,25 @@ export const DELIVERY_CONFIRMATION_STATUS = {
     CONFIRMED: 'confirmed',
 };
 
+const normalizeNotesMetadata = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null;
+    }
+
+    const cleanedEntries = Object.entries(value).filter(([, entryValue]) => entryValue !== undefined);
+    if (!cleanedEntries.length) {
+        return null;
+    }
+
+    return Object.fromEntries(cleanedEntries);
+};
+
 export const parseMultiDeliveryNotes = (notes) => {
     if (typeof notes !== 'string' || !notes.startsWith(MULTI_DELIVERY_NOTES_PREFIX)) {
         return {
             note: typeof notes === 'string' ? notes : '',
             destinations: [],
+            metadata: null,
             hasMultiDelivery: false,
         };
     }
@@ -23,28 +37,32 @@ export const parseMultiDeliveryNotes = (notes) => {
         return {
             note: typeof payload?.note === 'string' ? payload.note : '',
             destinations,
+            metadata: normalizeNotesMetadata(payload?.metadata),
             hasMultiDelivery: destinations.length > 0,
         };
     } catch (error) {
         return {
             note: notes,
             destinations: [],
+            metadata: null,
             hasMultiDelivery: false,
         };
     }
 };
 
-export const serializeMultiDeliveryNotes = ({ destinations = [], note = '' } = {}) => {
+export const serializeMultiDeliveryNotes = ({ destinations = [], note = '', metadata = null } = {}) => {
     const cleanDestinations = Array.isArray(destinations) ? destinations.filter(Boolean) : [];
     const cleanNote = String(note || '').trim();
+    const cleanMetadata = normalizeNotesMetadata(metadata);
 
-    if (!cleanDestinations.length) {
+    if (!cleanDestinations.length && !cleanMetadata) {
         return cleanNote || null;
     }
 
     return `${MULTI_DELIVERY_NOTES_PREFIX}${JSON.stringify({
         note: cleanNote,
         destinations: cleanDestinations,
+        metadata: cleanMetadata,
     })}`;
 };
 

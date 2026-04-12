@@ -26,7 +26,9 @@ import {
     createRefundRequest,
     getRefundRequestForEntity,
     getRefundStatusLabel,
+    isActiveRefundRequest,
     maskGcashNumber,
+    requiresRefundReviewBeforeCancellation,
     submitRefundGcashDetails,
 } from '../utils/refundWorkflows';
 import {
@@ -646,6 +648,73 @@ const OrderBookingTracking = () => {
             .filter((item) => item.remainingQuantity > 0);
     };
 
+    const getPaidCancellationRefundAmount = (currentRequest) => {
+        const requestData = parseJsonObject(currentRequest?.requestData || currentRequest?.data);
+        const amountReceived = Number(currentRequest?.amount_received || requestData?.amount_received || 0);
+        if (amountReceived > 0) {
+            return amountReceived;
+        }
+
+        return Number(
+            currentRequest?.final_price
+            || currentRequest?.totalAmount
+            || requestData?.final_price
+            || requestData?.estimated_total
+            || 0
+        );
+    };
+
+    const shouldRouteCancellationToRefund = (currentRequest) => {
+        const requestData = parseJsonObject(currentRequest?.requestData || currentRequest?.data);
+        return requiresRefundReviewBeforeCancellation({
+            paymentStatus: currentRequest?.payment_status || requestData?.payment_status,
+            amountPaid: currentRequest?.amount_received || requestData?.amount_received || 0,
+            fallbackAmount: getPaidCancellationRefundAmount(currentRequest),
+            receiptUrl: currentRequest?.receipt_url || requestData?.receipt_url || '',
+            additionalReceipts: currentRequest?.additional_receipts || requestData?.additional_receipts || [],
+        });
+    };
+
+    const createCancellationRefundReview = async ({ selectedItem, quantityToCancel, reason }) => {
+        if (!request?.id) {
+            throw new Error('This request could not be found.');
+        }
+
+        const { data: sessionData } = await supabase.auth.getSession();
+        const customerId = sessionData?.session?.user?.id || null;
+        if (!customerId) {
+            throw new Error('Please sign in again before requesting this cancellation.');
+        }
+
+        const existingRefund = await getRefundRequestForEntity({
+            entityType: 'request',
+            entityId: request.id,
+        });
+        if (isActiveRefundRequest(existingRefund)) {
+            return { refundRequest: existingRefund, reused: true };
+        }
+
+        const itemLabel = getCancellationItemDisplayLabel(selectedItem);
+        const detailedReason = [
+            `Cancellation request for ${itemLabel}`,
+            `Quantity: ${quantityToCancel}`,
+            `Customer reason: ${reason}`,
+        ].join('\n');
+
+        const result = await createRefundRequest({
+            entityType: 'request',
+            entityId: request.id,
+            customerId,
+            reason: detailedReason,
+            refundAmount: getPaidCancellationRefundAmount(request),
+        });
+
+        return {
+            refundRequest: result?.refundRequest || null,
+            reused: false,
+        };
+    };
+
     const closeCancelModal = () => {
         setShowCancelModal(false);
         setCancelTargetItemKey('');
@@ -807,6 +876,25 @@ const OrderBookingTracking = () => {
         );
 
         try {
+            if (shouldRouteCancellationToRefund(request)) {
+                const refundResult = await createCancellationRefundReview({
+                    selectedItem,
+                    quantityToCancel,
+                    reason: trimmedCancelReason,
+                });
+
+                await loadRequest(false);
+                closeCancelModal();
+                setInfoModal({
+                    show: true,
+                    title: refundResult.reused ? 'Refund Review Already Pending' : 'Cancellation Request Submitted',
+                    message: refundResult.reused
+                        ? 'This paid request already has a refund review in progress. Please wait for the admin decision before cancelling again.'
+                        : 'Because payment was already submitted or received, we sent your cancellation through refund review first. We will finalize the cancellation after that review is resolved.',
+                });
+                return;
+            }
+
             await updateRequestCancellation(cancelTargetItemKey, quantityToCancel, trimmedCancelReason);
             await loadRequest(false);
             closeCancelModal();

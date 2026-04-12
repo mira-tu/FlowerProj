@@ -8,7 +8,11 @@ import GCashConfirmationSection from '../components/GCashConfirmationSection';
 import GCashQrModal from '../components/GCashQrModal';
 import MultiAddressDeliverySection from '../components/MultiAddressDeliverySection';
 import { insertUserNotification } from '../utils/notificationApi';
-import { normalizeGcashReferenceNumber, writeWithOptionalColumns } from '../utils/gcashPayments';
+import {
+    mergeOrderPaymentMetadataIntoNotes,
+    normalizeGcashReferenceNumber,
+    writeWithOptionalColumns,
+} from '../utils/gcashPayments';
 import {
     buildAddressFeeMap,
     buildMultiDeliveryDestinations,
@@ -321,6 +325,14 @@ const Checkout = ({ setCart, user, products = [] }) => {
         }
 
         const order_number = `JFS-${user.id.substring(0, 8)}-${Date.now()}`;
+        const serializedOrderNotes = mergeOrderPaymentMetadataIntoNotes(
+            serializeMultiDeliveryNotes({
+                destinations: multiDeliveryDestinations,
+            }),
+            selectedPayment === 'gcash'
+                ? { gcash_reference_number: normalizedGcashReference }
+                : {}
+        );
 
         const newOrder = {
             created_at: new Date().toISOString(),
@@ -337,9 +349,7 @@ const Checkout = ({ setCart, user, products = [] }) => {
             pickup_time: deliveryMethod === 'pickup' ? `${selectedPickupDate} - ${selectedPickupTime}` : null,
             receipt_url: uploadedReceiptUrl,
             gcash_reference_number: selectedPayment === 'gcash' ? normalizedGcashReference : null,
-            notes: serializeMultiDeliveryNotes({
-                destinations: multiDeliveryDestinations,
-            }),
+            notes: serializedOrderNotes,
         };
 
         const { data, error, usedNotesFallback, usedGcashReferenceFallback } = await insertOrderWithNotesFallback(newOrder);
@@ -354,8 +364,8 @@ const Checkout = ({ setCart, user, products = [] }) => {
         if (usedNotesFallback && multiDeliveryDestinations.length > 0) {
             console.warn('Multi-address delivery details were not saved on the order because orders.notes is not available yet.');
         }
-        if (usedGcashReferenceFallback && selectedPayment === 'gcash') {
-            console.warn('GCash transaction number could not be stored on the order because orders.gcash_reference_number is not available yet.');
+        if (usedGcashReferenceFallback && selectedPayment === 'gcash' && usedNotesFallback) {
+            console.warn('GCash transaction number could not be stored on the order because both orders.gcash_reference_number and orders.notes are not available yet.');
         }
 
         const newOrderId = data.id; // Correct: Use data.id for the internal ID
