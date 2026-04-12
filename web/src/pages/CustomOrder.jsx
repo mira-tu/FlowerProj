@@ -11,7 +11,6 @@ import {
     DEFAULT_CUSTOM_ORDER_CATALOG as SHARED_DEFAULT_CUSTOM_ORDER_CATALOG,
     buildGroupedArrangementOptions as buildSharedGroupedArrangementOptions,
     fetchCustomOrderCatalog as fetchSharedCustomOrderCatalog,
-    isCustomCatalogOption as isSharedCustomCatalogOption,
     normalizeCustomOrderCatalog as normalizeSharedCustomOrderCatalog,
 } from '../utils/customOrderCatalog';
 import InfoModal from '../components/InfoModal';
@@ -239,7 +238,6 @@ const DEFAULT_CUSTOM_ORDER_CATALOG = {
         label: item.label,
         img: item.img,
         isActive: true,
-        isCustomOption: item.value === 'Others'
     })),
     arrangements: flattenedArrangementOptions.map((item, index) => ({
         id: `arrangement-${index + 1}`,
@@ -250,7 +248,6 @@ const DEFAULT_CUSTOM_ORDER_CATALOG = {
         img: item.img || '',
         flowersPerArrangement: extractFlowersPerArrangement(item.label),
         isActive: true,
-        isCustomOption: item.value === 'Other'
     })),
     colors: colorOptions.map((item, index) => ({
         id: `color-${index + 1}`,
@@ -258,7 +255,6 @@ const DEFAULT_CUSTOM_ORDER_CATALOG = {
         label: item.label,
         colors: item.colors,
         isActive: true,
-        isCustomOption: item.value === 'Others'
     }))
 };
 
@@ -301,7 +297,6 @@ const normalizeFlowerCatalogItem = (item, index) => {
         label,
         img: normalizeCatalogImage(item?.img),
         isActive: item?.isActive !== false,
-        isCustomOption: Boolean(item?.isCustomOption),
     };
 };
 
@@ -322,7 +317,6 @@ const normalizeArrangementCatalogItem = (item, index) => {
         img: normalizeCatalogImage(item?.img),
         flowersPerArrangement,
         isActive: item?.isActive !== false,
-        isCustomOption: Boolean(item?.isCustomOption),
     };
 };
 
@@ -336,7 +330,6 @@ const normalizeColorCatalogItem = (item, index) => {
         label,
         colors: normalizeCatalogColorSwatches(item?.colors),
         isActive: item?.isActive !== false,
-        isCustomOption: Boolean(item?.isCustomOption),
     };
 };
 
@@ -382,7 +375,6 @@ const buildGroupedArrangementOptions = (arrangements = []) => {
             description: item.description || '',
             img: item.img || '',
             flowersPerArrangement: item.flowersPerArrangement || 0,
-            isCustomOption: Boolean(item.isCustomOption),
         });
     });
 
@@ -391,8 +383,6 @@ const buildGroupedArrangementOptions = (arrangements = []) => {
         options,
     }));
 };
-
-const isCustomCatalogOption = (option) => Boolean(option?.isCustomOption);
 
 const fetchCustomOrderCatalog = async () => {
     try {
@@ -943,26 +933,14 @@ const CustomOrder = ({ user }) => {
         [arrangementOptionLookup, formData.arrangementTypes]
     );
 
-    const hasOtherArrangement = selectedArrangementOptions.some(isSharedCustomCatalogOption);
-
-    const otherFlowersPerArrangement = useMemo(() => {
-        const parsedCount = Number.parseInt(formData.flowerQuantity, 10);
-        return Number.isFinite(parsedCount) && parsedCount > 0 ? parsedCount : 0;
-    }, [formData.flowerQuantity]);
-
     const arrangementDetails = useMemo(() => {
         if (!selectedArrangementOptions.length) return [];
 
         return selectedArrangementOptions.map((option) => {
             const parsedQty = Number.parseInt(formData.arrangementQuantities?.[option.value], 10);
             const quantity = Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1;
-            const isOther = isSharedCustomCatalogOption(option);
-            const label = isOther
-                ? (formData.otherArrangementType?.trim() || option.label)
-                : option.label;
-            const flowersPerArrangement = isOther
-                ? otherFlowersPerArrangement
-                : (Number(option.flowersPerArrangement) || extractFlowersPerArrangement(option.label));
+            const label = option.label;
+            const flowersPerArrangement = Number(option.flowersPerArrangement) || extractFlowersPerArrangement(option.label);
             const estimatedPriceMin = Number(option.estimatedPriceMin) || 0;
             const estimatedPriceMax = Number(option.estimatedPriceMax) || estimatedPriceMin;
             const estimatedPriceNote = String(option.estimatedPriceNote || '').trim();
@@ -986,7 +964,7 @@ const CustomOrder = ({ user }) => {
                     : 'To be quoted',
             };
         });
-    }, [formData.arrangementQuantities, formData.otherArrangementType, otherFlowersPerArrangement, selectedArrangementOptions]);
+    }, [formData.arrangementQuantities, selectedArrangementOptions]);
 
     const arrangementSummary = useMemo(
         () => arrangementDetails.map((detail) => detail.label + ' x' + detail.quantity).join(', '),
@@ -1049,14 +1027,13 @@ const CustomOrder = ({ user }) => {
         () => arrangementDetails
             .map((detail) => {
                 const selectedColor = formData.colorPreferenceByArrangement?.[detail.value] || '';
-                const otherColor = formData.otherColorPreferenceByArrangement?.[detail.value] || '';
                 if (!selectedColor) return null;
-                const colorLabel = isSharedCustomCatalogOption(colorOptionLookup.get(selectedColor)) ? otherColor : selectedColor;
+                const colorLabel = selectedColor;
                 return colorLabel ? `${detail.label}: ${colorLabel}` : null;
             })
             .filter(Boolean)
             .join(' | '),
-        [arrangementDetails, colorOptionLookup, formData.colorPreferenceByArrangement, formData.otherColorPreferenceByArrangement]
+        [arrangementDetails, formData.colorPreferenceByArrangement]
     );
 
     const leadArrangementInspirationImage = useMemo(
@@ -1105,11 +1082,6 @@ const CustomOrder = ({ user }) => {
                 otherColorPreferenceByArrangement: nextOtherColorPreferenceByArrangement,
                 inspirationImageByArrangement: nextInspirationImageByArrangement
             };
-
-            if (!selectedValues.some((value) => isSharedCustomCatalogOption(arrangementOptionLookup.get(value)))) {
-                nextState.otherArrangementType = '';
-                nextState.flowerQuantity = '';
-            }
 
             return nextState;
         });
@@ -1340,7 +1312,6 @@ const CustomOrder = ({ user }) => {
             const selectedColor = formData.colorPreferenceByArrangement?.[detail.value] || '';
             const otherColor = String(formData.otherColorPreferenceByArrangement?.[detail.value] || '').trim();
             const inspirationImageBase64 = formData.inspirationImageByArrangement?.[detail.value] || null;
-            const isCustomArrangement = isSharedCustomCatalogOption(arrangementOptionLookup.get(detail.value));
             const arrangementSelection = {
                 arrangement_type: detail.value,
                 arrangement_label: detail.label,
@@ -1357,8 +1328,8 @@ const CustomOrder = ({ user }) => {
                 otherFlowersText: arrangementOtherFlowersText || null,
                 other_flowers_text: arrangementOtherFlowersText || null,
                 flowers: arrangementFlowerLabels.join(', ') + (arrangementOtherFlowersText ? ` (${arrangementOtherFlowersText})` : ''),
-                colorPreference: isSharedCustomCatalogOption(colorOptionLookup.get(selectedColor)) ? otherColor : selectedColor || null,
-                color_preference: isSharedCustomCatalogOption(colorOptionLookup.get(selectedColor)) ? otherColor : selectedColor || null,
+                colorPreference: selectedColor || null,
+                color_preference: selectedColor || null,
                 rawColorPreference: selectedColor || null,
                 raw_color_preference: selectedColor || null,
                 otherColorPreference: otherColor || null,
@@ -1377,8 +1348,6 @@ const CustomOrder = ({ user }) => {
                 tentativeSubtotalMin: detail.estimatedPriceMin,
                 tentativeSubtotalMax: detail.estimatedPriceMax,
             }]);
-            const hasCustomFlowerSelection = arrangementFlowers.some((flower) => isSharedCustomCatalogOption(flower));
-
             return {
                 id: `${Date.now()}-${detail.value}-${detail.unitIndex}-${itemIndex + 1}`,
                 serviceType: 'Custom Order',
@@ -1418,8 +1387,8 @@ const CustomOrder = ({ user }) => {
                 arrangement_quantity: 1,
                 quantity: 1,
                 qty: 1,
-                flowerQuantity: isCustomArrangement ? (formData.flowerQuantity || null) : null,
-                otherArrangementImageBase64: isCustomArrangement ? otherArrangementImagePreview : null,
+                flowerQuantity: formData.flowerQuantity || null,
+                otherArrangementImageBase64: otherArrangementImagePreview || null,
                 totalFlowers: detail.flowersPerArrangement > 0 ? detail.flowersPerArrangement : null,
                 total_flower_count: detail.flowersPerArrangement > 0 ? detail.flowersPerArrangement : null,
                 customerPreferredFlowers: arrangementFlowerLabels,
@@ -1430,8 +1399,8 @@ const CustomOrder = ({ user }) => {
                 flowers: arrangementFlowerLabels.join(', ') + (arrangementOtherFlowersText ? ` (${arrangementOtherFlowersText})` : ''),
                 otherFlowersText: arrangementOtherFlowersText || null,
                 other_flowers_text: arrangementOtherFlowersText || null,
-                otherFlowersImageBase64: hasCustomFlowerSelection ? otherFlowersImagePreview : null,
-                colorPreference: isSharedCustomCatalogOption(colorOptionLookup.get(selectedColor)) ? otherColor : selectedColor || null,
+                otherFlowersImageBase64: otherFlowersImagePreview || null,
+                colorPreference: selectedColor || null,
                 specialInstructions: formData.specialInstructions,
                 inspirationImageBase64,
                 image_url: inspirationImageBase64 || null,
@@ -1718,29 +1687,6 @@ const CustomOrder = ({ user }) => {
                                                         <div className="form-text arrangement-helper-text">
                                                             Choose one or more arrangement types, then set the quantity for each selection below.
                                                         </div>
-                                                        {hasOtherArrangement && (
-                                                            <div className="arrangement-other-panel mt-3">
-                                                                <input type="text" name="otherArrangementType" className="form-control bg-light border-0 py-3" placeholder="Describe your custom arrangement" value={formData.otherArrangementType} onChange={handleChange} required />
-                                                                <div className="mt-3">
-                                                                    <label className="form-label fw-semibold mb-2">Flowers per "Others" Arrangement</label>
-                                                                    <input type="number" name="flowerQuantity" className="form-control bg-light border-0 py-3" placeholder="e.g., 50" min="1" value={formData.flowerQuantity} onChange={handleChange} required />
-                                                                </div>
-                                                                <div className="mt-3">
-                                                                    <label className="form-label fw-semibold mb-2">Arrangement Reference Photo (Optional)</label>
-                                                                    <input type="file" className="form-control bg-light border-0 py-2" accept=".jpg,.jpeg,.png" onChange={handleOtherArrangementImageChange} />
-                                                                    <div className="form-text small">JPG or PNG, max 5MB.</div>
-                                                                    {otherArrangementImagePreview && (
-                                                                        <div className="mt-2">
-                                                                            <img src={otherArrangementImagePreview} alt="Arrangement reference preview" className="rounded-3 border" style={{ maxHeight: '140px', maxWidth: '100%', objectFit: 'cover' }} />
-                                                                            <div className="mt-2">
-                                                                                <button type="button" className="btn btn-sm btn-outline-danger" onClick={removeOtherArrangementImage}>Remove Photo</button>
-                                                                            </div>
-                                                                        </div>
-                                                                    )}
-                                                                    {otherArrangementImageError && <p className="text-danger small mt-2 mb-0"><i className="fas fa-exclamation-circle me-1"></i>{otherArrangementImageError}</p>}
-                                                                </div>
-                                                            </div>
-                                                        )}
                                                     </div>
 
                                                     <div className="col-12">
@@ -1883,16 +1829,13 @@ const CustomOrder = ({ user }) => {
                                                                                 <div className="text-danger small mt-1">Please select at least one preferred flower for this unit.</div>
                                                                             )}
 
-                                                                            {selectedUnitFlowers.some((flower) => isSharedCustomCatalogOption(flower)) && (
-                                                                                <input
-                                                                                    type="text"
-                                                                                    className="form-control bg-light border-0 py-3 mt-3"
-                                                                                    placeholder={`Please specify flowers for ${detail.label}${detail.quantity > 1 ? ` (${unitLabel})` : ''}`}
-                                                                                    value={selectedUnitOtherFlowers}
-                                                                                    onChange={(e) => handleArrangementUnitOtherFlowersChange(detail.value, unitIndex, e.target.value)}
-                                                                                    required
-                                                                                />
-                                                                            )}
+                                                                            <input
+                                                                                type="text"
+                                                                                className="form-control bg-light border-0 py-3 mt-3"
+                                                                                placeholder={`Additional flower notes for ${detail.label}${detail.quantity > 1 ? ` (${unitLabel})` : ''} (optional)`}
+                                                                                value={selectedUnitOtherFlowers}
+                                                                                onChange={(e) => handleArrangementUnitOtherFlowersChange(detail.value, unitIndex, e.target.value)}
+                                                                            />
                                                                         </div>
                                                                     );
                                                                 })}
@@ -1901,29 +1844,22 @@ const CustomOrder = ({ user }) => {
                                                     );
                                                 })}
                                             </div>
-
-                                            {arrangementDetails.some((detail) => (
-                                                Array.from({ length: detail.quantity }, (_, unitArrayIndex) => (
-                                                    formData.preferredFlowersByUnit?.[buildArrangementUnitKey(detail.value, unitArrayIndex + 1)] || []
-                                                )).some((selectedUnitFlowers) => selectedUnitFlowers.some((flower) => isSharedCustomCatalogOption(flower)))
-                                            )) && (
-                                                <div className="arrangement-other-panel mt-3">
-                                                    <div className="mt-1">
-                                                        <label className="form-label fw-semibold mb-2">Flower Reference Photo (Optional)</label>
-                                                        <input type="file" className="form-control bg-light border-0 py-2" accept=".jpg,.jpeg,.png" onChange={handleOtherFlowersImageChange} />
-                                                        <div className="form-text small">JPG or PNG, max 5MB.</div>
-                                                        {otherFlowersImagePreview && (
+                                            <div className="arrangement-other-panel mt-3">
+                                                <div className="mt-1">
+                                                    <label className="form-label fw-semibold mb-2">Flower Reference Photo (Optional)</label>
+                                                    <input type="file" className="form-control bg-light border-0 py-2" accept=".jpg,.jpeg,.png" onChange={handleOtherFlowersImageChange} />
+                                                    <div className="form-text small">JPG or PNG, max 5MB.</div>
+                                                    {otherFlowersImagePreview && (
+                                                        <div className="mt-2">
+                                                            <img src={otherFlowersImagePreview} alt="Flower reference preview" className="rounded-3 border" style={{ maxHeight: '140px', maxWidth: '100%', objectFit: 'cover' }} />
                                                             <div className="mt-2">
-                                                                <img src={otherFlowersImagePreview} alt="Flower reference preview" className="rounded-3 border" style={{ maxHeight: '140px', maxWidth: '100%', objectFit: 'cover' }} />
-                                                                <div className="mt-2">
-                                                                    <button type="button" className="btn btn-sm btn-outline-danger" onClick={removeOtherFlowersImage}>Remove Photo</button>
-                                                                </div>
+                                                                <button type="button" className="btn btn-sm btn-outline-danger" onClick={removeOtherFlowersImage}>Remove Photo</button>
                                                             </div>
-                                                        )}
-                                                        {otherFlowersImageError && <p className="text-danger small mt-2 mb-0"><i className="fas fa-exclamation-circle me-1"></i>{otherFlowersImageError}</p>}
-                                                    </div>
+                                                        </div>
+                                                    )}
+                                                    {otherFlowersImageError && <p className="text-danger small mt-2 mb-0"><i className="fas fa-exclamation-circle me-1"></i>{otherFlowersImageError}</p>}
                                                 </div>
-                                            )}
+                                            </div>
 
                                         </div>
 
@@ -1966,16 +1902,6 @@ const CustomOrder = ({ user }) => {
                                                             />
                                                             {hasColorError && (
                                                                 <div className="text-danger small mt-1">Please select a color theme for this arrangement.</div>
-                                                            )}
-                                                            {isSharedCustomCatalogOption(colorOptionLookup.get(selectedColor)) && (
-                                                                <input
-                                                                    type="text"
-                                                                    className="form-control bg-light border-0 py-3 mt-2"
-                                                                    placeholder={`Please specify color preference for ${detail.label}`}
-                                                                    value={otherColor}
-                                                                    onChange={(e) => handleArrangementOtherColorChange(detail.value, e.target.value)}
-                                                                    required
-                                                                />
                                                             )}
                                                         </div>
                                                     );
@@ -2144,12 +2070,6 @@ const CustomOrder = ({ user }) => {
                                     Final price may change after review and confirmation.
                                 </div>
                             </div>
-                            {hasOtherArrangement && formData.flowerQuantity && (
-                                <div className="d-flex justify-content-between mb-2">
-                                    <span className="text-muted">Flowers per "Others" Arrangement:</span>
-                                    <span className="fw-semibold text-end">{formData.flowerQuantity}</span>
-                                </div>
-                            )}
                             {otherArrangementImagePreview && (
                                 <div className="mt-2 text-center">
                                     <span className="text-muted d-block mb-1">Arrangement Reference:</span>
@@ -2189,7 +2109,7 @@ const CustomOrder = ({ user }) => {
                                     <div key={`summary-color-${detail.value}`} className="d-flex justify-content-between mb-2">
                                         <span className="text-muted">{detail.label} Color:</span>
                                         <span className="fw-semibold text-end" style={{ maxWidth: '60%' }}>
-                                            {isSharedCustomCatalogOption(colorOptionLookup.get(selectedColor)) ? otherColor : selectedColor}
+                                            {selectedColor}
                                         </span>
                                     </div>
                                 );

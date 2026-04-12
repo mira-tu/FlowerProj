@@ -243,6 +243,25 @@ const CustomOrderTab = () => {
 
   useEffect(() => {
     loadCatalog();
+    const channel = supabase
+      .channel('custom-order-admin-catalog-updates')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'app_content',
+          filter: `key=eq.${CUSTOM_ORDER_CATALOG_KEY}`,
+        },
+        () => {
+          loadCatalog();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const closeEditorModal = () => {
@@ -285,20 +304,10 @@ const CustomOrderTab = () => {
     setEditorVisible(true);
   };
 
-  const updateSectionItems = (sectionKey, updater) => {
-    setCatalog((currentCatalog) => ({
-      ...currentCatalog,
-      [sectionKey]: updater(currentCatalog[sectionKey] || []),
-    }));
-  };
-
-  const handleToggleAvailability = (sectionKey, itemId, nextValue) => {
-    updateSectionItems(sectionKey, (items) => items.map((item) => (
-      item.id === itemId
-        ? { ...item, isActive: nextValue }
-        : item
-    )));
-  };
+  const getNextCatalogSnapshot = (sectionKey, updater, sourceCatalog = catalog) => ({
+    ...sourceCatalog,
+    [sectionKey]: updater(sourceCatalog[sectionKey] || []),
+  });
 
   const handlePickEditorImage = async () => {
     try {
@@ -356,7 +365,6 @@ const CustomOrderTab = () => {
         label,
         colors: parseColorSwatchText(editorForm.colorsText),
         isActive: editorForm.isActive !== false,
-        isCustomOption: Boolean(editorForm.isCustomOption),
       };
     }
 
@@ -367,7 +375,6 @@ const CustomOrderTab = () => {
         label,
         img: editorForm.img || '',
         isActive: editorForm.isActive !== false,
-        isCustomOption: Boolean(editorForm.isCustomOption),
       };
     }
 
@@ -383,35 +390,7 @@ const CustomOrderTab = () => {
       estimatedPriceMax: trimText(editorForm.estimatedPriceMax),
       estimatedPriceNote: trimText(editorForm.estimatedPriceNote),
       isActive: editorForm.isActive !== false,
-      isCustomOption: Boolean(editorForm.isCustomOption),
     };
-  };
-
-  const handleSaveEditor = () => {
-    const normalizedItem = validateEditorForm();
-    if (!normalizedItem) {
-      return;
-    }
-
-    const sectionKey = editorType === 'arrangement'
-      ? 'arrangements'
-      : editorType === 'flower'
-        ? 'flowers'
-        : 'colors';
-
-    updateSectionItems(sectionKey, (items) => {
-      if (editorMode === 'edit') {
-        return items.map((item) => (
-          item.id === normalizedItem.id
-            ? normalizedItem
-            : item
-        ));
-      }
-
-      return [normalizedItem, ...items];
-    });
-
-    closeEditorModal();
   };
 
   const uploadCatalogImage = async (image, sectionType, itemId) => {
@@ -446,8 +425,9 @@ const CustomOrderTab = () => {
       : '';
   };
 
-  const buildCatalogForSave = async () => {
-    const arrangements = await Promise.all((catalog.arrangements || []).map(async (item, index) => ({
+  const buildCatalogForSave = async (sourceCatalog) => {
+    const workingCatalog = normalizeCustomOrderAdminCatalog(sourceCatalog);
+    const arrangements = await Promise.all((workingCatalog.arrangements || []).map(async (item, index) => ({
       ...item,
       id: trimText(item.id) || buildCustomOrderItemId(item.value || item.label || `arrangement-${index + 1}`, 'arrangement'),
       flowersPerArrangement: Number.parseInt(item.flowersPerArrangement, 10) || 0,
@@ -457,30 +437,30 @@ const CustomOrderTab = () => {
       img: await uploadCatalogImage(item.img, 'arrangements', trimText(item.id) || `arrangement-${index + 1}`),
     })));
 
-    const flowers = await Promise.all((catalog.flowers || []).map(async (item, index) => ({
+    const flowers = await Promise.all((workingCatalog.flowers || []).map(async (item, index) => ({
       ...item,
       id: trimText(item.id) || buildCustomOrderItemId(item.value || item.label || `flower-${index + 1}`, 'flower'),
       img: await uploadCatalogImage(item.img, 'flowers', trimText(item.id) || `flower-${index + 1}`),
     })));
 
-    const colors = (catalog.colors || []).map((item, index) => ({
+    const colors = (workingCatalog.colors || []).map((item, index) => ({
       ...item,
       id: trimText(item.id) || buildCustomOrderItemId(item.value || item.label || `color-${index + 1}`, 'color'),
       colors: Array.isArray(item.colors) ? item.colors.filter(Boolean) : [],
     }));
 
     return normalizeCustomOrderAdminCatalog({
-      version: Number(catalog.version || 1) + 1,
+      version: Number(workingCatalog.version || 1) + 1,
       arrangements,
       flowers,
       colors,
     });
   };
 
-  const handleSaveCatalog = async () => {
+  const persistCatalogSnapshot = async (nextCatalog, successMessage = '', { closeEditorOnSuccess = false, showSuccessAlert = true } = {}) => {
     setSaving(true);
     try {
-      const nextCatalog = await buildCatalogForSave();
+      const persistedCatalog = await buildCatalogForSave(nextCatalog);
       const nowIso = new Date().toISOString();
 
       const { error } = await supabase
@@ -488,21 +468,68 @@ const CustomOrderTab = () => {
         .upsert([
           {
             key: CUSTOM_ORDER_CATALOG_KEY,
-            value: JSON.stringify(nextCatalog),
+            value: JSON.stringify(persistedCatalog),
             updated_at: nowIso,
           },
         ], { onConflict: 'key' });
 
       if (error) throw error;
 
-      setCatalog(nextCatalog);
-      Alert.alert('Success', 'Custom order settings were saved.');
+      setCatalog(persistedCatalog);
+      if (closeEditorOnSuccess) {
+        closeEditorModal();
+      }
+      if (successMessage && showSuccessAlert) {
+        Alert.alert('Success', successMessage);
+      }
+      return true;
     } catch (error) {
       console.error('Error saving custom order catalog:', error);
       Alert.alert('Error', error.message || 'Failed to save custom order settings.');
+      return false;
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleToggleAvailability = async (sectionKey, itemId, nextValue) => {
+    const nextCatalog = getNextCatalogSnapshot(sectionKey, (items) => items.map((item) => (
+      item.id === itemId
+        ? { ...item, isActive: nextValue }
+        : item
+    )));
+    await persistCatalogSnapshot(nextCatalog, '', { showSuccessAlert: false });
+  };
+
+  const handleSaveEditor = async () => {
+    const normalizedItem = validateEditorForm();
+    if (!normalizedItem) {
+      return;
+    }
+
+    const sectionKey = editorType === 'arrangement'
+      ? 'arrangements'
+      : editorType === 'flower'
+        ? 'flowers'
+        : 'colors';
+
+    const nextCatalog = getNextCatalogSnapshot(sectionKey, (items) => {
+      if (editorMode === 'edit') {
+        return items.map((item) => (
+          item.id === normalizedItem.id
+            ? normalizedItem
+            : item
+        ));
+      }
+
+      return [normalizedItem, ...items];
+    });
+
+    await persistCatalogSnapshot(
+      nextCatalog,
+      editorMode === 'edit' ? 'Custom order item updated.' : 'Custom order item added.',
+      { closeEditorOnSuccess: true }
+    );
   };
 
   const renderSectionMeta = (type, item) => {
@@ -548,25 +575,6 @@ const CustomOrderTab = () => {
           <Text style={styles.customOrderAdminSummaryValue}>{catalog.flowers.length}</Text>
           <Text style={styles.customOrderAdminSummaryLabel}>Flower options</Text>
         </View>
-      </View>
-
-      <View style={styles.customOrderAdminActionRow}>
-        <TouchableOpacity
-          style={[styles.customOrderAdminPrimaryButton, saving && styles.customOrderAdminButtonDisabled]}
-          onPress={handleSaveCatalog}
-          disabled={saving}
-        >
-          <Ionicons name="save-outline" size={18} color="#fff" />
-          <Text style={styles.customOrderAdminPrimaryButtonText}>{saving ? 'Saving...' : 'Save Changes'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.customOrderAdminSecondaryButton}
-          onPress={loadCatalog}
-          disabled={saving}
-        >
-          <Ionicons name="refresh-outline" size={18} color="#ec4899" />
-          <Text style={styles.customOrderAdminSecondaryButtonText}>Reload</Text>
-        </TouchableOpacity>
       </View>
 
       {SECTION_CONFIG.map((section) => (
@@ -623,9 +631,6 @@ const CustomOrderTab = () => {
                     ) : null}
                     {section.type === 'arrangement' && item.description ? (
                       <Text style={styles.customOrderAdminItemDescription}>{item.description}</Text>
-                    ) : null}
-                    {item.isCustomOption ? (
-                      <Text style={styles.customOrderAdminCustomFlag}>Custom input option</Text>
                     ) : null}
                   </View>
                 </View>
@@ -823,20 +828,6 @@ const CustomOrderTab = () => {
                 />
               </View>
 
-              <View style={styles.customOrderAdminSwitchRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.customOrderAdminSwitchTitle}>Use as custom input option</Text>
-                  <Text style={styles.customOrderAdminSwitchHint}>
-                    Enable this for entries like "Others" where the customer types their own details.
-                  </Text>
-                </View>
-                <Switch
-                  value={Boolean(editorForm.isCustomOption)}
-                  onValueChange={(nextValue) => setEditorForm((currentForm) => ({ ...currentForm, isCustomOption: nextValue }))}
-                  trackColor={{ false: '#f3d4dd', true: '#f5a6c1' }}
-                  thumbColor={editorForm.isCustomOption ? '#ec4899' : '#9ca3af'}
-                />
-              </View>
             </ScrollView>
 
             <View style={[styles.modalButtons, styles.customOrderAdminEditorFooter]}>
@@ -847,10 +838,13 @@ const CustomOrderTab = () => {
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalButton, styles.saveButton]}
+                style={[styles.modalButton, styles.saveButton, saving && styles.customOrderAdminButtonDisabled]}
                 onPress={handleSaveEditor}
+                disabled={saving}
               >
-                <Text style={styles.buttonText}>{editorMode === 'edit' ? 'Update' : 'Add'}</Text>
+                <Text style={styles.buttonText}>
+                  {saving ? (editorMode === 'edit' ? 'Updating...' : 'Adding...') : (editorMode === 'edit' ? 'Update' : 'Add')}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -860,10 +854,16 @@ const CustomOrderTab = () => {
       <ConfirmDeleteModal
         visible={Boolean(deleteTarget)}
         onClose={() => setDeleteTarget(null)}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (!deleteTarget) return;
-          updateSectionItems(deleteTarget.sectionKey, (items) => items.filter((item) => item.id !== deleteTarget.item.id));
-          setDeleteTarget(null);
+          const nextCatalog = getNextCatalogSnapshot(
+            deleteTarget.sectionKey,
+            (items) => items.filter((item) => item.id !== deleteTarget.item.id),
+          );
+          const didPersist = await persistCatalogSnapshot(nextCatalog, 'Custom order item deleted.');
+          if (didPersist) {
+            setDeleteTarget(null);
+          }
         }}
         title="Delete Item"
         message={`Remove "${deleteTarget?.item?.label || 'this item'}" from the custom order form?`}

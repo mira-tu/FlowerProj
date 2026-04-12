@@ -46,7 +46,7 @@ const DEFAULT_FLOWERS = [
   { value: 'Orchids', label: 'Orchids', img: 'https://images.pexels.com/photos/132474/pexels-photo-132474.jpeg?auto=compress&cs=tinysrgb&w=800' },
   { value: 'Carnations', label: 'Carnations', img: 'https://images.pexels.com/photos/14532594/pexels-photo-14532594.jpeg?auto=compress&cs=tinysrgb&w=800' },
   { value: 'Mixed Flowers', label: 'Mixed Flowers', img: 'https://images.pexels.com/photos/931162/pexels-photo-931162.jpeg?auto=compress&cs=tinysrgb&w=800' },
-  { value: 'Others', label: 'Others', img: 'https://images.pexels.com/photos/931173/pexels-photo-931173.jpeg?auto=compress&cs=tinysrgb&w=800', isCustomOption: true },
+  { value: 'Others', label: 'Others', img: 'https://images.pexels.com/photos/931173/pexels-photo-931173.jpeg?auto=compress&cs=tinysrgb&w=800' },
 ];
 
 const DEFAULT_ARRANGEMENTS = [
@@ -153,7 +153,6 @@ const DEFAULT_ARRANGEMENTS = [
     description: 'Request a fully custom design and specify arrangement details below.',
     img: 'https://images.pexels.com/photos/931174/pexels-photo-931174.jpeg?auto=compress&cs=tinysrgb&w=1200',
     flowersPerArrangement: 0,
-    isCustomOption: true,
   },
 ];
 
@@ -164,7 +163,7 @@ const DEFAULT_COLORS = [
   { value: 'All White / Elegant', label: 'All White / Elegant', colors: ['#ffffff', '#f5f5f5'] },
   { value: 'Vibrant / Colorful', label: 'Vibrant / Colorful', colors: ['#ff0000', '#ffff00', '#0000ff'] },
   { value: 'Soft Blues and Purples', label: 'Soft Blues and Purples', colors: ['#add8e6', '#800080'] },
-  { value: 'Others', label: 'Others', colors: [], isCustomOption: true },
+  { value: 'Others', label: 'Others', colors: [] },
 ];
 
 const trimText = (value) => String(value || '').trim();
@@ -269,7 +268,6 @@ const normalizeFlower = (item, index) => {
     label,
     img: typeof item?.img === 'string' ? item.img : item?.img || '',
     isActive: item?.isActive !== false,
-    isCustomOption: Boolean(item?.isCustomOption),
   };
 };
 
@@ -290,7 +288,6 @@ const normalizeArrangement = (item, index) => {
     estimatedPriceMax: priceDefaults.estimatedPriceMax,
     estimatedPriceNote: priceDefaults.estimatedPriceNote,
     isActive: item?.isActive !== false,
-    isCustomOption: Boolean(item?.isCustomOption),
   };
 };
 
@@ -304,7 +301,6 @@ const normalizeColor = (item, index) => {
     label,
     colors: normalizeColorSwatches(item?.colors),
     isActive: item?.isActive !== false,
-    isCustomOption: Boolean(item?.isCustomOption),
   };
 };
 
@@ -355,7 +351,6 @@ export const createEmptyCustomOrderItem = (type) => {
       estimatedPriceMax: '',
       estimatedPriceNote: '',
       isActive: true,
-      isCustomOption: false,
     };
   }
 
@@ -366,7 +361,6 @@ export const createEmptyCustomOrderItem = (type) => {
       label: '',
       img: '',
       isActive: true,
-      isCustomOption: false,
     };
   }
 
@@ -377,7 +371,6 @@ export const createEmptyCustomOrderItem = (type) => {
     colorsText: '',
     colors: [],
     isActive: true,
-    isCustomOption: false,
   };
 };
 

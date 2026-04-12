@@ -205,7 +205,6 @@ export const DEFAULT_CUSTOM_ORDER_CATALOG = {
     label: item.label,
     img: item.img,
     isActive: true,
-    isCustomOption: item.value === 'Others',
   })),
   arrangements: flattenedArrangementOptions.map((item, index) => ({
     id: `arrangement-${index + 1}`,
@@ -216,7 +215,6 @@ export const DEFAULT_CUSTOM_ORDER_CATALOG = {
     img: item.img || '',
     flowersPerArrangement: extractFlowersPerArrangement(item.label),
     isActive: true,
-    isCustomOption: item.value === 'Other',
   })),
   colors: colorOptions.map((item, index) => ({
     id: `color-${index + 1}`,
@@ -224,7 +222,6 @@ export const DEFAULT_CUSTOM_ORDER_CATALOG = {
     label: item.label,
     colors: item.colors,
     isActive: true,
-    isCustomOption: item.value === 'Others',
   })),
 };
 
@@ -347,7 +344,6 @@ const normalizeFlowerCatalogItem = (item, index) => {
     label,
     img: normalizeCatalogImage(item?.img),
     isActive: item?.isActive !== false,
-    isCustomOption: Boolean(item?.isCustomOption),
   };
 };
 
@@ -372,7 +368,6 @@ const normalizeArrangementCatalogItem = (item, index) => {
     estimatedPriceMax: priceDefaults.estimatedPriceMax,
     estimatedPriceNote: priceDefaults.estimatedPriceNote,
     isActive: item?.isActive !== false,
-    isCustomOption: Boolean(item?.isCustomOption),
   };
 };
 
@@ -386,7 +381,6 @@ const normalizeColorCatalogItem = (item, index) => {
     label,
     colors: normalizeCatalogColorSwatches(item?.colors),
     isActive: item?.isActive !== false,
-    isCustomOption: Boolean(item?.isCustomOption),
   };
 };
 
@@ -444,7 +438,6 @@ export const buildGroupedArrangementOptions = (arrangements = []) => {
       estimatedPriceMin: item.estimatedPriceMin || 0,
       estimatedPriceMax: item.estimatedPriceMax || 0,
       estimatedPriceNote: item.estimatedPriceNote || '',
-      isCustomOption: Boolean(item.isCustomOption),
     });
   });
 
@@ -453,8 +446,6 @@ export const buildGroupedArrangementOptions = (arrangements = []) => {
     options,
   }));
 };
-
-export const isCustomCatalogOption = (option) => Boolean(option?.isCustomOption);
 
 export const fetchCustomOrderCatalog = async () => {
   try {
