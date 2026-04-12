@@ -1,5 +1,12 @@
 import React, { useState } from 'react';
-import qrCodeImage from '../assets/qr-code-1.jpg';
+import GCashConfirmationSection from './GCashConfirmationSection';
+import GCashQrModal from './GCashQrModal';
+import { normalizeAdditionalReceiptEntries } from '../utils/gcashPayments';
+
+const formatReferenceLabel = (value) => {
+    const trimmed = String(value || '').trim();
+    return trimmed || 'Not provided';
+};
 
 const TrackingPaymentDetails = ({
     paymentMethod,
@@ -7,18 +14,43 @@ const TrackingPaymentDetails = ({
     totalAmount,
     amountPaid,
     receiptUrl,
+    gcashReferenceNumber,
     additionalReceipts,
     onUploadReceipt,
     uploadingReceipt,
     additionalFile,
     setAdditionalFile,
-    shippingFee
+    uploadReferenceNumber,
+    setUploadReferenceNumber,
+    shippingFee,
 }) => {
     const [showQR, setShowQR] = useState(false);
 
     if (paymentMethod?.toLowerCase() !== 'gcash') return null;
 
-    const balance = totalAmount - (amountPaid || 0);
+    const numericTotal = Number(totalAmount || 0);
+    const numericPaid = Number(amountPaid || 0);
+    const numericShippingFee = Number(shippingFee || 0);
+    const balance = Math.max(0, numericTotal - numericPaid);
+    const normalizedReceipts = normalizeAdditionalReceiptEntries(additionalReceipts);
+    const hasMainReceipt = Boolean(receiptUrl);
+    const hasAnyReceipt = hasMainReceipt || normalizedReceipts.length > 0;
+
+    const renderReceiptRow = (label, url, referenceNumber) => (
+        <div className="d-flex justify-content-between align-items-center gap-3 flex-wrap p-2 border rounded-3 bg-white" key={`${label}-${url}`}>
+            <a
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-sm btn-outline-primary rounded-pill"
+            >
+                <i className="fas fa-image me-1"></i>{label}
+            </a>
+            <div className="small text-muted">
+                <span className="fw-semibold">Transaction No.:</span> {formatReferenceLabel(referenceNumber)}
+            </div>
+        </div>
+    );
 
     return (
         <div className="card shadow-sm border-0 mb-4" style={{ borderRadius: '15px', overflow: 'hidden' }}>
@@ -35,25 +67,25 @@ const TrackingPaymentDetails = ({
             </div>
 
             <div className="card-body p-3">
-                {(amountPaid > 0 || totalAmount > 0) && (
+                {(numericPaid > 0 || numericTotal > 0) && (
                     <div className="mb-3 p-2 bg-light rounded shadow-sm border">
                         <div className="d-flex justify-content-between mb-1">
                             <span className="small text-muted">Item Price:</span>
-                            <span className="fw-bold">₱{((totalAmount || 0) - (shippingFee || 0)).toLocaleString()}</span>
+                            <span className="fw-bold">₱{Math.max(0, numericTotal - numericShippingFee).toLocaleString()}</span>
                         </div>
-                        {shippingFee > 0 && (
+                        {numericShippingFee > 0 && (
                             <div className="d-flex justify-content-between mb-1">
-                <span className="small text-muted">Delivery Fee:</span>
-                                <span className="fw-bold">₱{shippingFee.toLocaleString()}</span>
+                                <span className="small text-muted">Delivery Fee:</span>
+                                <span className="fw-bold">₱{numericShippingFee.toLocaleString()}</span>
                             </div>
                         )}
                         <div className="d-flex justify-content-between mb-1 pt-1 border-top mt-1">
                             <span className="fw-bold">Total Amount:</span>
-                            <span className="fw-bold">₱{totalAmount?.toLocaleString()}</span>
+                            <span className="fw-bold">₱{numericTotal.toLocaleString()}</span>
                         </div>
                         <div className="d-flex justify-content-between mb-1 pt-1 border-top mt-1">
                             <span className="small text-muted">Amount Paid:</span>
-                            <span className="fw-bold text-success">₱{(amountPaid || 0).toLocaleString()}</span>
+                            <span className="fw-bold text-success">₱{numericPaid.toLocaleString()}</span>
                         </div>
                         {balance > 0 ? (
                             <div className="d-flex justify-content-between pt-1 border-top mt-1">
@@ -73,7 +105,7 @@ const TrackingPaymentDetails = ({
                         <div className="d-flex align-items-center">
                             <i className="fas fa-exclamation-circle text-danger me-2"></i>
                             <div className="small text-danger">
-                                <strong>Partial Payment Detected.</strong> Your payment is lacking ₱{balance.toLocaleString()}. Please upload an additional receipt to cover the remaining balance.
+                                <strong>Partial Payment Detected.</strong> Your payment is lacking ₱{balance.toLocaleString()}. Please upload an additional receipt and its transaction number to cover the remaining balance.
                             </div>
                         </div>
                     </div>
@@ -90,52 +122,40 @@ const TrackingPaymentDetails = ({
                             <i className="fas fa-qrcode me-1"></i>View GCash QR
                         </button>
                     </div>
-                    <div className="d-flex flex-wrap gap-2">
-                        {receiptUrl && (
-                            <a href={receiptUrl} target="_blank" rel="noopener noreferrer" className="btn btn-sm btn-outline-primary rounded-pill">
-                                <i className="fas fa-image me-1"></i>Main Receipt
-                            </a>
-                        )}
-                        {additionalReceipts?.map((r, idx) => (
-                            <a key={idx} href={r.url} target="_blank" rel="noopener noreferrer" className="btn btn-sm btn-outline-primary rounded-pill">
-                                <i className="fas fa-image me-1"></i>Receipt {idx + 2}
-                            </a>
+                    <div className="d-flex flex-column gap-2">
+                        {hasMainReceipt && renderReceiptRow('Main Receipt', receiptUrl, gcashReferenceNumber)}
+                        {normalizedReceipts.map((receipt, index) => (
+                            renderReceiptRow(`Receipt ${index + 2}`, receipt.url, receipt.reference_number)
                         ))}
-                        {!receiptUrl && (!additionalReceipts || additionalReceipts.length === 0) && (
-                            <span className="text-muted small italic">No receipts uploaded yet.</span>
+                        {!hasAnyReceipt && (
+                            <span className="text-muted small fst-italic">No receipts uploaded yet.</span>
                         )}
                     </div>
                 </div>
 
-                {(!receiptUrl) && (
-                    <div className="mt-3 p-2 rounded" style={{ backgroundColor: '#fdf2f8', border: '1px dashed var(--shop-pink)' }}>
-                        <label className="form-label small fw-bold mb-1">Upload GCash Receipt</label>
-                        <div className="input-group">
-                            <input
-                                type="file"
-                                className="form-control form-control-sm"
-                                accept="image/*"
-                                onChange={(e) => setAdditionalFile(e.target.files[0])}
-                            />
-                            <button
-                                className="btn btn-sm"
-                                style={{ background: 'var(--shop-pink)', color: 'white' }}
-                                onClick={onUploadReceipt}
-                                disabled={!additionalFile || uploadingReceipt}
-                            >
-                                {uploadingReceipt ? (
-                                    <span className="spinner-border spinner-border-sm"></span>
-                                ) : (
-                                    'Upload'
-                                )}
-                            </button>
-                        </div>
-                    </div>
+                {!hasMainReceipt && (
+                    <GCashConfirmationSection
+                        title="Submit Your GCash Payment"
+                        amount={numericTotal}
+                        onViewQr={() => setShowQR(true)}
+                        referenceNumber={uploadReferenceNumber}
+                        onReferenceNumberChange={setUploadReferenceNumber}
+                        receiptFile={additionalFile}
+                        receiptPreview={null}
+                        onReceiptUpload={(event) => setAdditionalFile(event.target.files?.[0] || null)}
+                        onRemoveReceipt={() => setAdditionalFile(null)}
+                        receiptInputId="tracking-main-gcash-receipt"
+                        helperText="We will review this GCash payment manually. Please upload the receipt screenshot and the exact transaction number."
+                        actionLabel="Upload Receipt"
+                        onAction={onUploadReceipt}
+                        actionDisabled={!additionalFile || !String(uploadReferenceNumber || '').trim() || uploadingReceipt}
+                        actionLoading={uploadingReceipt}
+                        disabled={uploadingReceipt}
+                    />
                 )}
 
-                {/* Show waiting message whenever payment_status is waiting_for_confirmation */}
                 {paymentStatus === 'waiting_for_confirmation' && (
-                    <div className="alert alert-secondary py-2 mb-3 border-0 shadow-sm mt-3" style={{ backgroundColor: '#F3F4F6' }}>
+                    <div className="alert alert-secondary py-2 mb-0 border-0 shadow-sm mt-3" style={{ backgroundColor: '#F3F4F6' }}>
                         <div className="d-flex align-items-center">
                             <i className="fas fa-clock text-secondary me-2"></i>
                             <div className="small text-secondary">
@@ -145,61 +165,35 @@ const TrackingPaymentDetails = ({
                     </div>
                 )}
 
-                {/* Upload block — shows only when admin has confirmed previous payment but balance remains */}
-                {receiptUrl && paymentStatus === 'partial' && balance > 0 && (
-                    <div className="mt-3 p-2 rounded" style={{ backgroundColor: '#fef2f2', border: '1px dashed #ef4444' }}>
-                        <label className="form-label small fw-bold text-danger mb-1">Upload Additional Receipt for Balance</label>
-                        <div className="input-group">
-                            <input
-                                type="file"
-                                className="form-control form-control-sm border-danger"
-                                accept="image/*"
-                                onChange={(e) => setAdditionalFile(e.target.files[0])}
-                            />
-                            <button
-                                className="btn btn-sm btn-danger"
-                                onClick={onUploadReceipt}
-                                disabled={!additionalFile || uploadingReceipt}
-                            >
-                                {uploadingReceipt ? (
-                                    <span className="spinner-border spinner-border-sm"></span>
-                                ) : (
-                                    'Upload Balance Receipt'
-                                )}
-                            </button>
-                        </div>
+                {hasMainReceipt && paymentStatus === 'partial' && balance > 0 && (
+                    <div className="mt-3">
+                        <GCashConfirmationSection
+                            title="Upload Remaining Balance Receipt"
+                            amount={balance}
+                            onViewQr={() => setShowQR(true)}
+                            referenceNumber={uploadReferenceNumber}
+                            onReferenceNumberChange={setUploadReferenceNumber}
+                            receiptFile={additionalFile}
+                            receiptPreview={null}
+                            onReceiptUpload={(event) => setAdditionalFile(event.target.files?.[0] || null)}
+                            onRemoveReceipt={() => setAdditionalFile(null)}
+                            receiptInputId="tracking-balance-gcash-receipt"
+                            helperText="Each balance upload needs its own GCash transaction number so staff can verify it separately."
+                            actionLabel="Upload Balance Receipt"
+                            onAction={onUploadReceipt}
+                            actionDisabled={!additionalFile || !String(uploadReferenceNumber || '').trim() || uploadingReceipt}
+                            actionLoading={uploadingReceipt}
+                            disabled={uploadingReceipt}
+                        />
                     </div>
                 )}
             </div>
 
-            {/* QR Code Modal */}
-            {showQR && (
-                <div style={{
-                    position: 'fixed',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: '100%',
-                    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    zIndex: 9999
-                }} onClick={() => setShowQR(false)}>
-                    <div className="bg-white p-4 rounded-4 shadow-lg text-center" style={{ maxWidth: '350px', width: '90%' }} onClick={e => e.stopPropagation()}>
-                        <div className="d-flex justify-content-between align-items-center mb-3">
-                            <h5 className="fw-bold mb-0">GCash QR Code</h5>
-                            <button className="btn-close" onClick={() => setShowQR(false)}></button>
-                        </div>
-                        <div className="p-2 border rounded-3 mb-3 bg-white">
-                            <img src={qrCodeImage} alt="GCash QR" className="img-fluid rounded-2" />
-                        </div>
-                        <div className="alert alert-info py-2 small mb-0">
-                            Scan this QR code using your GCash app and enter the amount needed.
-                        </div>
-                    </div>
-                </div>
-            )}
+            <GCashQrModal
+                visible={showQR}
+                onClose={() => setShowQR(false)}
+                amount={hasMainReceipt && paymentStatus === 'partial' && balance > 0 ? balance : numericTotal}
+            />
         </div>
     );
 };

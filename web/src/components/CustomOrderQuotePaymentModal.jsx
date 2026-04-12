@@ -1,6 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import qrCodeImage from '../assets/qr-code-1.jpg';
+import GCashConfirmationSection from './GCashConfirmationSection';
+import GCashQrModal from './GCashQrModal';
 import { supabase } from '../config/supabase';
+import {
+    normalizeGcashReferenceNumber,
+    writeWithOptionalColumns,
+} from '../utils/gcashPayments';
 
 const resolveRequestId = (order = {}) => {
     const rawId = order?.request_id
@@ -25,6 +30,8 @@ const CustomOrderQuotePaymentModal = ({
 }) => {
     const [receiptFile, setReceiptFile] = useState(null);
     const [receiptPreview, setReceiptPreview] = useState(null);
+    const [gcashReferenceNumber, setGcashReferenceNumber] = useState('');
+    const [showQRModal, setShowQRModal] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
     const requestId = useMemo(() => resolveRequestId(order), [order]);
@@ -35,6 +42,8 @@ const CustomOrderQuotePaymentModal = ({
         if (!visible) {
             setReceiptFile(null);
             setReceiptPreview(null);
+            setGcashReferenceNumber('');
+            setShowQRModal(false);
             setIsProcessing(false);
             setErrorMessage('');
         }
@@ -61,6 +70,11 @@ const CustomOrderQuotePaymentModal = ({
         reader.readAsDataURL(file);
     };
 
+    const clearReceiptSelection = () => {
+        setReceiptFile(null);
+        setReceiptPreview(null);
+    };
+
     const handleClose = () => {
         if (isProcessing) {
             return;
@@ -68,13 +82,22 @@ const CustomOrderQuotePaymentModal = ({
 
         setReceiptFile(null);
         setReceiptPreview(null);
+        setGcashReferenceNumber('');
+        setShowQRModal(false);
         setErrorMessage('');
         onClose?.();
     };
 
     const handleSubmit = async () => {
+        const normalizedGcashReference = normalizeGcashReferenceNumber(gcashReferenceNumber);
+
         if (!receiptFile) {
             setErrorMessage('Please upload your payment receipt before confirming.');
+            return;
+        }
+
+        if (!normalizedGcashReference) {
+            setErrorMessage('Please enter your GCash transaction number before confirming.');
             return;
         }
 
@@ -118,14 +141,36 @@ const CustomOrderQuotePaymentModal = ({
                 throw new Error('Could not retrieve the uploaded receipt URL.');
             }
 
-            const { error: updateError } = await supabase
-                .from('requests')
-                .update({
+            const existingRequestData = (
+                order?.requestData && typeof order.requestData === 'object'
+                    ? order.requestData
+                    : (order?.data && typeof order.data === 'object' ? order.data : {})
+            );
+
+            const nextRequestData = {
+                ...existingRequestData,
+                payment_status: 'waiting_for_confirmation',
+                receipt_url: urlData.publicUrl,
+                gcash_reference_number: normalizedGcashReference,
+            };
+
+            const { error: updateError } = await writeWithOptionalColumns({
+                tableName: 'requests',
+                initialPayload: {
                     status: 'accepted',
                     payment_status: 'waiting_for_confirmation',
                     receipt_url: urlData.publicUrl,
-                })
-                .eq('id', requestId);
+                    gcash_reference_number: normalizedGcashReference,
+                    data: nextRequestData,
+                },
+                optionalColumns: ['gcash_reference_number'],
+                execute: (payload) => (
+                    supabase
+                        .from('requests')
+                        .update(payload)
+                        .eq('id', requestId)
+                ),
+            });
 
             if (updateError) throw updateError;
 
@@ -139,6 +184,8 @@ const CustomOrderQuotePaymentModal = ({
 
             setReceiptFile(null);
             setReceiptPreview(null);
+            setGcashReferenceNumber('');
+            setShowQRModal(false);
             if (onSuccess) {
                 await onSuccess(updatedRequest);
             }
@@ -154,72 +201,48 @@ const CustomOrderQuotePaymentModal = ({
 
     return (
         <div className="modal-overlay" onClick={handleClose}>
-            <div className="modal-content-custom" onClick={(event) => event.stopPropagation()} style={{ maxWidth: '400px' }}>
+            <div className="modal-content-custom" onClick={(event) => event.stopPropagation()} style={{ maxWidth: '420px' }}>
                 <div className="modal-header-custom">
                     <h4>GCash Payment</h4>
                     <button className="modal-close" disabled={isProcessing} onClick={handleClose}>
                         <i className="fas fa-times"></i>
                     </button>
                 </div>
-                <div className="modal-body-custom text-center">
-                    <p>Please scan the QR code to pay for request #{requestNumber}.</p>
-                    <div className="mb-3">
-                        <img
-                            src={qrCodeImage}
-                            alt="GCash QR Code"
-                            style={{ width: '100%', height: 'auto', maxWidth: '250px', margin: '0 auto', borderRadius: '10px' }}
-                        />
-                    </div>
-                    <div className="p-3 rounded mb-3" style={{ background: '#f8f9fa' }}>
-                        <h6 className="fw-bold mb-2">Payment Instructions:</h6>
-                        <ol className="text-start small" style={{ paddingLeft: '20px' }}>
-                            <li>Open your GCash app and tap "Scan QR".</li>
-                            <li>Scan this QR code.</li>
-                            <li>Enter the amount: <strong>₱{paymentAmount.toLocaleString()}</strong></li>
-                            <li>Complete the payment and take a screenshot.</li>
-                            <li>Upload the screenshot below for confirmation.</li>
-                        </ol>
-                    </div>
+                <div className="modal-body-custom">
+                    <p className="text-muted mb-3">
+                        Submit your proof of payment for request #{requestNumber}. We will manually confirm the receipt before the booking moves forward.
+                    </p>
 
-                    <div className="mt-3">
-                        <label className="form-label fw-bold small">
-                            <i className="fas fa-receipt me-2" style={{ color: 'var(--shop-pink)' }}></i>
-                            Upload Payment Receipt
-                        </label>
-                        <input
-                            type="file"
-                            className="form-control form-control-sm"
-                            accept="image/*"
-                            onChange={handleReceiptUpload}
-                            disabled={isProcessing}
-                        />
-                        {receiptPreview && (
-                            <div className="mt-2">
-                                <img src={receiptPreview} alt="Receipt Preview" style={{ maxWidth: '100px', maxHeight: '100px', borderRadius: '8px' }} />
-                            </div>
-                        )}
-                        {errorMessage && (
-                            <div className="mt-2 small text-danger fw-medium">
-                                {errorMessage}
-                            </div>
-                        )}
-                    </div>
-
-                    <button
-                        className="btn w-100 mt-3"
-                        style={{ background: 'var(--shop-pink)', color: 'white' }}
-                        onClick={handleSubmit}
-                        disabled={isProcessing || !receiptFile}
-                    >
-                        {isProcessing ? (
-                            <>
-                                <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
-                                Submitting...
-                            </>
-                        ) : 'Submit for Confirmation'}
-                    </button>
+                    <GCashConfirmationSection
+                        title="Confirm Your Custom Order Payment"
+                        amount={paymentAmount}
+                        onViewQr={() => setShowQRModal(true)}
+                        referenceNumber={gcashReferenceNumber}
+                        onReferenceNumberChange={setGcashReferenceNumber}
+                        receiptFile={receiptFile}
+                        receiptPreview={receiptPreview}
+                        onReceiptUpload={handleReceiptUpload}
+                        onRemoveReceipt={clearReceiptSelection}
+                        receiptInputId="custom-order-quote-gcash-receipt"
+                        helperText="We need both the screenshot and the GCash transaction number before we can mark this quote as paid for review."
+                        actionLabel="Submit for Confirmation"
+                        onAction={handleSubmit}
+                        actionDisabled={isProcessing || !receiptFile || !normalizeGcashReferenceNumber(gcashReferenceNumber)}
+                        actionLoading={isProcessing}
+                        disabled={isProcessing}
+                    />
+                    {errorMessage && (
+                        <div className="mt-3 small text-danger fw-medium">
+                            {errorMessage}
+                        </div>
+                    )}
                 </div>
             </div>
+            <GCashQrModal
+                visible={showQRModal}
+                onClose={() => setShowQRModal(false)}
+                amount={paymentAmount}
+            />
         </div>
     );
 };

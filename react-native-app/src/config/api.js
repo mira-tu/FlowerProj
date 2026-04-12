@@ -1132,6 +1132,7 @@ const REQUEST_QUERY_OPTION_FALLBACKS = [
     ['payment_status', 'includePaymentStatus', 'payment_status'],
     ['payment_method', 'includePaymentMethod', 'payment_method'],
     ['receipt_url', 'includeReceiptUrl', 'receipt_url'],
+    ['gcash_reference_number', 'includeGcashReferenceNumber', 'gcash_reference_number'],
     ['amount_received', 'includeAmountReceived', 'amount_received'],
     ['additional_receipts', 'includeAdditionalReceipts', 'additional_receipts'],
     ['assigned_rider', 'includeAssignedRider', 'assigned_rider'],
@@ -1182,6 +1183,7 @@ const buildAdminRequestSelectColumns = (options = {}) => {
         ...(options.includePaymentStatus !== false ? ['payment_status'] : []),
         ...(options.includePaymentMethod !== false ? ['payment_method'] : []),
         ...(options.includeReceiptUrl !== false ? ['receipt_url'] : []),
+        ...(options.includeGcashReferenceNumber !== false ? ['gcash_reference_number'] : []),
         ...(options.includeAmountReceived !== false ? ['amount_received'] : []),
         ...(options.includeAdditionalReceipts !== false ? ['additional_receipts'] : []),
         ...(options.includeAssignedRider !== false ? ['assigned_rider'] : []),
@@ -3474,7 +3476,11 @@ export const authAPI = {
 // Admin API - Supabase-backed admin operations
 export const adminAPI = {
     getAllOrders: async (params) => {
-        const buildOrdersQuery = ({ includeNotes = true, includeCancellationReason = true } = {}) => {
+        const buildOrdersQuery = ({
+            includeNotes = true,
+            includeCancellationReason = true,
+            includeGcashReferenceNumber = true,
+        } = {}) => {
             let query = supabase
                 .from('orders')
                 .select(`
@@ -3486,6 +3492,7 @@ export const adminAPI = {
                     payment_status,
                     payment_method,
                     receipt_url,
+                    ${includeGcashReferenceNumber ? 'gcash_reference_number,' : ''}
                     additional_receipts,
                     pickup_time,
                     total,
@@ -3528,7 +3535,7 @@ export const adminAPI = {
             return query;
         };
 
-        let queryOptions = { includeNotes: true, includeCancellationReason: true };
+        let queryOptions = { includeNotes: true, includeCancellationReason: true, includeGcashReferenceNumber: true };
         let { data: orders, error } = await buildOrdersQuery(queryOptions);
 
         const missingColumnError = () => error?.code === '42703' ? String(error?.message || '') : '';
@@ -3542,6 +3549,12 @@ export const adminAPI = {
         if (missingColumnError().includes('orders.cancellation_reason')) {
             console.warn('Orders table is missing the cancellation_reason column; retrying admin order fetch without it.');
             queryOptions = { ...queryOptions, includeCancellationReason: false };
+            ({ data: orders, error } = await buildOrdersQuery(queryOptions));
+        }
+
+        if (missingColumnError().includes('orders.gcash_reference_number')) {
+            console.warn('Orders table is missing the gcash_reference_number column; retrying admin order fetch without it.');
+            queryOptions = { ...queryOptions, includeGcashReferenceNumber: false };
             ({ data: orders, error } = await buildOrdersQuery(queryOptions));
         }
 
@@ -3589,6 +3602,7 @@ export const adminAPI = {
                 customer_name: customerName,
                 customer_email: customerEmail,
                 customer_phone: customerPhone,
+                gcash_reference_number: order.gcash_reference_number || null,
                 items: items,
                 multi_delivery_destinations: parsedNotes.destinations,
                 order_items: undefined, // Remove the raw order_items object
@@ -4620,6 +4634,7 @@ export const adminAPI = {
             includePaymentStatus: true,
             includePaymentMethod: true,
             includeReceiptUrl: true,
+            includeGcashReferenceNumber: true,
             includeAmountReceived: true,
             includeAdditionalReceipts: true,
             includeAssignedRider: true,
@@ -4767,6 +4782,9 @@ export const adminAPI = {
             const receiptUrlToUse = req.receipt_url !== undefined && req.receipt_url !== null
                 ? req.receipt_url
                 : requestData?.receipt_url;
+            const gcashReferenceToUse = req.gcash_reference_number !== undefined && req.gcash_reference_number !== null
+                ? req.gcash_reference_number
+                : requestData?.gcash_reference_number;
 
             const deliveryMethodFromData = requestData?.delivery_method;
             const pickupTimeFromData = requestData?.pickup_time;
@@ -4795,6 +4813,7 @@ export const adminAPI = {
                 payment_status: paymentStatusToUse,
                 payment_method: paymentMethodToUse,
                 receipt_url: receiptUrlToUse,
+                gcash_reference_number: gcashReferenceToUse || null,
                 delivery_method: deliveryMethodFromData || req.delivery_method,
                 pickup_time: pickupTimeFromData || req.pickup_time,
                 user_name: userData.name || requestData?.customerName || requestData?.name || 'N/A',

@@ -21,6 +21,11 @@ import {
     maskGcashNumber,
     submitRefundGcashDetails,
 } from '../utils/refundWorkflows';
+import {
+    createAdditionalReceiptEntry,
+    normalizeGcashReferenceNumber,
+    writeWithOptionalColumns,
+} from '../utils/gcashPayments';
 import { summarizeCancellationItems } from '../utils/orderCancellation';
 import '../styles/Shop.css';
 
@@ -85,6 +90,7 @@ const OrderCustomizedTracking = ({ user }) => {
     const [currentStep, setCurrentStep] = useState(1);
     const [loading, setLoading] = useState(true);
     const [additionalFile, setAdditionalFile] = useState(null);
+    const [uploadReferenceNumber, setUploadReferenceNumber] = useState('');
     const [uploadingReceipt, setUploadingReceipt] = useState(false);
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
     const [refundRequest, setRefundRequest] = useState(null);
@@ -204,6 +210,7 @@ const OrderCustomizedTracking = ({ user }) => {
                     return summary.allCancelled ? 0 : summary.remainingSubtotal + shippingFee;
                 })(),
                 trackingStatus,
+                gcash_reference_number: foundRequest.gcash_reference_number || foundRequest.data?.gcash_reference_number || null,
             };
             setRequest(transformedRequest);
 
@@ -313,7 +320,12 @@ const OrderCustomizedTracking = ({ user }) => {
     }, [request?.id]);
 
     const handleUploadReceipt = async () => {
+        const normalizedReference = normalizeGcashReferenceNumber(uploadReferenceNumber);
         if (!additionalFile || !request) return;
+        if (!normalizedReference) {
+            setInfoModal({ show: true, title: 'Transaction Number Required', message: 'Please enter the GCash transaction number before uploading your receipt.' });
+            return;
+        }
 
         setUploadingReceipt(true);
         try {
@@ -335,31 +347,53 @@ const OrderCustomizedTracking = ({ user }) => {
 
             let updatePayload = {};
             if (!request.receipt_url) {
+                const nextRequestData = {
+                    ...(request.requestData || {}),
+                    payment_status: 'waiting_for_confirmation',
+                    receipt_url: urlData.publicUrl,
+                    gcash_reference_number: normalizedReference,
+                };
                 updatePayload = {
                     receipt_url: urlData.publicUrl,
-                    payment_status: 'waiting_for_confirmation'
+                    gcash_reference_number: normalizedReference,
+                    payment_status: 'waiting_for_confirmation',
+                    data: nextRequestData,
                 };
             } else {
-                const newReceipt = {
+                const newReceipt = createAdditionalReceiptEntry({
                     url: urlData.publicUrl,
-                    uploaded_at: new Date().toISOString()
-                };
+                    referenceNumber: normalizedReference,
+                });
                 const currentReceipts = request.additional_receipts || [];
+                const nextRequestData = {
+                    ...(request.requestData || {}),
+                    additional_receipts: [...currentReceipts, newReceipt],
+                    payment_status: 'waiting_for_confirmation',
+                };
                 updatePayload = {
                     additional_receipts: [...currentReceipts, newReceipt],
-                    payment_status: 'waiting_for_confirmation'
+                    payment_status: 'waiting_for_confirmation',
+                    data: nextRequestData,
                 };
             }
 
-            const { error: updateError } = await supabase
-                .from('requests')
-                .update(updatePayload)
-                .eq('id', request.id);
+            const { error: updateError } = await writeWithOptionalColumns({
+                tableName: 'requests',
+                initialPayload: updatePayload,
+                optionalColumns: ['gcash_reference_number'],
+                execute: (payload) => (
+                    supabase
+                        .from('requests')
+                        .update(payload)
+                        .eq('id', request.id)
+                ),
+            });
 
             if (updateError) throw updateError;
 
             setInfoModal({ show: true, title: 'Success', message: 'Receipt uploaded successfully!' });
             setAdditionalFile(null);
+            setUploadReferenceNumber('');
             // Refresh request data manually
             const { data: updatedRequest } = await supabase
                 .from('requests')
@@ -371,6 +405,7 @@ const OrderCustomizedTracking = ({ user }) => {
                 setRequest(prev => ({
                     ...prev,
                     receipt_url: updatedRequest.receipt_url,
+                    gcash_reference_number: updatedRequest.gcash_reference_number || updatedRequest.data?.gcash_reference_number || prev?.gcash_reference_number || null,
                     payment_status: updatedRequest.payment_status,
                     additional_receipts: updatedRequest.additional_receipts || []
                 }));
@@ -815,11 +850,14 @@ const OrderCustomizedTracking = ({ user }) => {
                             totalAmount={request.finalPrice}
                             amountPaid={request.amount_received}
                             receiptUrl={request.receipt_url}
+                            gcashReferenceNumber={request.gcash_reference_number}
                             additionalReceipts={request.additional_receipts}
                             onUploadReceipt={handleUploadReceipt}
                             uploadingReceipt={uploadingReceipt}
                             additionalFile={additionalFile}
                             setAdditionalFile={setAdditionalFile}
+                            uploadReferenceNumber={uploadReferenceNumber}
+                            setUploadReferenceNumber={setUploadReferenceNumber}
                             shippingFee={request.shipping_fee}
                         />
 

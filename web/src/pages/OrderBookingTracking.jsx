@@ -29,6 +29,11 @@ import {
     maskGcashNumber,
     submitRefundGcashDetails,
 } from '../utils/refundWorkflows';
+import {
+    createAdditionalReceiptEntry,
+    normalizeGcashReferenceNumber,
+    writeWithOptionalColumns,
+} from '../utils/gcashPayments';
 import '../styles/Shop.css';
 
 // Timeline steps for Delivery Requests
@@ -281,6 +286,7 @@ const OrderBookingTracking = () => {
     const [currentStep, setCurrentStep] = useState(1);
     const [loading, setLoading] = useState(true);
     const [additionalFile, setAdditionalFile] = useState(null);
+    const [uploadReferenceNumber, setUploadReferenceNumber] = useState('');
     const [uploadingReceipt, setUploadingReceipt] = useState(false);
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
     const [quotePaymentRequest, setQuotePaymentRequest] = useState(null);
@@ -407,6 +413,7 @@ const OrderBookingTracking = () => {
             finalPrice: nextFinalPrice,
             shipping_fee: nextShippingFee,
             status: bookingSummary.allCancelled ? 'cancelled' : foundRequest.status,
+            gcash_reference_number: foundRequest.gcash_reference_number || normalizedRequestData?.gcash_reference_number || null,
         };
         setRequest(transformedRequest);
 
@@ -518,7 +525,12 @@ const OrderBookingTracking = () => {
     }, [request?.id]);
 
     const handleUploadReceipt = async () => {
+        const normalizedReference = normalizeGcashReferenceNumber(uploadReferenceNumber);
         if (!additionalFile || !request) return;
+        if (!normalizedReference) {
+            setInfoModal({ show: true, title: 'Transaction Number Required', message: 'Please enter the GCash transaction number before uploading your receipt.' });
+            return;
+        }
 
         setUploadingReceipt(true);
         try {
@@ -540,33 +552,53 @@ const OrderBookingTracking = () => {
 
             let updatePayload = {};
             if (!request.receipt_url) {
-                // If there's no main receipt yet, set this as the main receipt
+                const nextRequestData = {
+                    ...(request.requestData || {}),
+                    payment_status: 'waiting_for_confirmation',
+                    receipt_url: urlData.publicUrl,
+                    gcash_reference_number: normalizedReference,
+                };
                 updatePayload = {
                     receipt_url: urlData.publicUrl,
-                    payment_status: 'waiting_for_confirmation' // Optional: indicate it's waiting
+                    gcash_reference_number: normalizedReference,
+                    payment_status: 'waiting_for_confirmation',
+                    data: nextRequestData,
                 };
             } else {
-                // Otherwise add to additional receipts
-                const newReceipt = {
+                const newReceipt = createAdditionalReceiptEntry({
                     url: urlData.publicUrl,
-                    uploaded_at: new Date().toISOString()
-                };
+                    referenceNumber: normalizedReference,
+                });
                 const currentReceipts = request.additional_receipts || [];
+                const nextRequestData = {
+                    ...(request.requestData || {}),
+                    additional_receipts: [...currentReceipts, newReceipt],
+                    payment_status: 'waiting_for_confirmation',
+                };
                 updatePayload = {
                     additional_receipts: [...currentReceipts, newReceipt],
-                    payment_status: 'waiting_for_confirmation'
+                    payment_status: 'waiting_for_confirmation',
+                    data: nextRequestData,
                 };
             }
 
-            const { error: updateError } = await supabase
-                .from('requests')
-                .update(updatePayload)
-                .eq('id', request.id);
+            const { error: updateError } = await writeWithOptionalColumns({
+                tableName: 'requests',
+                initialPayload: updatePayload,
+                optionalColumns: ['gcash_reference_number'],
+                execute: (payload) => (
+                    supabase
+                        .from('requests')
+                        .update(payload)
+                        .eq('id', request.id)
+                ),
+            });
 
             if (updateError) throw updateError;
 
             setInfoModal({ show: true, title: 'Success', message: 'Receipt uploaded successfully!' });
             setAdditionalFile(null);
+            setUploadReferenceNumber('');
             await loadRequest(false);
         } catch (error) {
             console.error('Error uploading receipt:', error);
@@ -1233,11 +1265,14 @@ const OrderBookingTracking = () => {
                                 totalAmount={request.finalPrice}
                                 amountPaid={request.amount_received}
                                 receiptUrl={request.receipt_url}
+                                gcashReferenceNumber={request.gcash_reference_number}
                                 additionalReceipts={request.additional_receipts}
                                 onUploadReceipt={handleUploadReceipt}
                                 uploadingReceipt={uploadingReceipt}
                                 additionalFile={additionalFile}
                                 setAdditionalFile={setAdditionalFile}
+                                uploadReferenceNumber={uploadReferenceNumber}
+                                setUploadReferenceNumber={setUploadReferenceNumber}
                                 shippingFee={request.shipping_fee}
                             />
                         )}

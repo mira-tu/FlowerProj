@@ -22,6 +22,11 @@ import {
     maskGcashNumber,
     submitRefundGcashDetails,
 } from '../utils/refundWorkflows';
+import {
+    createAdditionalReceiptEntry,
+    normalizeGcashReferenceNumber,
+    writeWithOptionalColumns,
+} from '../utils/gcashPayments';
 import { summarizeCancellationItems } from '../utils/orderCancellation';
 import '../styles/Shop.css';
 
@@ -51,6 +56,7 @@ const OrderTracking = ({ user }) => {
     const [currentStep, setCurrentStep] = useState(1);
     const [loading, setLoading] = useState(true);
     const [additionalFile, setAdditionalFile] = useState(null);
+    const [uploadReferenceNumber, setUploadReferenceNumber] = useState('');
     const [uploadingReceipt, setUploadingReceipt] = useState(false);
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
     const [refundRequest, setRefundRequest] = useState(null);
@@ -144,6 +150,7 @@ const OrderTracking = ({ user }) => {
                 total: itemSummary.hasItems
                     ? (itemSummary.allCancelled ? 0 : (itemSummary.remainingSubtotal + Number(foundOrder.shipping_fee || 0)))
                     : foundOrder.total,
+                gcash_reference_number: foundOrder.gcash_reference_number || null,
             };
             setOrder(transformedOrder);
 
@@ -253,7 +260,12 @@ const OrderTracking = ({ user }) => {
     }, [order?.id]);
 
     const handleUploadReceipt = async () => {
+        const normalizedReference = normalizeGcashReferenceNumber(uploadReferenceNumber);
         if (!additionalFile || !order) return;
+        if (!normalizedReference) {
+            setInfoModal({ show: true, title: 'Transaction Number Required', message: 'Please enter the GCash transaction number before uploading your receipt.' });
+            return;
+        }
 
         setUploadingReceipt(true);
         try {
@@ -277,13 +289,14 @@ const OrderTracking = ({ user }) => {
             if (!order.receipt_url) {
                 updatePayload = {
                     receipt_url: urlData.publicUrl,
+                    gcash_reference_number: normalizedReference,
                     payment_status: 'waiting_for_confirmation'
                 };
             } else {
-                const newReceipt = {
+                const newReceipt = createAdditionalReceiptEntry({
                     url: urlData.publicUrl,
-                    uploaded_at: new Date().toISOString()
-                };
+                    referenceNumber: normalizedReference,
+                });
                 const currentReceipts = order.additional_receipts || [];
                 updatePayload = {
                     additional_receipts: [...currentReceipts, newReceipt],
@@ -291,15 +304,23 @@ const OrderTracking = ({ user }) => {
                 };
             }
 
-            const { error: updateError } = await supabase
-                .from('orders')
-                .update(updatePayload)
-                .eq('id', order.id);
+            const { error: updateError } = await writeWithOptionalColumns({
+                tableName: 'orders',
+                initialPayload: updatePayload,
+                optionalColumns: ['gcash_reference_number'],
+                execute: (payload) => (
+                    supabase
+                        .from('orders')
+                        .update(payload)
+                        .eq('id', order.id)
+                ),
+            });
 
             if (updateError) throw updateError;
 
             setInfoModal({ show: true, title: 'Success', message: 'Receipt uploaded successfully!' });
             setAdditionalFile(null);
+            setUploadReferenceNumber('');
 
             // Refresh order data
             const { data: updatedOrder } = await supabase
@@ -312,6 +333,7 @@ const OrderTracking = ({ user }) => {
                 setOrder(prev => ({
                     ...prev,
                     receipt_url: updatedOrder.receipt_url,
+                    gcash_reference_number: updatedOrder.gcash_reference_number || prev?.gcash_reference_number || null,
                     payment_status: updatedOrder.payment_status,
                     additional_receipts: updatedOrder.additional_receipts || []
                 }));
@@ -689,11 +711,14 @@ const OrderTracking = ({ user }) => {
                             totalAmount={order.total}
                             amountPaid={order.amount_received}
                             receiptUrl={order.receipt_url}
+                            gcashReferenceNumber={order.gcash_reference_number}
                             additionalReceipts={order.additional_receipts}
                             onUploadReceipt={handleUploadReceipt}
                             uploadingReceipt={uploadingReceipt}
                             additionalFile={additionalFile}
                             setAdditionalFile={setAdditionalFile}
+                            uploadReferenceNumber={uploadReferenceNumber}
+                            setUploadReferenceNumber={setUploadReferenceNumber}
                             shippingFee={order.shipping_fee}
                         />
 

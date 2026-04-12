@@ -20,6 +20,10 @@ const PaymentDetailsSection = ({ item, styles, onRecordPay, onEditAmount, onView
     const isPaid = item.payment_status === 'paid';
     const isTerminal = ['pending', 'cancelled', 'declined'].includes(item.status);
     const hasReceipt = !!(item.receipt_url);
+    const mainReferenceNumber = item.gcash_reference_number || item.data?.gcash_reference_number || '';
+    const normalizedAdditionalReceipts = Array.isArray(item.additional_receipts)
+        ? item.additional_receipts
+        : (Array.isArray(item.data?.additional_receipts) ? item.data.additional_receipts : []);
 
     const showRecordPay = isGCash && !isPaid && !isTerminal && (requireReceipt ? hasReceipt : true);
 
@@ -65,18 +69,28 @@ const PaymentDetailsSection = ({ item, styles, onRecordPay, onEditAmount, onView
                 </View>
 
                 {/* All receipts section — main receipt first, followed by additionals */}
-                {((isGCash && item.payment_method && item.receipt_url) || (item.additional_receipts && item.additional_receipts.length > 0)) && (
-                    <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+                {((isGCash && item.payment_method && item.receipt_url) || normalizedAdditionalReceipts.length > 0) && (
+                    <View style={{ gap: 8, marginTop: 8 }}>
                         {isGCash && item.payment_method && item.receipt_url && (
-                            <TouchableOpacity onPress={() => onViewReceipt(item.receipt_url)}>
-                                <Text style={styles.eoViewReceipt}>Main Receipt</Text>
-                            </TouchableOpacity>
-                        )}
-                        {item.additional_receipts && item.additional_receipts.length > 0 && (
-                            item.additional_receipts.map((receipt, idx) => (
-                                <TouchableOpacity key={idx} onPress={() => onViewReceipt(receipt.url)}>
-                                    <Text style={styles.eoViewReceipt}>Receipt {idx + 2}</Text>
+                            <View style={{ padding: 10, borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 8, backgroundColor: '#FFFFFF' }}>
+                                <TouchableOpacity onPress={() => onViewReceipt(item.receipt_url)}>
+                                    <Text style={styles.eoViewReceipt}>Main Receipt</Text>
                                 </TouchableOpacity>
+                                <Text style={[styles.eoDetailText, { marginTop: 6, color: '#6B7280' }]}>
+                                    Transaction No.: {mainReferenceNumber || 'Not provided'}
+                                </Text>
+                            </View>
+                        )}
+                        {normalizedAdditionalReceipts.length > 0 && (
+                            normalizedAdditionalReceipts.map((receipt, idx) => (
+                                <View key={idx} style={{ padding: 10, borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 8, backgroundColor: '#FFFFFF' }}>
+                                    <TouchableOpacity onPress={() => onViewReceipt(receipt.url)}>
+                                        <Text style={styles.eoViewReceipt}>Receipt {idx + 2}</Text>
+                                    </TouchableOpacity>
+                                    <Text style={[styles.eoDetailText, { marginTop: 6, color: '#6B7280' }]}>
+                                        Transaction No.: {receipt.reference_number || receipt.referenceNumber || 'Not provided'}
+                                    </Text>
+                                </View>
                             ))
                         )}
                     </View>

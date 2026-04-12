@@ -6,8 +6,10 @@ import { stockAPI } from '../config/api';
 import InfoModal from '../components/InfoModal';
 import CheckoutAddressSelection from '../components/CheckoutAddressSelection';
 import CustomizedBouquetPreview from '../components/CustomizedBouquetPreview';
+import GCashConfirmationSection from '../components/GCashConfirmationSection';
+import GCashQrModal from '../components/GCashQrModal';
 import MultiAddressDeliverySection from '../components/MultiAddressDeliverySection';
-import qrCodeImage from '../assets/qr-code-1.jpg';
+import { normalizeGcashReferenceNumber, writeWithOptionalColumns } from '../utils/gcashPayments';
 import {
     buildAddressFeeMap,
     buildMultiDeliveryDestinations,
@@ -175,48 +177,27 @@ const buildCustomizedRequestErrorMessage = (error) => {
 };
 
 const insertCustomizedRequestWithFallbacks = async (requestPayload) => {
-    const fallbackColumns = [
-        ['requests.image_url', 'image_url'],
-        ['requests.notes', 'notes'],
-        ['requests.delivery_method', 'delivery_method'],
-        ['requests.pickup_time', 'pickup_time'],
-        ['requests.shipping_fee', 'shipping_fee'],
-        ['requests.payment_status', 'payment_status'],
-        ['requests.contact_number', 'contact_number'],
-    ];
-
-    let payload = { ...requestPayload };
-
-    while (true) {
-        const result = await supabase
-            .from('requests')
-            .insert([payload])
-            .select('id')
-            .single();
-
-        if (!result.error) {
-            return result;
-        }
-
-        const errorMessage = String(result.error.message || '');
-        const matchingFallback = fallbackColumns.find(([needle, column]) => (
-            errorMessage.includes(needle)
-            || errorMessage.includes(`'${column}' column of 'requests'`)
-        ));
-
-        if (!matchingFallback) {
-            return result;
-        }
-
-        const [, column] = matchingFallback;
-        if (!(column in payload)) {
-            return result;
-        }
-
-        const nextPayload = { ...payload };
-        delete nextPayload[column];
-        payload = nextPayload;
-    }
+    return writeWithOptionalColumns({
+        tableName: 'requests',
+        initialPayload: requestPayload,
+        optionalColumns: [
+            'image_url',
+            'notes',
+            'delivery_method',
+            'pickup_time',
+            'shipping_fee',
+            'payment_status',
+            'contact_number',
+            'gcash_reference_number',
+        ],
+        execute: (payload) => (
+            supabase
+                .from('requests')
+                .insert([payload])
+                .select('id')
+                .single()
+        ),
+    });
 };
 
 const CustomizedCheckout = ({ user }) => {
@@ -230,6 +211,7 @@ const CustomizedCheckout = ({ user }) => {
     const [showQRModal, setShowQRModal] = useState(false);
     const [receiptFile, setReceiptFile] = useState(null);
     const [receiptPreview, setReceiptPreview] = useState(null);
+    const [gcashReferenceNumber, setGcashReferenceNumber] = useState('');
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
 
     const [address, setAddress] = useState({
@@ -437,24 +419,35 @@ const CustomizedCheckout = ({ user }) => {
 
     const handlePaymentChange = (paymentId) => {
         setSelectedPayment(paymentId);
-        if (paymentId === 'gcash') {
-            setShowQRModal(true);
+        if (paymentId !== 'gcash') {
+            setShowQRModal(false);
         }
     };
 
     const handleReceiptUpload = (e) => {
         const file = e.target.files[0];
-        if (file) {
-            setReceiptFile(file);
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setReceiptPreview(reader.result);
-            };
-            reader.readAsDataURL(file);
+        if (!file) {
+            setReceiptFile(null);
+            setReceiptPreview(null);
+            return;
         }
+
+        setReceiptFile(file);
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            setReceiptPreview(reader.result);
+        };
+        reader.readAsDataURL(file);
+    };
+
+    const clearReceiptSelection = () => {
+        setReceiptFile(null);
+        setReceiptPreview(null);
     };
 
     const handlePlaceOrder = async () => {
+        const normalizedGcashReference = normalizeGcashReferenceNumber(gcashReferenceNumber);
+
         if (!user) {
             setInfoModal({ show: true, title: 'Notice', message: 'You must be logged in to place an order. Please log in or sign up.', linkTo: '/login', linkText: 'Go to Login' });
             return;
@@ -480,6 +473,11 @@ const CustomizedCheckout = ({ user }) => {
 
         if (selectedPayment === 'gcash' && !receiptFile) {
             setInfoModal({ show: true, title: 'Notice', message: 'Please upload your GCash payment receipt' });
+            return;
+        }
+
+        if (selectedPayment === 'gcash' && !normalizedGcashReference) {
+            setInfoModal({ show: true, title: 'Notice', message: 'Please enter your GCash transaction number before submitting your request.' });
             return;
         }
 
@@ -573,6 +571,7 @@ const CustomizedCheckout = ({ user }) => {
             pickup_time: pickupDateTime,
             shipping_fee: shippingFee,
             payment_status,
+            gcash_reference_number: selectedPayment === 'gcash' ? normalizedGcashReference : null,
             image_url: firstItem.image_url || null,
             notes: null,
             data: {
@@ -591,13 +590,14 @@ const CustomizedCheckout = ({ user }) => {
                 ), 0),
                 shipping_fee: shippingFee,
                 receipt_url: uploadedReceiptUrl,
+                gcash_reference_number: selectedPayment === 'gcash' ? normalizedGcashReference : null,
                 image_url: firstItem.image_url || null,
                 stock_allocations: stockAllocations,
             },
         };
 
         // 4. Insert into `requests` table
-        const { data, error } = await insertCustomizedRequestWithFallbacks(newRequest);
+        const { data, error, removedColumns = [] } = await insertCustomizedRequestWithFallbacks(newRequest);
 
         if (error) {
             console.error('Error creating request:', error);
@@ -608,6 +608,10 @@ const CustomizedCheckout = ({ user }) => {
             });
             setIsProcessing(false);
             return;
+        }
+
+        if (removedColumns.includes('gcash_reference_number') && selectedPayment === 'gcash') {
+            console.warn('GCash transaction number could not be stored on the request because requests.gcash_reference_number is not available yet.');
         }
 
         if (stockAllocations.length > 0) {
@@ -843,66 +847,21 @@ const CustomizedCheckout = ({ user }) => {
                                 </div>
                             </div>
 
-                            <div className="mt-3 p-3 rounded" style={{ background: '#f8f9fa', border: '2px dashed var(--shop-pink)' }}>
-                                <div className="text-center mb-3">
-                                    <h6 className="fw-bold mb-2">
-                                        <i className="fas fa-qrcode me-2" style={{ color: 'var(--shop-pink)' }}></i>
-                                        Scan to Pay via GCash
-                                    </h6>
-                                    <button
-                                        className="btn btn-sm btn-outline-primary"
-                                        onClick={() => setShowQRModal(true)}
-                                    >
-                                        <i className="fas fa-eye me-2"></i>View QR Code
-                                    </button>
-                                </div>
-
-                                <div className="mt-3">
-                                    <label className="form-label fw-bold small">
-                                        <i className="fas fa-receipt me-2" style={{ color: 'var(--shop-pink)' }}></i>
-                                        Upload Payment Receipt (Screenshot)
-                                    </label>
-                                    <input
-                                        type="file"
-                                        className="form-control form-control-sm"
-                                        accept="image/*"
-                                        onChange={handleReceiptUpload}
-                                        required
-                                    />
-                                    {receiptFile && (
-                                        <div className="text-muted small mt-1">
-                                            <i className="fas fa-check-circle text-success me-1"></i>
-                                            File selected: {receiptFile.name}
-                                        </div>
-                                    )}
-                                    {receiptPreview && (
-                                        <div className="mt-2">
-                                            <img
-                                                src={receiptPreview}
-                                                alt="Receipt Preview"
-                                                style={{
-                                                    maxWidth: '100%',
-                                                    maxHeight: '200px',
-                                                    borderRadius: '8px',
-                                                    border: '1px solid #ddd'
-                                                }}
-                                            />
-                                            <button
-                                                className="btn btn-sm btn-link text-danger mt-1 p-0"
-                                                onClick={() => {
-                                                    setReceiptFile(null);
-                                                    setReceiptPreview(null);
-                                                }}
-                                            >
-                                                <i className="fas fa-times me-1"></i>Remove
-                                            </button>
-                                        </div>
-                                    )}
-                                    <small className="text-muted d-block mt-2">
-                                        <i className="fas fa-info-circle me-1"></i>
-                                        Please upload a screenshot of your GCash payment confirmation
-                                    </small>
-                                </div>
+                            <div className="mt-3">
+                                <GCashConfirmationSection
+                                    title="Confirm Your GCash Payment"
+                                    amount={total}
+                                    onViewQr={() => setShowQRModal(true)}
+                                    referenceNumber={gcashReferenceNumber}
+                                    onReferenceNumberChange={setGcashReferenceNumber}
+                                    receiptFile={receiptFile}
+                                    receiptPreview={receiptPreview}
+                                    onReceiptUpload={handleReceiptUpload}
+                                    onRemoveReceipt={clearReceiptSelection}
+                                    receiptInputId="customized-checkout-gcash-receipt"
+                                    helperText="Upload your Customizer Studio payment receipt together with the GCash transaction number so our staff can confirm it."
+                                    disabled={isProcessing}
+                                />
                             </div>
                         </div>
                     </div>
@@ -977,102 +936,11 @@ const CustomizedCheckout = ({ user }) => {
                 </div>
             </div>
 
-            {showQRModal && (
-                <div className="modal-overlay" onClick={() => setShowQRModal(false)}>
-                    <div className="modal-content-custom" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
-                        <div className="modal-header-custom">
-                            <h4>GCash Payment QR Code</h4>
-                            <button className="modal-close" onClick={() => setShowQRModal(false)}>
-                                <i className="fas fa-times"></i>
-                            </button>
-                        </div>
-                        <div className="modal-body-custom text-center">
-                            <div className="mb-3">
-                                <div
-                                    style={{
-                                        width: '250px',
-                                        height: '250px',
-                                        margin: '0 auto',
-                                        background: '#fff',
-                                        border: '2px solid #e0e0e0',
-                                        borderRadius: '12px',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        position: 'relative'
-                                    }}
-                                >
-                                    <img
-                                        src={qrCodeImage}
-                                        alt="GCash QR Code"
-                                        style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '10px' }}
-                                    />
-                                </div>
-                            </div>
-                            <div className="p-3 rounded mb-3" style={{ background: '#f8f9fa' }}>
-                                <h6 className="fw-bold mb-2">Payment Instructions:</h6>
-                                <ol className="text-start small" style={{ paddingLeft: '20px' }}>
-                                    <li>Open your GCash app</li>
-                                    <li>Tap "Scan QR"</li>
-                                    <li>Scan this QR code</li>
-                                    <li>Enter the amount: <strong>₱{total.toLocaleString()}</strong></li>
-                                    <li>Complete the payment</li>
-                                    <li>Take a screenshot of the payment confirmation</li>
-                                    <li>Upload the screenshot below</li>
-                                </ol>
-                            </div>
-                            <div className="mb-3">
-                                <label className="form-label fw-bold small">
-                                    <i className="fas fa-receipt me-2" style={{ color: 'var(--shop-pink)' }}></i>
-                                    Upload Payment Receipt
-                                </label>
-                                <input
-                                    type="file"
-                                    className="form-control form-control-sm"
-                                    accept="image/*"
-                                    onChange={handleReceiptUpload}
-                                />
-                                {receiptFile && (
-                                    <div className="text-muted small mt-1">
-                                        <i className="fas fa-check-circle text-success me-1"></i>
-                                        File selected: {receiptFile.name}
-                                    </div>
-                                )}
-                                {receiptPreview && (
-                                    <div className="mt-2">
-                                        <img
-                                            src={receiptPreview}
-                                            alt="Receipt Preview"
-                                            style={{
-                                                maxWidth: '100%',
-                                                maxHeight: '150px',
-                                                borderRadius: '8px',
-                                                border: '1px solid #ddd'
-                                            }}
-                                        />
-                                        <button
-                                            className="btn btn-sm btn-link text-danger mt-1 p-0"
-                                            onClick={() => {
-                                                setReceiptFile(null);
-                                                setReceiptPreview(null);
-                                            }}
-                                        >
-                                            <i className="fas fa-times me-1"></i>Remove
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-                            <button
-                                className="btn w-100"
-                                style={{ background: 'var(--shop-pink)', color: 'white' }}
-                                onClick={() => setShowQRModal(false)}
-                            >
-                                Done
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <GCashQrModal
+                visible={showQRModal}
+                onClose={() => setShowQRModal(false)}
+                amount={total}
+            />
 
             <InfoModal
                 show={infoModal.show}
