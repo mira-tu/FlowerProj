@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import * as ImagePicker from 'expo-image-picker';
 import {
   Alert,
   FlatList,
@@ -24,8 +25,20 @@ import styles from '../../AdminDashboard.styles';
 import { formatTimestamp, getPaymentStatusDisplay, getStatusColor, getStatusLabel } from '../adminHelpers';
 import PaymentDetailsSection from '../components/PaymentDetailsSection';
 import { generateAndShareReceipt } from '../../../utils/receiptGenerator';
-import { groupDeliveryDestinations } from '../../../utils/deliveryDestinations';
+import {
+  DELIVERY_CONFIRMATION_OWNER,
+  DELIVERY_CONFIRMATION_STATUS,
+  getDeliveryStopDisplayLabel,
+  groupDeliveryDestinations,
+  hasStopConfirmationFlow,
+  normalizeDeliveryDestinations,
+} from '../../../utils/deliveryDestinations';
 import { filterRequestForAssignedRider, shouldRestrictRequestToAssignedRider } from '../../../utils/riderAssignmentFilter';
+import {
+  getCustomOrderQuoteTypeLabel,
+  normalizeCustomOrderQuoteLineItems,
+  normalizeCustomOrderQuoteType,
+} from '../../../utils/customOrderQuoteBreakdown';
 
 const DetailSection = ({ label, value }) => {
   if (!value) return null;
@@ -102,6 +115,9 @@ const getTentativeBreakdown = (item = {}) => {
         label,
         quantity,
         hasEstimate,
+        unitMin,
+        unitMax,
+        note,
         formattedUnitRange: hasEstimate ? formatTentativeRange(unitMin, unitMax, note) : 'For discussion',
         formattedLineRange: hasEstimate ? formatTentativeRange(lineMin || (unitMin * quantity), lineMax || (unitMax * quantity)) : 'For discussion',
         lineMin: lineMin || (unitMin * quantity),
@@ -120,7 +136,48 @@ const getTentativeBreakdown = (item = {}) => {
     lineItems,
     hasAnyEstimate,
     hasCompleteEstimate,
+    subtotalMin,
+    subtotalMax,
     formattedSubtotalRange: hasCompleteEstimate ? formatTentativeRange(subtotalMin, subtotalMax) : 'For discussion',
+  };
+};
+
+const getArrangementLookupKey = (value = '') => String(value || '').trim().toLowerCase();
+
+const getRangeWarningState = (amount, min, max) => {
+  const safeAmount = parseCurrencyNumber(amount);
+  const safeMin = parseCurrencyNumber(min);
+  const safeMaxCandidate = parseCurrencyNumber(max);
+  const safeMax = safeMaxCandidate < safeMin ? safeMin : safeMaxCandidate;
+
+  if (safeMin <= 0 && safeMax <= 0) {
+    return {
+      isBelowRange: false,
+      isAboveRange: false,
+      rangeWarningText: '',
+    };
+  }
+
+  if (safeAmount < safeMin) {
+    return {
+      isBelowRange: true,
+      isAboveRange: false,
+      rangeWarningText: `Below minimum catalogue range by ${formatTentativePeso(safeMin - safeAmount)}`,
+    };
+  }
+
+  if (safeMax > 0 && safeAmount > safeMax) {
+    return {
+      isBelowRange: false,
+      isAboveRange: true,
+      rangeWarningText: `Above maximum catalogue range by ${formatTentativePeso(safeAmount - safeMax)}`,
+    };
+  }
+
+  return {
+    isBelowRange: false,
+    isAboveRange: false,
+    rangeWarningText: '',
   };
 };
 
@@ -280,6 +337,10 @@ const normalizeArrangementSelections = (requestData = {}) => {
   const source = Array.isArray(requestData.arrangementSelections)
     ? requestData.arrangementSelections
     : [];
+  const tentativeLineItems = getTentativeBreakdown(requestData).lineItems;
+  const tentativeLineItemMap = new Map(
+    tentativeLineItems.map((lineItem) => [getArrangementLookupKey(lineItem.label), lineItem])
+  );
 
   return source
     .map((selection) => {
@@ -299,12 +360,60 @@ const normalizeArrangementSelections = (requestData = {}) => {
         totalFlowers = flowersPerArrangement * quantity;
       }
 
+      const matchedTentativeLineItem = tentativeLineItemMap.get(getArrangementLookupKey(arrangementLabel));
+      const rawUnitMin = parseCurrencyNumber(
+        selection?.unitMin
+        ?? selection?.estimatedPriceMin
+        ?? selection?.estimated_price_min
+        ?? matchedTentativeLineItem?.unitMin
+      );
+      const rawUnitMaxCandidate = parseCurrencyNumber(
+        selection?.unitMax
+        ?? selection?.estimatedPriceMax
+        ?? selection?.estimated_price_max
+        ?? matchedTentativeLineItem?.unitMax
+      );
+      const rawLineMin = parseCurrencyNumber(
+        selection?.lineMin
+        ?? selection?.tentativeSubtotalMin
+        ?? selection?.tentative_subtotal_min
+        ?? matchedTentativeLineItem?.lineMin
+      );
+      const rawLineMaxCandidate = parseCurrencyNumber(
+        selection?.lineMax
+        ?? selection?.tentativeSubtotalMax
+        ?? selection?.tentative_subtotal_max
+        ?? matchedTentativeLineItem?.lineMax
+      );
+      const lineMin = rawLineMin || (rawUnitMin * quantity);
+      const lineMaxBase = rawLineMaxCandidate || (Math.max(rawUnitMaxCandidate, rawUnitMin) * quantity);
+      const lineMax = lineMaxBase < lineMin ? lineMin : lineMaxBase;
+      const unitMin = rawUnitMin || (lineMin > 0 && quantity > 0 ? lineMin / quantity : 0);
+      const unitMaxBase = rawUnitMaxCandidate || (lineMax > 0 && quantity > 0 ? lineMax / quantity : 0);
+      const unitMax = unitMaxBase < unitMin ? unitMin : unitMaxBase;
+      const note = String(
+        selection?.note
+        ?? selection?.estimatedPriceNote
+        ?? selection?.estimated_price_note
+        ?? matchedTentativeLineItem?.note
+        ?? ''
+      ).trim();
+      const hasEstimate = unitMin > 0 || unitMax > 0 || lineMin > 0 || lineMax > 0;
+
       return {
         arrangementLabel,
         quantity,
         flowersPerArrangement,
         totalFlowers,
         preferredFlowerNames: getArrangementSelectionPreferredFlowerNames(selection),
+        unitMin,
+        unitMax,
+        lineMin,
+        lineMax,
+        note,
+        hasEstimate,
+        formattedUnitRange: hasEstimate ? formatTentativeRange(unitMin, unitMax, note) : 'For discussion',
+        formattedLineRange: hasEstimate ? formatTentativeRange(lineMin, lineMax) : 'For discussion',
       };
     })
     .filter(Boolean);
@@ -327,21 +436,47 @@ const mergeArrangementSelections = (selections = []) => {
 
   (Array.isArray(selections) ? selections : []).forEach((selection) => {
     const arrangementLabel = String(selection?.arrangementLabel || '').trim();
-    if (!arrangementLabel) return;
+    const arrangementGroupKey = String(selection?.arrangementGroupKey || arrangementLabel).trim();
+    if (!arrangementLabel || !arrangementGroupKey) return;
 
-    if (!merged.has(arrangementLabel)) {
-      merged.set(arrangementLabel, {
+    if (!merged.has(arrangementGroupKey)) {
+      merged.set(arrangementGroupKey, {
+        arrangementGroupKey,
         arrangementLabel,
         quantity: 0,
         flowersPerArrangement: selection?.flowersPerArrangement || getArrangementFlowerCount(arrangementLabel),
         totalFlowers: 0,
         preferredFlowerNames: [],
+        unitMin: parseCurrencyNumber(selection?.unitMin),
+        unitMax: parseCurrencyNumber(selection?.unitMax),
+        lineMin: 0,
+        lineMax: 0,
+        note: String(selection?.note || '').trim(),
+        hasEstimate: false,
       });
     }
 
-    const current = merged.get(arrangementLabel);
+    const current = merged.get(arrangementGroupKey);
     current.quantity += toPositiveInt(selection?.quantity, 0);
     current.totalFlowers += toPositiveInt(selection?.totalFlowers, 0);
+    current.lineMin += parseCurrencyNumber(selection?.lineMin);
+    current.lineMax += parseCurrencyNumber(selection?.lineMax);
+    if (!current.unitMin && parseCurrencyNumber(selection?.unitMin) > 0) {
+      current.unitMin = parseCurrencyNumber(selection?.unitMin);
+    }
+    if (!current.unitMax && parseCurrencyNumber(selection?.unitMax) > 0) {
+      current.unitMax = parseCurrencyNumber(selection?.unitMax);
+    }
+    if (!current.note && String(selection?.note || '').trim()) {
+      current.note = String(selection?.note || '').trim();
+    }
+    current.hasEstimate = current.hasEstimate || Boolean(
+      selection?.hasEstimate
+      || parseCurrencyNumber(selection?.lineMin) > 0
+      || parseCurrencyNumber(selection?.lineMax) > 0
+      || parseCurrencyNumber(selection?.unitMin) > 0
+      || parseCurrencyNumber(selection?.unitMax) > 0
+    );
     current.preferredFlowerNames = Array.from(
       new Set([
         ...(Array.isArray(current.preferredFlowerNames) ? current.preferredFlowerNames : []),
@@ -350,7 +485,55 @@ const mergeArrangementSelections = (selections = []) => {
     );
   });
 
-  return Array.from(merged.values());
+  return Array.from(merged.values()).map((selection) => {
+    const lineMin = parseCurrencyNumber(selection?.lineMin);
+    const lineMaxCandidate = parseCurrencyNumber(selection?.lineMax);
+    const lineMax = lineMaxCandidate < lineMin ? lineMin : lineMaxCandidate;
+    const unitMin = parseCurrencyNumber(selection?.unitMin) || (lineMin > 0 && selection.quantity > 0 ? lineMin / selection.quantity : 0);
+    const unitMaxBase = parseCurrencyNumber(selection?.unitMax) || (lineMax > 0 && selection.quantity > 0 ? lineMax / selection.quantity : 0);
+    const unitMax = unitMaxBase < unitMin ? unitMin : unitMaxBase;
+    const note = String(selection?.note || '').trim();
+    const hasEstimate = Boolean(selection?.hasEstimate || lineMin > 0 || lineMax > 0 || unitMin > 0 || unitMax > 0);
+
+    return {
+      ...selection,
+      unitMin,
+      unitMax,
+      lineMin,
+      lineMax,
+      note,
+      hasEstimate,
+      formattedUnitRange: hasEstimate ? formatTentativeRange(unitMin, unitMax, note) : 'For discussion',
+      formattedLineRange: hasEstimate ? formatTentativeRange(lineMin, lineMax) : 'For discussion',
+    };
+  });
+};
+
+const isUnitizedBookingItem = (item = {}) => Boolean(
+  String(item?.parent_arrangement_key || item?.parentArrangementKey || '').trim()
+  || String(item?.unit_label || item?.unitLabel || '').trim()
+  || toPositiveInt(item?.unit_index ?? item?.unitIndex, 0) > 0
+);
+
+const buildBookingUnitSelectionMetadata = (item = {}, itemIndex = 0, selectionIndex = 0) => {
+  const parentArrangementKey = String(
+    item?.parent_arrangement_key
+    || item?.parentArrangementKey
+    || item?.arrangementType
+    || item?.arrangementSummary
+    || item?.name
+    || `booking-${itemIndex + 1}`
+  ).trim();
+  const unitIndex = toPositiveInt(item?.unit_index ?? item?.unitIndex, 0);
+  const unitCount = toPositiveInt(item?.unit_count ?? item?.unitCount, 0);
+  const unitLabel = String(item?.unit_label || item?.unitLabel || (unitIndex > 0 ? `Unit ${unitIndex}` : '')).trim();
+
+  return {
+    unitIndex,
+    unitCount,
+    unitLabel,
+    arrangementGroupKey: [parentArrangementKey || `booking-${itemIndex + 1}`, unitIndex || itemIndex + 1, selectionIndex + 1].join('::'),
+  };
 };
 
 const buildFlowerPricingContext = (request) => {
@@ -365,9 +548,27 @@ const buildFlowerPricingContext = (request) => {
 
   const bookingItems = getBookingItemsFromData(requestData);
   const pricingSources = bookingItems.length ? bookingItems : [requestData];
-  const arrangementSelections = mergeArrangementSelections(
-    pricingSources.flatMap((item) => normalizeArrangementSelections(item))
-  );
+  const rawArrangementSelections = pricingSources.flatMap((item, itemIndex) => (
+    normalizeArrangementSelections(item).map((selection, selectionIndex) => {
+      if (!isUnitizedBookingItem(item)) {
+        return selection;
+      }
+
+      const unitMetadata = buildBookingUnitSelectionMetadata(item, itemIndex, selectionIndex);
+      return {
+        ...selection,
+        arrangementLabel: unitMetadata.unitLabel
+          ? `${selection.arrangementLabel} - ${unitMetadata.unitLabel}`
+          : selection.arrangementLabel,
+        arrangementGroupKey: unitMetadata.arrangementGroupKey,
+        baseArrangementLabel: selection.arrangementLabel,
+        unitIndex: unitMetadata.unitIndex,
+        unitCount: unitMetadata.unitCount,
+        unitLabel: unitMetadata.unitLabel,
+      };
+    })
+  ));
+  const arrangementSelections = mergeArrangementSelections(rawArrangementSelections);
 
   const fallbackArrangementType = Array.from(
     new Set(
@@ -385,7 +586,11 @@ const buildFlowerPricingContext = (request) => {
   ).join(' | ') || 'N/A';
 
   const arrangementType = arrangementSelections.length
-    ? arrangementSelections.map((selection) => `${selection.arrangementLabel} x${selection.quantity}`).join(', ')
+    ? arrangementSelections.map((selection) => (
+      selection.quantity > 1
+        ? `${selection.arrangementLabel} x${selection.quantity}`
+        : selection.arrangementLabel
+    )).join(', ')
     : fallbackArrangementType;
 
   const arrangementQuantity = arrangementSelections.length
@@ -474,6 +679,24 @@ const buildFlowerPricingContext = (request) => {
     });
   }
 
+  const estimatedArrangementSelections = arrangementSelections.filter((selection) => (
+    Boolean(
+      selection?.hasEstimate
+      || parseCurrencyNumber(selection?.lineMin) > 0
+      || parseCurrencyNumber(selection?.lineMax) > 0
+    )
+  ));
+  const hasAnyEstimate = estimatedArrangementSelections.length > 0;
+  const hasCompleteEstimate = hasAnyEstimate && estimatedArrangementSelections.length === arrangementSelections.length;
+  const subtotalMin = estimatedArrangementSelections.reduce(
+    (sum, selection) => sum + parseCurrencyNumber(selection?.lineMin),
+    0
+  );
+  const subtotalMax = estimatedArrangementSelections.reduce(
+    (sum, selection) => sum + parseCurrencyNumber(selection?.lineMax),
+    0
+  );
+
   return {
     arrangementType,
     arrangementQuantity,
@@ -482,6 +705,11 @@ const buildFlowerPricingContext = (request) => {
     flowerTypes: normalizedFlowerTypes,
     flowerQuantities,
     itemCount: bookingItems.reduce((sum, item) => sum + getRemainingRequestItemQuantity(item), 0) || bookingItems.length || 1,
+    subtotalMin,
+    subtotalMax,
+    hasAnyEstimate,
+    hasCompleteEstimate,
+    formattedSubtotalRange: hasCompleteEstimate ? formatTentativeRange(subtotalMin, subtotalMax) : 'For discussion',
   };
 };
 const formatCurrency = (value) => {
@@ -489,48 +717,307 @@ const formatCurrency = (value) => {
   return `PHP ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
-const createManualQuoteRow = (name = '', price = '', arrangementGroup = null) => ({
+const createQuoteChargeRow = ({
+  type = 'extra',
+  label = '',
+  amount = '',
+  reason = '',
+  arrangementGroup = '',
+} = {}) => ({
   id: `quote-row-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-  productName: String(name || ''),
-  price: String(price || ''),
-  arrangementGroup,
+  type: normalizeCustomOrderQuoteType(type, label),
+  label: String(label || ''),
+  amount: String(amount || ''),
+  reason: String(reason || ''),
+  arrangementGroup: String(arrangementGroup || '').trim(),
 });
 
-const buildManualQuoteRows = (bookingItems, storedQuoteBreakdown) => {
-  const lineItems = Array.isArray(storedQuoteBreakdown?.line_items) ? storedQuoteBreakdown.line_items : [];
-
-  if (lineItems.length) {
-    return lineItems.map((item) => createManualQuoteRow(
-      item?.product_name || item?.flowerName || item?.name || '',
-      item?.price != null ? String(item.price) : (item?.unitPrice != null ? String(item.unitPrice) : (item?.unit_price != null ? String(item.unit_price) : '')),
-      item?.arrangement_group || null
-    ));
+const getQuoteSeedGroups = (arrangementBreakdownItems = [], bookingItems = []) => {
+  if (Array.isArray(arrangementBreakdownItems) && arrangementBreakdownItems.length) {
+    return arrangementBreakdownItems.map((selection, index) => {
+      const arrangementLabel = String(selection?.arrangementLabel || '').trim();
+      const arrangementGroupKey = String(selection?.arrangementGroupKey || arrangementLabel || `arrangement-${index + 1}`).trim();
+      return {
+        key: arrangementGroupKey,
+        title: arrangementLabel || `Arrangement ${index + 1}`,
+        preferredFlowerNames: Array.isArray(selection?.preferredFlowerNames)
+          ? selection.preferredFlowerNames.filter(Boolean)
+          : [],
+        preferredFlowersText: Array.isArray(selection?.preferredFlowerNames) && selection.preferredFlowerNames.length
+          ? selection.preferredFlowerNames.filter(Boolean).join(', ')
+          : '',
+        quantity: toPositiveInt(selection?.quantity, 1),
+        flowersPerArrangement: toPositiveInt(selection?.flowersPerArrangement, 0),
+        unitMin: parseCurrencyNumber(selection?.unitMin),
+        unitMax: parseCurrencyNumber(selection?.unitMax),
+        lineMin: parseCurrencyNumber(selection?.lineMin),
+        lineMax: parseCurrencyNumber(selection?.lineMax),
+        formattedUnitRange: String(selection?.formattedUnitRange || '').trim(),
+        formattedLineRange: String(selection?.formattedLineRange || '').trim(),
+        hasEstimate: Boolean(selection?.hasEstimate),
+      };
+    });
   }
 
-  const items = Array.isArray(bookingItems) ? bookingItems : [];
-  const seededRows = items
-    .map((item, index) => {
-      const arrangementLabel = firstNonEmpty(
-        item?.arrangementSummary,
-        getBookingArrangementText(item),
-        item?.arrangementType,
-        item?.arrangement_type
-      );
-      const productName = firstNonEmpty(
-        item?.name,
-        arrangementLabel,
-        item?.occasion
-      ) || `Custom Order ${index + 1}`;
+  const normalizedBookingItems = Array.isArray(bookingItems) ? bookingItems : [];
+  if (normalizedBookingItems.length) {
+    return normalizedBookingItems.map((item, index) => {
+      const arrangementLabel = String(
+        item?.name
+        || item?.title
+        || item?.arrangementText
+        || item?.label
+        || item?.occasion
+        || ''
+      ).trim();
+      const unitMetadata = buildBookingUnitSelectionMetadata(item, index, 0);
 
-      return createManualQuoteRow(productName, '', arrangementLabel || productName);
-    })
-    .filter((row) => row.productName);
+      return {
+        key: unitMetadata.arrangementGroupKey,
+        title: arrangementLabel || `Custom Order ${index + 1}`,
+        preferredFlowerNames: normalizeFlowerNames(
+          item?.preferredFlowers
+          || item?.selectedFlowers
+          || item?.customerPreferredFlowers
+          || item?.flowers
+        ),
+        preferredFlowersText: normalizeFlowerNames(
+          item?.preferredFlowers
+          || item?.selectedFlowers
+          || item?.customerPreferredFlowers
+          || item?.flowers
+        ).join(', '),
+        quantity: 1,
+        flowersPerArrangement: 0,
+        unitMin: 0,
+        unitMax: 0,
+        lineMin: 0,
+        lineMax: 0,
+        formattedUnitRange: '',
+        formattedLineRange: '',
+        hasEstimate: false,
+      };
+    });
+  }
+
+  return [{
+    key: '',
+    title: 'General Charges',
+    preferredFlowerNames: [],
+    preferredFlowersText: '',
+    quantity: 1,
+    flowersPerArrangement: 0,
+    unitMin: 0,
+    unitMax: 0,
+    lineMin: 0,
+    lineMax: 0,
+    formattedUnitRange: '',
+    formattedLineRange: '',
+    hasEstimate: false,
+  }];
+};
+
+const buildQuoteArrangementBreakdownItems = ({
+  arrangementSelections = [],
+  customOrderItems = [],
+  flowerTypes = [],
+}) => (
+  (Array.isArray(arrangementSelections) ? arrangementSelections : []).map((selection) => {
+    const selectionPreferredFlowers = getArrangementSelectionPreferredFlowerNames(selection);
+    const matchedPreferredFlowers = Array.from(
+      new Set(
+        (Array.isArray(customOrderItems) ? customOrderItems : []).flatMap((item) => {
+          const arrangementText = String(item?.arrangementText || '').trim();
+          const arrangementLabel = String(selection?.arrangementLabel || '').trim();
+          const doesMatchArrangement = arrangementLabel && arrangementText
+            ? arrangementText.toLowerCase().includes(arrangementLabel.toLowerCase())
+            : false;
+
+          if (!doesMatchArrangement && (Array.isArray(customOrderItems) ? customOrderItems.length : 0) > 1) {
+            return [];
+          }
+
+          return normalizeFlowerNames(item?.preferredFlowers);
+        })
+      )
+    );
+
+    const fallbackFlowers = selectionPreferredFlowers.length
+      ? selectionPreferredFlowers
+      : (matchedPreferredFlowers.length ? matchedPreferredFlowers : flowerTypes);
+
+    return {
+      ...selection,
+      preferredFlowerNames: fallbackFlowers,
+      preferredFlowersText: fallbackFlowers.length ? fallbackFlowers.join(', ') : null,
+    };
+  })
+);
+
+const buildQuoteChargeRows = ({
+  bookingItems = [],
+  arrangementBreakdownItems = [],
+  storedQuoteBreakdown = null,
+}) => {
+  const storedLineItems = normalizeCustomOrderQuoteLineItems(storedQuoteBreakdown)
+    .filter((item) => item.type !== 'delivery');
+
+  if (storedLineItems.length) {
+    return storedLineItems.map((item) => createQuoteChargeRow({
+      type: item.type,
+      label: item.label,
+      amount: item.amount > 0 ? String(item.amount) : '',
+      reason: item.reason,
+      arrangementGroup: item.arrangementGroup,
+    }));
+  }
+
+  const seedGroups = getQuoteSeedGroups(arrangementBreakdownItems, bookingItems);
+  const seededRows = seedGroups.flatMap((group, index) => {
+    const arrangementGroup = group.key;
+    const arrangementLabel = group.title || `Arrangement ${index + 1}`;
+    const flowerRows = (Array.isArray(group.preferredFlowerNames) && group.preferredFlowerNames.length
+      ? group.preferredFlowerNames
+      : ['']).map((flowerName) => createQuoteChargeRow({
+        type: 'flower',
+        label: flowerName,
+        amount: '',
+        reason: '',
+        arrangementGroup,
+      }));
+
+    return [
+      createQuoteChargeRow({
+        type: 'arrangement',
+        label: arrangementLabel,
+        amount: '',
+        reason: '',
+        arrangementGroup,
+      }),
+      ...flowerRows,
+      createQuoteChargeRow({
+        type: 'labor',
+        label: 'Labor / Materials',
+        amount: '',
+        reason: '',
+        arrangementGroup,
+      }),
+    ];
+  });
 
   if (seededRows.length) {
     return seededRows;
   }
 
-  return [createManualQuoteRow('', '')];
+  return [createQuoteChargeRow({ type: 'flower' })];
+};
+
+const rowHasQuoteContent = (row = {}) => Boolean(
+  String(row?.label || '').trim()
+  || String(row?.amount || '').trim()
+  || String(row?.reason || '').trim()
+);
+
+const getQuoteChargeLabelPlaceholder = (type = 'extra') => {
+  switch (normalizeCustomOrderQuoteType(type)) {
+    case 'arrangement':
+      return 'Arrangement base price';
+    case 'flower':
+      return 'Flower name';
+    case 'labor':
+      return 'Labor charge';
+    case 'material':
+      return 'Material or supply';
+    default:
+      return 'Extra charge';
+  }
+};
+
+const getQuoteChargeReasonPlaceholder = (type = 'extra') => {
+  switch (normalizeCustomOrderQuoteType(type)) {
+    case 'arrangement':
+      return 'Base stand styling or arrangement design';
+    case 'flower':
+      return 'Currently seasonal, imported, premium bloom';
+    case 'labor':
+      return 'Assembly and finishing';
+    case 'material':
+      return 'Foam, stand, wrapping, or support materials';
+    default:
+      return 'Add a short reason for this charge';
+  }
+};
+
+const groupQuoteChargeRows = (rows = [], arrangementBreakdownItems = [], bookingItems = []) => {
+  const groups = [];
+  const groupMap = new Map();
+
+  const ensureGroup = (groupKey = '', title = '', metadata = {}) => {
+    const normalizedGroupKey = String(groupKey || '').trim();
+    const lookupKey = normalizedGroupKey || '__ungrouped__';
+    if (!groupMap.has(lookupKey)) {
+      const lineMin = parseCurrencyNumber(metadata?.lineMin);
+      const lineMaxCandidate = parseCurrencyNumber(metadata?.lineMax);
+      const lineMax = lineMaxCandidate < lineMin ? lineMin : lineMaxCandidate;
+      const group = {
+        key: lookupKey,
+        arrangementGroup: normalizedGroupKey,
+        title: String(title || normalizedGroupKey || 'General Charges').trim(),
+        items: [],
+        subtotal: 0,
+        preferredFlowersText: String(metadata?.preferredFlowersText || '').trim(),
+        formattedUnitRange: String(metadata?.formattedUnitRange || '').trim(),
+        formattedLineRange: String(metadata?.formattedLineRange || '').trim(),
+        lineMin,
+        lineMax,
+        hasEstimate: Boolean(metadata?.hasEstimate || lineMin > 0 || lineMax > 0),
+      };
+      groupMap.set(lookupKey, group);
+      groups.push(group);
+    } else if (metadata && Object.keys(metadata).length) {
+      const group = groupMap.get(lookupKey);
+      if (!group.preferredFlowersText && metadata?.preferredFlowersText) {
+        group.preferredFlowersText = String(metadata.preferredFlowersText).trim();
+      }
+      if (!group.formattedUnitRange && metadata?.formattedUnitRange) {
+        group.formattedUnitRange = String(metadata.formattedUnitRange).trim();
+      }
+      if (!group.formattedLineRange && metadata?.formattedLineRange) {
+        group.formattedLineRange = String(metadata.formattedLineRange).trim();
+      }
+      if (!group.lineMin && parseCurrencyNumber(metadata?.lineMin) > 0) {
+        group.lineMin = parseCurrencyNumber(metadata.lineMin);
+      }
+      if (!group.lineMax && parseCurrencyNumber(metadata?.lineMax) > 0) {
+        group.lineMax = parseCurrencyNumber(metadata.lineMax);
+      }
+      group.hasEstimate = group.hasEstimate || Boolean(
+        metadata?.hasEstimate
+        || parseCurrencyNumber(metadata?.lineMin) > 0
+        || parseCurrencyNumber(metadata?.lineMax) > 0
+      );
+    }
+
+    return groupMap.get(lookupKey);
+  };
+
+  getQuoteSeedGroups(arrangementBreakdownItems, bookingItems).forEach((group) => {
+    ensureGroup(group.key, group.title, group);
+  });
+
+  (Array.isArray(rows) ? rows : []).forEach((row, index) => {
+    const normalizedGroupKey = String(row?.arrangementGroup || '').trim();
+    const group = ensureGroup(normalizedGroupKey, normalizedGroupKey || `Charge Group ${index + 1}`);
+    group.items.push(row);
+    group.subtotal += parseCurrencyNumber(row?.amount);
+  });
+
+  const finalizedGroups = groups.length ? groups : [ensureGroup('', 'General Charges')];
+
+  return finalizedGroups.map((group) => ({
+    ...group,
+    ...getRangeWarningState(group.subtotal, group.lineMin, group.lineMax),
+  }));
 };
 
 const quoteStyles = StyleSheet.create({
@@ -885,6 +1372,237 @@ const quoteStyles = StyleSheet.create({
     color: '#be185d',
     textAlign: 'right',
   },
+  quoteSummaryCard: {
+    marginTop: 10,
+    backgroundColor: '#fffafc',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#fbcfe8',
+    padding: 16,
+  },
+  quoteSummaryTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  quoteSummaryMeta: {
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 19,
+    color: '#6b7280',
+  },
+  quoteSummaryTagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  quoteSummaryTag: {
+    backgroundColor: '#fdf2f8',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#f9a8d4',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  quoteSummaryTagText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#9d174d',
+  },
+  quoteRangeCard: {
+    marginTop: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#f9a8d4',
+    backgroundColor: '#fff7fb',
+    padding: 12,
+  },
+  quoteRangeLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+    color: '#9d174d',
+  },
+  quoteRangeValue: {
+    marginTop: 4,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#831843',
+  },
+  quoteRangeHint: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#9d174d',
+  },
+  quoteWarningBox: {
+    marginTop: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    backgroundColor: '#fff1f2',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  quoteWarningText: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '700',
+    color: '#be123c',
+  },
+  quoteGroupCard: {
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#fbcfe8',
+    padding: 16,
+    marginBottom: 14,
+  },
+  quoteGroupHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 12,
+  },
+  quoteGroupTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  quoteGroupMeta: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#6b7280',
+  },
+  quoteGroupSubtotal: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#be185d',
+  },
+  quoteChargeCard: {
+    backgroundColor: '#fffafc',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#fbcfe8',
+    padding: 12,
+    marginBottom: 12,
+  },
+  quoteChargeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 10,
+  },
+  quoteChargeTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  quoteChargeAmount: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#be185d',
+  },
+  quoteChargeTypeBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#fbcfe8',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#fce7f3',
+    marginBottom: 10,
+  },
+  quoteChargeTypeBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#9d174d',
+  },
+  quoteTextField: {
+    borderWidth: 1,
+    borderColor: '#fbcfe8',
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    fontSize: 14,
+    color: '#111827',
+    marginBottom: 10,
+  },
+  quoteReasonInput: {
+    borderWidth: 1,
+    borderColor: '#fbcfe8',
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    fontSize: 13,
+    color: '#111827',
+    minHeight: 72,
+    textAlignVertical: 'top',
+  },
+  quoteChargeFooter: {
+    marginTop: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  quoteChargeFooterHint: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#6b7280',
+  },
+  quoteRemoveChip: {
+    backgroundColor: '#fff1f2',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  quoteRemoveChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#be123c',
+  },
+  quoteAddChargeButton: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffedf5',
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    marginTop: 4,
+  },
+  quoteAddChargeText: {
+    marginLeft: 6,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#be185d',
+  },
+  quoteAddActionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 4,
+  },
+  quoteFooterSummaryCard: {
+    marginTop: 8,
+    marginHorizontal: 20,
+    marginBottom: 12,
+    padding: 16,
+    backgroundColor: '#fdf2f8',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#fbcfe8',
+  },
 });
 const normalizeRequestData = (request) => {
   const rawData = request?.data;
@@ -1164,6 +1882,343 @@ const CustomizedBouquetPreview = ({ item, style, fallbackResizeMode = 'cover' })
   );
 };
 
+const getGroupedDestinationsForRequest = (request) => (
+  groupDeliveryDestinations(normalizeRequestData(request)?.multi_delivery_destinations || [])
+);
+
+const formatRequestAmountBadge = (value) => {
+  const amount = parseCurrencyNumber(value);
+  if (amount <= 0) return 'Price pending';
+  return `PHP ${amount.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  })}`;
+};
+
+const getCompactRequestPreviewUri = (item) => {
+  if (!item) return null;
+
+  if (item.type === 'customized') {
+    const firstCustomizedItem = getCustomizedRequestItems(item)[0];
+    return toAbsoluteImageUrl(
+      firstCustomizedItem?.imageUri
+      || firstCustomizedItem?.image_url
+      || item?.image_url
+    );
+  }
+
+  if (item.type === 'booking') {
+    const firstBookingItem = getBookingRequestItems(item)[0];
+    return toAbsoluteImageUrl(
+      firstBookingItem?.imageUri
+      || firstBookingItem?.image_url
+      || item?.image_url
+    );
+  }
+
+  return toAbsoluteImageUrl(item?.image_url);
+};
+
+const getCompactRequestSummary = (item) => {
+  const groupedDestinations = item?.delivery_method === 'delivery'
+    ? getGroupedDestinationsForRequest(item)
+    : [];
+
+  if (item?.type === 'customized') {
+    const customizedItems = getCustomizedRequestItems(item);
+    const firstItem = customizedItems[0] || {};
+    const bouquetCount = customizedItems.reduce(
+      (sum, customizedItem) => sum + getRemainingRequestItemQuantity(customizedItem),
+      0
+    ) || customizedItems.length || 1;
+    const lines = [
+      firstItem?.bundleSizeText ? `Bundle: ${firstItem.bundleSizeText}` : null,
+      firstItem?.flowersText ? `Flowers: ${firstItem.flowersText}` : null,
+      firstItem?.destinationSummary
+        ? `Deliver to: ${firstItem.destinationSummary}`
+        : (groupedDestinations.length > 1 ? `Delivery stops: ${groupedDestinations.length}` : null),
+    ].filter(Boolean);
+
+    return {
+      title: `${bouquetCount} customizer bouquet${bouquetCount === 1 ? '' : 's'}`,
+      lines,
+      badge: bouquetCount > 1 ? `${bouquetCount} bouquets` : 'Customizer Studio',
+    };
+  }
+
+  if (item?.type === 'booking') {
+    const bookingItems = getBookingRequestItems(item);
+    const firstItem = bookingItems[0] || {};
+    const requestItemCount = bookingItems.reduce(
+      (sum, bookingItem) => sum + getRemainingRequestItemQuantity(bookingItem),
+      0
+    ) || bookingItems.length || 1;
+    const lines = [
+      firstItem?.arrangementText ? `Arrangement: ${firstItem.arrangementText}` : null,
+      firstItem?.preferredFlowers ? `Flowers: ${firstItem.preferredFlowers}` : null,
+      firstItem?.eventDateText
+        ? `Date: ${firstItem.eventDateText}${firstItem?.eventTimeText ? ` at ${firstItem.eventTimeText}` : ''}`
+        : null,
+      firstItem?.venueText ? `Venue: ${firstItem.venueText}` : null,
+      firstItem?.destinationSummary
+        ? `Delivery: ${firstItem.destinationSummary}`
+        : (groupedDestinations.length > 1 ? `Delivery stops: ${groupedDestinations.length}` : null),
+    ].filter(Boolean);
+
+    return {
+      title: `${requestItemCount} custom order item${requestItemCount === 1 ? '' : 's'}`,
+      lines,
+      badge: requestItemCount > 1 ? `${requestItemCount} items` : 'Custom Order',
+    };
+  }
+
+  const requestData = normalizeRequestData(item);
+  const occasionText = firstNonEmpty(requestData?.occasion, requestData?.otherOccasion);
+  const lines = [
+    occasionText ? `Occasion: ${occasionText}` : null,
+    requestData?.flowerType ? `Flowers: ${requestData.flowerType}` : null,
+    item?.delivery_method === 'delivery' && groupedDestinations.length > 1
+      ? `Delivery stops: ${groupedDestinations.length}`
+      : null,
+    requestData?.notes || item?.notes || null,
+  ].filter(Boolean);
+
+  return {
+    title: getStatusLabel(item?.type) || 'Request',
+    lines,
+    badge: item?.delivery_method === 'delivery' ? 'Delivery' : 'Pick-up',
+  };
+};
+
+const RequestSummaryCard = React.memo(({
+  item,
+  activeActionKey,
+  onMessageCustomer,
+  onPhoneCall,
+  onPrintReceipt,
+  onOpenDetails,
+  onProvidePrice,
+  onDecline,
+  onOpenStatus,
+  onAssignRider,
+  onAcceptPendingCustomized,
+}) => {
+  const isCustomizedRequest = item.type === 'customized';
+  const groupedDestinations = item.delivery_method === 'delivery'
+    ? getGroupedDestinationsForRequest(item)
+    : [];
+  const previewUri = getCompactRequestPreviewUri(item);
+  const summary = getCompactRequestSummary(item);
+  const customerContact = item.user_email || item.contact_number || item.user_phone || 'No contact on file';
+  const paymentBadgeText = item.payment_status
+    ? getPaymentStatusDisplay(item.payment_status, item.payment_method)
+    : null;
+  const isActionBusy = Boolean(activeActionKey);
+  const canChangeStatus = !['pending', 'completed', 'cancelled', 'declined'].includes(item.status);
+  const isAwaitingPayment = (item.payment_method?.toLowerCase() === 'gcash' || !item.payment_method)
+    && item.payment_status !== 'paid';
+
+  return (
+    <View style={styles.eoCard}>
+      <View style={styles.eoCardHeader}>
+        <View style={{ flex: 1, gap: 6 }}>
+          <Text style={styles.eoLabel}>Request #{item.request_number}</Text>
+          <Text style={styles.eoOrderId}>{getStatusLabel(item.type)}</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <View style={[styles.eoDeliveryTypeBadge, { backgroundColor: item.delivery_method === 'delivery' ? '#3B82F6' : '#10B981' }]}>
+              <Ionicons name={item.delivery_method === 'delivery' ? 'rocket-outline' : 'storefront-outline'} size={12} color="#fff" />
+              <Text style={styles.eoDeliveryTypeBadgeText}>
+                {item.delivery_method === 'delivery' ? 'Delivery' : 'Pick-up'}
+              </Text>
+            </View>
+            <View style={[styles.eoPaymentStatus, { backgroundColor: '#111827' }]}>
+              <Text style={styles.eoPaymentStatusText}>{formatRequestAmountBadge(item.final_price)}</Text>
+            </View>
+            {paymentBadgeText ? (
+              <View style={[styles.eoPaymentStatus, { backgroundColor: '#EC4899' }]}>
+                <Text style={styles.eoPaymentStatusText}>{paymentBadgeText}</Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+        <View style={{ alignItems: 'flex-end', gap: 8 }}>
+          <View style={styles.eoDateBadge}>
+            <Text style={styles.eoDateText}>{formatTimestamp(item.created_at)}</Text>
+          </View>
+          <View style={[styles.eoStatusBadge, { backgroundColor: getStatusColor(item.status) }]}>
+            <Ionicons name="time-outline" size={14} color="#fff" />
+            <Text style={styles.eoStatusText}>{getStatusLabel(item.status)}</Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.eoSection}>
+        <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}>
+          <View style={[styles.eoItemImage, { width: 64, height: 64, borderRadius: 12, backgroundColor: '#F3F4F6' }]}>
+            {previewUri ? (
+              <Image
+                source={{ uri: previewUri }}
+                style={{ width: '100%', height: '100%' }}
+                resizeMode="cover"
+              />
+            ) : (
+              <Ionicons
+                name={isCustomizedRequest ? 'flower-outline' : (item.type === 'booking' ? 'images-outline' : 'document-text-outline')}
+                size={24}
+                color="#6B7280"
+              />
+            )}
+          </View>
+          <View style={{ flex: 1, gap: 4 }}>
+            <Text style={styles.customizedRequestItemMeta}>{summary.badge}</Text>
+            <Text style={styles.eoItemName}>{summary.title}</Text>
+            {summary.lines.slice(0, 3).map((line, index) => (
+              <Text key={`${item.id}-summary-${index}`} style={styles.eoItemQuantity} numberOfLines={2}>
+                {line}
+              </Text>
+            ))}
+          </View>
+        </View>
+      </View>
+
+      <View style={[styles.eoSection, { paddingTop: 14, paddingBottom: 16 }]}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.eoCustomerName} numberOfLines={1}>{item.user_name || 'Unknown customer'}</Text>
+            <Text style={styles.eoItemQuantity} numberOfLines={1}>{customerContact}</Text>
+            {groupedDestinations.length > 1 ? (
+              <Text style={[styles.eoItemQuantity, { marginTop: 4 }]}>
+                Multi-stop delivery: {groupedDestinations.length} destinations
+              </Text>
+            ) : null}
+          </View>
+          <View style={styles.eoActionButtons}>
+            <TouchableOpacity
+              style={{ backgroundColor: '#6B7280', width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' }}
+              onPress={() => onPrintReceipt(item)}
+            >
+              <Ionicons name="print" size={18} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.eoIconBtnGreen} onPress={() => onPhoneCall(item.contact_number || item.user_phone)}>
+              <Ionicons name="call" size={18} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.eoIconBtnBlue}
+              onPress={() => onMessageCustomer(item.users, item.user_name, item.user_email)}
+            >
+              <Ionicons name="chatbubble" size={18} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.eoFooter}>
+        <TouchableOpacity style={[styles.eoMainBtn, { backgroundColor: '#8B5CF6' }]} onPress={() => onOpenDetails(item)}>
+          <Ionicons name="eye" size={18} color="#fff" />
+          <Text style={styles.eoMainBtnText}>View Details</Text>
+        </TouchableOpacity>
+
+        {item.status === 'pending' && item.type === 'customized' ? (
+          <View style={[styles.customizedRequestActionRow, { marginTop: 10 }]}>
+            <TouchableOpacity
+              style={[styles.eoMainBtn, styles.customizedRequestActionButton, { backgroundColor: isActionBusy ? '#9CA3AF' : '#10B981' }]}
+              disabled={isActionBusy}
+              onPress={() => onAcceptPendingCustomized(item)}
+            >
+              <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
+              <Text style={styles.eoMainBtnText}>Accept</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.eoMainBtn, styles.customizedRequestActionButton, { backgroundColor: isActionBusy ? '#9CA3AF' : '#EF4444' }]}
+              disabled={isActionBusy}
+              onPress={() => onDecline(item)}
+            >
+              <Ionicons name="close-circle-outline" size={18} color="#fff" />
+              <Text style={styles.eoMainBtnText}>Decline</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {item.type === 'booking' && !['completed', 'cancelled', 'declined', 'out_for_delivery', 'ready_for_pickup', 'ready_for_pick_up', 'claimed'].includes(item.status) ? (
+          <>
+            <TouchableOpacity
+              style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#F59E0B', marginTop: 10 }]}
+              disabled={isActionBusy}
+              onPress={() => onProvidePrice(item)}
+            >
+              <Text style={styles.eoMainBtnText}>{item.status === 'pending' ? 'Provide Price' : 'Edit Breakdown'}</Text>
+            </TouchableOpacity>
+            {item.status === 'pending' ? (
+              <TouchableOpacity
+                style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#EF4444', marginTop: 10 }]}
+                disabled={isActionBusy}
+                onPress={() => onDecline(item)}
+              >
+                <Ionicons name="close-circle-outline" size={18} color="#fff" />
+                <Text style={styles.eoMainBtnText}>Decline</Text>
+              </TouchableOpacity>
+            ) : null}
+          </>
+        ) : null}
+
+        {item.status === 'pending' && item.type === 'special_order' ? (
+          <>
+            <TouchableOpacity
+              style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#F59E0B', marginTop: 10 }]}
+              disabled={isActionBusy}
+              onPress={() => onProvidePrice(item)}
+            >
+              <Text style={styles.eoMainBtnText}>Provide Price</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#EF4444', marginTop: 10 }]}
+              disabled={isActionBusy}
+              onPress={() => onDecline(item)}
+            >
+              <Ionicons name="close-circle-outline" size={18} color="#fff" />
+              <Text style={styles.eoMainBtnText}>Decline</Text>
+            </TouchableOpacity>
+          </>
+        ) : null}
+
+        {canChangeStatus ? (
+          <TouchableOpacity
+            style={[
+              styles.eoMainBtn,
+              {
+                marginTop: 10,
+                backgroundColor: isActionBusy || isAwaitingPayment ? '#9CA3AF' : '#3B82F6',
+              },
+            ]}
+            disabled={isActionBusy || isAwaitingPayment}
+            onPress={() => onOpenStatus(item)}
+          >
+            <Ionicons name="git-network-outline" size={18} color="#fff" />
+            <Text style={styles.eoMainBtnText}>Change Status</Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {item.delivery_method === 'delivery' && item.status === 'processing' ? (
+          <TouchableOpacity
+            style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#10B981', marginTop: 10 }]}
+            disabled={isActionBusy}
+            onPress={() => onAssignRider(item)}
+          >
+            <Ionicons name="person-add-outline" size={18} color="#fff" />
+            <Text style={styles.eoMainBtnText}>{groupedDestinations.length > 0 ? 'Assign Stop Riders' : 'Assign Rider'}</Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {isAwaitingPayment && canChangeStatus ? (
+          <Text style={styles.eoActionHint}>
+            Wait for payment confirmation before changing the request status.
+          </Text>
+        ) : null}
+      </View>
+    </View>
+  );
+});
+
 const getCustomizedItemTotalPrice = (item = {}) => {
   const priceCandidates = [
     item?.price,
@@ -1227,6 +2282,11 @@ const getBookingSpecialInstructionsText = (item = {}, requestData = {}, request 
 );
 
 const getBookingArrangementText = (item = {}) => {
+  const unitLabel = String(item?.unit_label || item?.unitLabel || '').trim();
+  if (unitLabel && String(item?.name || '').trim()) {
+    return String(item.name).trim();
+  }
+
   const arrangementSelections = Array.isArray(item?.arrangementSelections) ? item.arrangementSelections : [];
 
   if (arrangementSelections.length) {
@@ -1234,7 +2294,8 @@ const getBookingArrangementText = (item = {}) => {
       .map((selection) => {
         const label = selection?.arrangement_label || selection?.arrangementLabel || selection?.arrangement_type || selection?.arrangementType;
         const quantity = toPositiveInt(selection?.quantity || selection?.arrangement_quantity, 1);
-        return label ? `${label} x${quantity}` : null;
+        if (!label) return null;
+        return quantity > 1 ? `${label} x${quantity}` : label;
       })
       .filter(Boolean)
       .join(', ');
@@ -1337,7 +2398,9 @@ const getBookingRequestItems = (request) => {
       ...item,
       key: String(item?.id || `${request?.id || 'booking'}-${index}`),
       itemIndex: index,
-      label: `Custom Order ${index + 1}`,
+      label: String(item?.unit_label || item?.unitLabel || '').trim()
+        ? (firstNonEmpty(item?.name, item?.title) || `Custom Order ${index + 1}`)
+        : `Custom Order ${index + 1}`,
       title: firstNonEmpty(item?.name, getBookingArrangementText(item), item?.occasion) || `Custom Order ${index + 1}`,
       imageUri: toAbsoluteImageUrl(item?.image_url || item?.image || request?.image_url),
       arrangementText: getBookingArrangementText(item),
@@ -1511,29 +2574,37 @@ const resolveAcceptedRequestStatus = (request) => {
 const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntityTarget, clearFocusedEntityTarget }) => {
   const { height: screenHeight } = useWindowDimensions();
 
-  const handlePhoneCall = (phoneNumber) => {
+  const handlePhoneCall = React.useCallback((phoneNumber) => {
     if (phoneNumber && phoneNumber !== 'N/A' && phoneNumber.trim() !== '') {
       Linking.openURL(`tel:${phoneNumber}`);
     } else {
       Alert.alert('No Phone Number', 'This customer does not have a valid phone number on file.');
     }
-  };
+  }, []);
 
-  const handleMessageCustomer = (user, customerName, customerEmail) => {
+  const handleMessageCustomer = React.useCallback((user, customerName, customerEmail) => {
     if (!user || !user.id) {
       Alert.alert('Cannot message user', 'User information is incomplete.');
       return;
     }
     handleSelectCustomerForMessage({ id: user.id, name: customerName, email: customerEmail });
-  };
+  }, [handleSelectCustomerForMessage]);
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [listErrorMessage, setListErrorMessage] = useState('');
+  const [hasMoreRequests, setHasMoreRequests] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [statusFilter, setStatusFilter] = useState('All');
   const [activeActionKey, setActiveActionKey] = useState(null);
   const actionLockRef = useRef(null);
   const requestsLoadInProgressRef = useRef(false);
+  const loadRequestsRef = useRef(null);
+  const pendingRefreshTimeoutRef = useRef(null);
+  const queuedRequestsRefreshRef = useRef(false);
+  const initialRequestsLoadRef = useRef(false);
   const [selectedRequest, setSelectedRequest] = useState(null);
+  const [selectedRequestLoading, setSelectedRequestLoading] = useState(false);
   const [selectedCustomizedItem, setSelectedCustomizedItem] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [customizedItemModalVisible, setCustomizedItemModalVisible] = useState(false);
@@ -1560,12 +2631,19 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   const [isEditPaymentMode, setIsEditPaymentMode] = useState(false);
 
   const [riders, setRiders] = useState([]);
+  const ridersLoadInProgressRef = useRef(false);
   const [assignRiderModalVisible, setAssignRiderModalVisible] = useState(false);
   const [selectedRider, setSelectedRider] = useState(null);
   const [requestToAssignRider, setRequestToAssignRider] = useState(null);
   const [riderSearchQuery, setRiderSearchQuery] = useState('');
   const [selectedStopGroupKey, setSelectedStopGroupKey] = useState(null);
   const [stopRiderAssignments, setStopRiderAssignments] = useState({});
+  const [deliveryStopModalVisible, setDeliveryStopModalVisible] = useState(false);
+  const [requestToCompleteStops, setRequestToCompleteStops] = useState(null);
+  const [selectedDeliveryStopKey, setSelectedDeliveryStopKey] = useState(null);
+  const [selectedDeliveryProof, setSelectedDeliveryProof] = useState(null);
+  const [deliveryProofNote, setDeliveryProofNote] = useState('');
+  const [isCompletingDeliveryStop, setIsCompletingDeliveryStop] = useState(false);
 
   const filteredAndSortedRiders = React.useMemo(() => {
     let result = [...riders];
@@ -1600,20 +2678,73 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     }
   }, []);
 
-  const loadRiders = async () => {
+  const loadRiders = React.useCallback(async ({ force = false } = {}) => {
+    if (ridersLoadInProgressRef.current || (riders.length && !force)) {
+      return riders;
+    }
+
+    ridersLoadInProgressRef.current = true;
+
+    const buildRidersQuery = (options = {}) => supabase
+      .from('users')
+      .select([
+        'id',
+        'name',
+        ...(options.includeEmail !== false ? ['email'] : []),
+        ...(options.includePhone !== false ? ['phone'] : []),
+      ].join(', '))
+      .eq('role', 'employee')
+      .order('name', { ascending: true });
+
+    let queryOptions = {
+      includeEmail: true,
+      includePhone: true,
+    };
+
     try {
-      const { data, error } = await supabase.from('users').select('*').eq('role', 'employee');
+      let { data, error } = await buildRidersQuery(queryOptions);
+
+      let shouldRetry = true;
+      while (error && shouldRetry) {
+        shouldRetry = false;
+
+        if (queryOptions.includeEmail !== false && /email/i.test(String(error?.message || '')) && /users/i.test(String(error?.message || ''))) {
+          queryOptions = { ...queryOptions, includeEmail: false };
+          ({ data, error } = await buildRidersQuery(queryOptions));
+          shouldRetry = Boolean(error);
+          continue;
+        }
+
+        if (queryOptions.includePhone !== false && /phone/i.test(String(error?.message || '')) && /users/i.test(String(error?.message || ''))) {
+          queryOptions = { ...queryOptions, includePhone: false };
+          ({ data, error } = await buildRidersQuery(queryOptions));
+          shouldRetry = Boolean(error);
+        }
+      }
+
       if (error) throw error;
-      setRiders(data || []);
+
+      const nextRiders = Array.isArray(data) ? data : [];
+      setRiders(nextRiders);
+      return nextRiders;
     } catch (error) {
       console.error('Error loading riders:', error);
+      Toast.show({ type: 'error', text1: 'Failed to load riders' });
+      return [];
+    } finally {
+      ridersLoadInProgressRef.current = false;
     }
-  };
+  }, [riders]);
 
   const getGroupedDestinations = React.useCallback(
-    (request) => groupDeliveryDestinations(request?.data?.multi_delivery_destinations || []),
+    (request) => getGroupedDestinationsForRequest(request),
     []
   );
+
+  const getNormalizedStopDestinations = React.useCallback((request) => {
+    const requestData = normalizeRequestData(request);
+    return normalizeDeliveryDestinations(requestData?.multi_delivery_destinations || []);
+  }, []);
 
   const getInitialStopRiderAssignments = React.useCallback((request) => {
     const groupedDestinations = getGroupedDestinations(request);
@@ -1683,6 +2814,18 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     () => requestToAssignRider ? getGroupedDestinations(requestToAssignRider) : [],
     [requestToAssignRider, getGroupedDestinations]
   );
+  const deliveryStopModalStops = React.useMemo(
+    () => (
+      requestToCompleteStops
+        ? getNormalizedStopDestinations(requestToCompleteStops).filter((stop) => stop.confirmation_owner)
+        : []
+    ),
+    [getNormalizedStopDestinations, requestToCompleteStops]
+  );
+  const selectedDeliveryStop = React.useMemo(
+    () => deliveryStopModalStops.find((stop) => stop.unit_key === selectedDeliveryStopKey) || null,
+    [deliveryStopModalStops, selectedDeliveryStopKey]
+  );
 
   const selectedStopGroup = React.useMemo(
     () => assignableStopGroups.find((group) => group.groupKey === selectedStopGroupKey) || null,
@@ -1693,6 +2836,8 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   const assignRiderModalMaxHeight = Math.max(420, Math.min(screenHeight - 36, 760));
   const assignRiderStopListMaxHeight = Math.max(120, Math.min(screenHeight * 0.22, 220));
   const assignRiderListMaxHeight = Math.max(180, Math.min(screenHeight * 0.34, 320));
+  const deliveryStopModalMaxHeight = Math.max(460, Math.min(screenHeight - 36, 780));
+  const deliveryStopListMaxHeight = Math.max(180, Math.min(screenHeight * 0.32, 280));
 
   const filteredRequests = React.useMemo(() => {
     let result = riderScopedRequests;
@@ -1741,33 +2886,55 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     { id: 'completed', label: 'Completed', description: 'Request has been picked up' }
   ];
 
+  const queueRequestsRefresh = React.useCallback(() => {
+    if (pendingRefreshTimeoutRef.current) {
+      return;
+    }
+
+    pendingRefreshTimeoutRef.current = setTimeout(() => {
+      pendingRefreshTimeoutRef.current = null;
+      if (requestsLoadInProgressRef.current) {
+        queuedRequestsRefreshRef.current = true;
+      } else if (typeof loadRequestsRef.current === 'function') {
+        loadRequestsRef.current({ showLoader: false });
+      }
+    }, 800);
+  }, []);
+
   useFocusEffect(
     React.useCallback(() => {
-      loadRequests();
-      loadRiders();
+      if (typeof loadRequestsRef.current === 'function') {
+        loadRequestsRef.current();
+      }
 
       const channel = supabase
         .channel('public:requests')
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'requests' },
-          () => {
-            loadRequests({ showLoader: false });
-          }
+          queueRequestsRefresh
         )
         .subscribe();
 
       return () => {
         supabase.removeChannel(channel);
+        if (pendingRefreshTimeoutRef.current) {
+          clearTimeout(pendingRefreshTimeoutRef.current);
+          pendingRefreshTimeoutRef.current = null;
+        }
       };
-    }, [])
+    }, [queueRequestsRefresh])
   );
 
-  const openReceiptModal = (url) => {
+  const openReceiptModal = React.useCallback((url) => {
     const finalUrl = url.startsWith('http') ? url : `${BASE_URL}${url}`;
     setSelectedReceiptUrl(finalUrl);
     setReceiptModalVisible(true);
-  };
+  }, []);
+
+  const handlePrintReceipt = React.useCallback((requestItem) => {
+    generateAndShareReceipt(requestItem, true);
+  }, []);
 
 
   const renderPickupTimeSection = (request) => {
@@ -2023,38 +3190,103 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     );
   };
 
-  const loadRequests = async ({ showLoader = true } = {}) => {
+  const REQUESTS_PAGE_SIZE = 20;
+
+  const flushQueuedRequestsRefresh = React.useCallback(() => {
+    if (!queuedRequestsRefreshRef.current || typeof loadRequestsRef.current !== 'function') {
+      return;
+    }
+
+    queuedRequestsRefreshRef.current = false;
+    loadRequestsRef.current({ showLoader: false });
+  }, []);
+
+  const loadRequests = React.useCallback(async ({ showLoader = true } = {}) => {
     if (requestsLoadInProgressRef.current) {
+      queuedRequestsRefreshRef.current = true;
       return;
     }
 
     requestsLoadInProgressRef.current = true;
 
-    if (showLoader) {
+    if (showLoader && requests.length === 0) {
       setLoading(true);
     }
 
     try {
-      const response = await adminAPI.getAllRequests();
-      setRequests(response.data.requests || []);
+      const response = await adminAPI.getAllRequests({
+        limit: REQUESTS_PAGE_SIZE,
+        offset: 0,
+        includeUsers: true,
+        includeRefunds: false,
+      });
+      const nextRequests = response.data.requests || [];
+      setRequests(nextRequests);
+      setHasMoreRequests(nextRequests.length === REQUESTS_PAGE_SIZE);
+      setListErrorMessage('');
     } catch (error) {
       console.error('Error loading requests:', error);
-      setRequests([]);
-      Alert.alert('Error', 'Failed to load requests');
+      setListErrorMessage(error?.message || 'Failed to refresh requests. Showing the last loaded list.');
+      if (showLoader && requests.length === 0) {
+        Toast.show({ type: 'error', text1: 'Failed to load requests' });
+      }
     } finally {
       requestsLoadInProgressRef.current = false;
-      if (showLoader) {
+      if (showLoader && requests.length === 0) {
         setLoading(false);
       }
+      flushQueuedRequestsRefresh();
     }
-  };
+  }, [flushQueuedRequestsRefresh, requests.length]);
+
+  const loadMoreRequests = React.useCallback(async () => {
+    if (requestsLoadInProgressRef.current || isLoadingMore || !hasMoreRequests) {
+      return;
+    }
+
+    requestsLoadInProgressRef.current = true;
+    setIsLoadingMore(true);
+
+    try {
+      const response = await adminAPI.getAllRequests({
+        limit: REQUESTS_PAGE_SIZE,
+        offset: requests.length,
+        includeUsers: true,
+        includeRefunds: false,
+      });
+      const nextRequests = response.data.requests || [];
+      if (nextRequests.length) {
+        setRequests((previous) => [...previous, ...nextRequests]);
+      }
+      setHasMoreRequests(nextRequests.length === REQUESTS_PAGE_SIZE);
+      setListErrorMessage('');
+    } catch (error) {
+      console.error('Error loading more requests:', error);
+      setListErrorMessage(error?.message || 'Failed to load more requests.');
+    } finally {
+      requestsLoadInProgressRef.current = false;
+      setIsLoadingMore(false);
+      flushQueuedRequestsRefresh();
+    }
+  }, [flushQueuedRequestsRefresh, hasMoreRequests, isLoadingMore, requests.length]);
+
+  React.useEffect(() => {
+    loadRequestsRef.current = loadRequests;
+  }, [loadRequests]);
+
+  React.useEffect(() => {
+    if (!initialRequestsLoadRef.current && typeof loadRequestsRef.current === 'function') {
+      initialRequestsLoadRef.current = true;
+      loadRequestsRef.current();
+    }
+  }, []);
 
 
-  const onRefresh = async () => {
+  const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
     await loadRequests({ showLoader: false });
     setRefreshing(false);
-  };
+  }, [loadRequests]);
 
   const getNextRequestStatus = (currentStatus, deliveryMethod, type) => {
     const status = currentStatus;
@@ -2075,12 +3307,13 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     }
   };
 
-  const closeDetailsModal = () => {
+  const closeDetailsModal = React.useCallback(() => {
     setModalVisible(false);
     setSelectedRequest(null);
-  };
+    setSelectedRequestLoading(false);
+  }, []);
 
-  const openRequestDeclineModal = (request, action = 'decline') => {
+  const openRequestDeclineModal = React.useCallback((request, action = 'decline') => {
     if (actionLockRef.current || declineModalVisible) {
       return;
     }
@@ -2089,7 +3322,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     setDeclineAction(action);
     setDeclineFeedback('');
     setDeclineModalVisible(true);
-  };
+  }, [declineModalVisible]);
 
   const closeRequestDeclineModal = () => {
     setDeclineModalVisible(false);
@@ -2098,9 +3331,9 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     setDeclineFeedback('');
   };
 
-  const handleDeclineRequest = (request) => {
+  const handleDeclineRequest = React.useCallback((request) => {
     openRequestDeclineModal(request, 'decline');
-  };
+  }, [openRequestDeclineModal]);
 
   const submitDeclineRequest = async () => {
     if (!requestToDecline) return;
@@ -2156,8 +3389,124 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     setSelectedRequestStatus(null);
   };
 
-  const openRequestStatusModal = (request) => {
-    if (actionLockRef.current || requestStatusModalVisible) {
+  const closeDeliveryStopModal = React.useCallback(() => {
+    setDeliveryStopModalVisible(false);
+    setRequestToCompleteStops(null);
+    setSelectedDeliveryStopKey(null);
+    setSelectedDeliveryProof(null);
+    setDeliveryProofNote('');
+    setIsCompletingDeliveryStop(false);
+  }, []);
+
+  const pickDeliveryProofImage = React.useCallback(async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.8,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets?.[0]) {
+      setSelectedDeliveryProof(result.assets[0]);
+    }
+  }, []);
+
+  const openDeliveryStopModal = React.useCallback((request) => {
+    const stops = getNormalizedStopDestinations(request).filter((stop) => stop.confirmation_owner);
+    const firstActionableStop = stops.find((stop) => (
+      stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.RIDER
+      && stop.confirmation_status !== DELIVERY_CONFIRMATION_STATUS.CONFIRMED
+    ));
+
+    setRequestToCompleteStops(request);
+    setSelectedDeliveryStopKey(firstActionableStop?.unit_key || stops[0]?.unit_key || null);
+    setSelectedDeliveryProof(null);
+    setDeliveryProofNote('');
+    setDeliveryStopModalVisible(true);
+  }, [getNormalizedStopDestinations]);
+
+  const handleConfirmDeliveryStop = React.useCallback(async () => {
+    if (!requestToCompleteStops || !selectedDeliveryStopKey || isCompletingDeliveryStop) {
+      return;
+    }
+
+    const stops = getNormalizedStopDestinations(requestToCompleteStops);
+    const selectedStop = stops.find((stop) => stop.unit_key === selectedDeliveryStopKey);
+
+    if (!selectedStop) {
+      Alert.alert('Stop Not Found', 'Please choose a valid delivery stop.');
+      return;
+    }
+
+    if (selectedStop.confirmation_owner !== DELIVERY_CONFIRMATION_OWNER.RIDER) {
+      Alert.alert('Customer Confirmation Needed', 'This stop must be confirmed by the ordering customer.');
+      return;
+    }
+
+    if (selectedStop.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED) {
+      Alert.alert('Already Confirmed', 'This delivery stop already has a proof record.');
+      return;
+    }
+
+    if (!selectedDeliveryProof?.base64) {
+      Alert.alert('Proof Required', 'Please upload a delivery proof photo before completing this stop.');
+      return;
+    }
+
+    setIsCompletingDeliveryStop(true);
+
+    try {
+      const actorType = currentUser?.role === 'employee' ? 'rider' : 'staff';
+      const response = await adminAPI.completeRequestDeliveryStop(requestToCompleteStops.id, selectedDeliveryStopKey, {
+        actorId: currentUser?.id || null,
+        actorType,
+        proofFile: selectedDeliveryProof,
+        proofNote: deliveryProofNote,
+      });
+      const updatedRequest = response?.data?.request || null;
+
+      Toast.show({
+        type: 'success',
+        text1: updatedRequest?.status === 'completed' ? 'Request Completed' : 'Delivery Stop Completed',
+        text2: updatedRequest?.status === 'completed'
+          ? 'All delivery stops are now confirmed.'
+          : `${getDeliveryStopDisplayLabel(selectedStop)} now includes proof of delivery.`,
+      });
+
+      closeDetailsModal();
+      closeDeliveryStopModal();
+      await loadRequests({ showLoader: false });
+    } catch (error) {
+      const errorMessage = error?.message || 'Failed to complete this delivery stop.';
+      Toast.show({ type: 'error', text1: 'Completion Failed', text2: errorMessage });
+      Alert.alert('Completion Failed', errorMessage);
+    } finally {
+      setIsCompletingDeliveryStop(false);
+    }
+  }, [
+    closeDeliveryStopModal,
+    closeDetailsModal,
+    currentUser?.id,
+    currentUser?.role,
+    deliveryProofNote,
+    getNormalizedStopDestinations,
+    isCompletingDeliveryStop,
+    requestToCompleteStops,
+    selectedDeliveryProof,
+    selectedDeliveryStopKey,
+  ]);
+
+  const openRequestStatusModal = React.useCallback((request) => {
+    if (actionLockRef.current || requestStatusModalVisible || deliveryStopModalVisible) {
+      return;
+    }
+
+    if (
+      request?.delivery_method === 'delivery'
+      && request?.status === 'out_for_delivery'
+      && hasStopConfirmationFlow(normalizeRequestData(request)?.multi_delivery_destinations || [])
+    ) {
+      openDeliveryStopModal(request);
       return;
     }
 
@@ -2169,9 +3518,9 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
       setSelectedRequestStatus(request.status);
     }
     setRequestStatusModalVisible(true);
-  };
+  }, [deliveryStopModalVisible, openDeliveryStopModal, requestStatusModalVisible]);
 
-  const handleAcceptPendingRequest = async (request) => {
+  const handleAcceptPendingRequest = React.useCallback(async (request) => {
     if (!request) return;
 
     const nextStatus = resolveAcceptedRequestStatus(request);
@@ -2202,7 +3551,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
         Toast.show({ type: 'error', text1: 'Failed to accept request' });
       }
     });
-  };
+  }, [closeDetailsModal, loadRequests, runRequestAction]);
 
   const confirmRequestStatusChange = async () => {
     if (!requestToUpdate || !selectedRequestStatus || actionLockRef.current) return;
@@ -2290,28 +3639,6 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
 
   const isCustomOrderQuote = requestToQuote?.type === 'booking';
   const isEditingCustomOrderQuote = isCustomOrderQuote && requestToQuote?.status && requestToQuote.status !== 'pending';
-
-  const quoteBreakdownRows = React.useMemo(() => {
-    if (!quoteManualRows.length) return [];
-
-    return quoteManualRows.map((row) => {
-      const productName = String(row.productName || '').trim();
-      const price = parseCurrencyNumber(row.price);
-      return {
-        productName: productName || 'Untitled product',
-        price,
-        hasName: Boolean(productName),
-      };
-    });
-  }, [quoteManualRows]);
-
-  const quoteFlowerSubtotal = React.useMemo(
-    () => quoteManualRows.reduce((sum, row) => sum + parseCurrencyNumber(row.price), 0),
-    [quoteManualRows]
-  );
-
-  const quoteShippingValue = parseCurrencyNumber(quoteShippingFee);
-  const quoteTotalToPay = quoteFlowerSubtotal + quoteShippingValue;
   const quoteArrangementSelections = quoteFlowerContext?.arrangementSelections || [];
   const quoteFlowerTypes = quoteFlowerContext?.flowerTypes || [];
   const quoteCustomOrderItems = React.useMemo(
@@ -2319,37 +3646,104 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     [requestToQuote]
   );
   const quoteArrangementBreakdownItems = React.useMemo(
-    () => quoteArrangementSelections.map((selection) => {
-      const selectionPreferredFlowers = getArrangementSelectionPreferredFlowerNames(selection);
-      const matchedPreferredFlowers = Array.from(
-        new Set(
-          quoteCustomOrderItems.flatMap((item) => {
-            const arrangementText = String(item?.arrangementText || '').trim();
-            const arrangementLabel = String(selection?.arrangementLabel || '').trim();
-            const doesMatchArrangement = arrangementLabel && arrangementText
-              ? arrangementText.toLowerCase().includes(arrangementLabel.toLowerCase())
-              : false;
-
-            if (!doesMatchArrangement && quoteCustomOrderItems.length > 1) {
-              return [];
-            }
-
-            return normalizeFlowerNames(item?.preferredFlowers);
-          })
-        )
-      );
-
-      const fallbackFlowers = selectionPreferredFlowers.length
-        ? selectionPreferredFlowers
-        : (matchedPreferredFlowers.length ? matchedPreferredFlowers : quoteFlowerTypes);
-
-      return {
-        ...selection,
-        preferredFlowerNames: fallbackFlowers,
-        preferredFlowersText: fallbackFlowers.length ? fallbackFlowers.join(', ') : null,
-      };
+    () => buildQuoteArrangementBreakdownItems({
+      arrangementSelections: quoteArrangementSelections,
+      customOrderItems: quoteCustomOrderItems,
+      flowerTypes: quoteFlowerTypes,
     }),
     [quoteArrangementSelections, quoteCustomOrderItems, quoteFlowerTypes]
+  );
+
+  const quoteBreakdownRows = React.useMemo(() => {
+    if (!quoteManualRows.length) return [];
+
+    return quoteManualRows
+      .filter(rowHasQuoteContent)
+      .map((row, index) => {
+        const label = String(row.label || '').trim();
+        const amount = parseCurrencyNumber(row.amount);
+
+        return {
+          key: row.id || `quote-breakdown-${index}`,
+          type: normalizeCustomOrderQuoteType(row.type, label),
+          label: label || 'Untitled charge',
+          amount,
+          reason: String(row.reason || '').trim(),
+          arrangementGroup: String(row.arrangementGroup || '').trim(),
+        };
+      });
+  }, [quoteManualRows]);
+
+  const quoteFlowerSubtotal = React.useMemo(
+    () => quoteBreakdownRows.reduce((sum, row) => sum + row.amount, 0),
+    [quoteBreakdownRows]
+  );
+
+  const quoteShippingValue = parseCurrencyNumber(quoteShippingFee);
+  const quoteTotalToPay = quoteFlowerSubtotal + quoteShippingValue;
+  const quoteSubtotalMin = parseCurrencyNumber(quoteFlowerContext?.subtotalMin);
+  const quoteSubtotalMax = parseCurrencyNumber(quoteFlowerContext?.subtotalMax);
+  const quoteSubtotalRangeText = String(quoteFlowerContext?.formattedSubtotalRange || '').trim();
+  const quoteHasSubtotalEstimate = Boolean(
+    quoteFlowerContext?.hasAnyEstimate
+    || quoteSubtotalMin > 0
+    || quoteSubtotalMax > 0
+  );
+  const quoteSubtotalRangeWarning = React.useMemo(
+    () => getRangeWarningState(quoteFlowerSubtotal, quoteSubtotalMin, quoteSubtotalMax),
+    [quoteFlowerSubtotal, quoteSubtotalMin, quoteSubtotalMax]
+  );
+  const quoteChargeGroups = React.useMemo(
+    () => groupQuoteChargeRows(quoteManualRows, quoteArrangementBreakdownItems, quoteCustomOrderItems),
+    [quoteArrangementBreakdownItems, quoteCustomOrderItems, quoteManualRows]
+  );
+  const renderCustomOrderLiveQuoteSummary = (cardStyle = quoteStyles.quoteTotalCard) => (
+    <View style={cardStyle}>
+      <Text style={quoteStyles.quoteSectionLabel}>Live Quote Summary</Text>
+
+      {quoteHasSubtotalEstimate && quoteSubtotalRangeText ? (
+        <View style={quoteStyles.quoteRangeCard}>
+          <Text style={quoteStyles.quoteRangeLabel}>Catalogue Subtotal Guide</Text>
+          <Text style={quoteStyles.quoteRangeValue}>{quoteSubtotalRangeText}</Text>
+          <Text style={quoteStyles.quoteRangeHint}>This compares arrangement, flower, labor, material, and extra charges only. Delivery fee stays separate.</Text>
+        </View>
+      ) : null}
+
+      {quoteSubtotalRangeWarning.rangeWarningText ? (
+        <View style={quoteStyles.quoteWarningBox}>
+          <Text style={quoteStyles.quoteWarningText}>{quoteSubtotalRangeWarning.rangeWarningText}</Text>
+        </View>
+      ) : null}
+
+      {quoteBreakdownRows.map((row) => (
+        <View key={row.key} style={quoteStyles.quoteTotalRow}>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Text style={quoteStyles.quoteLiveItemName}>{row.label}</Text>
+            <Text style={quoteStyles.quoteTotalMeta}>
+              {[getCustomOrderQuoteTypeLabel(row.type), row.arrangementGroup || null, row.reason || null]
+                .filter(Boolean)
+                .join(' | ')}
+            </Text>
+          </View>
+          <Text style={quoteStyles.quoteLiveItemPrice}>{formatCurrency(row.amount)}</Text>
+        </View>
+      ))}
+
+      <View style={[quoteStyles.quoteTotalRow, quoteStyles.quoteTotalDivider]}>
+        <Text style={quoteStyles.quoteTotalLabel}>Charges Subtotal</Text>
+        <Text style={quoteStyles.quoteTotalValue}>{formatCurrency(quoteFlowerSubtotal)}</Text>
+      </View>
+
+      <View style={quoteStyles.quoteTotalRow}>
+        <Text style={quoteStyles.quoteTotalLabel}>Delivery Fee</Text>
+        <Text style={quoteStyles.quoteTotalValue}>{formatCurrency(quoteShippingValue)}</Text>
+      </View>
+
+      <View style={[quoteStyles.quoteTotalRow, quoteStyles.quoteTotalDivider]}>
+        <Text style={quoteStyles.quoteGrandTotalLabel}>Total Price to Pay</Text>
+        <Text style={quoteStyles.quoteGrandTotalValue}>{formatCurrency(quoteTotalToPay)}</Text>
+      </View>
+    </View>
   );
 
   const closeQuoteModal = () => {
@@ -2366,13 +3760,18 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   const updateQuoteManualRow = (rowId, field, value) => {
     setQuoteManualRows((previousRows) => previousRows.map((row) => {
       if (row.id !== rowId) return row;
-      if (field === 'price') return { ...row, price: sanitizeQuoteCurrencyInput(value) };
-      return { ...row, productName: value };
+      if (field === 'amount') return { ...row, amount: sanitizeQuoteCurrencyInput(value) };
+      if (field === 'reason') return { ...row, reason: value };
+      if (field === 'label') return { ...row, label: value };
+      return { ...row, [field]: value };
     }));
   };
 
-  const addQuoteManualRow = () => {
-    setQuoteManualRows((previousRows) => [...previousRows, createManualQuoteRow('', '')]);
+  const addQuoteManualRow = (type = 'extra', arrangementGroup = '') => {
+    setQuoteManualRows((previousRows) => [
+      ...previousRows,
+      createQuoteChargeRow({ type, arrangementGroup }),
+    ]);
   };
 
   const removeQuoteManualRow = (rowId) => {
@@ -2383,7 +3782,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     ));
   };
 
-  const openQuoteModal = (request) => {
+  const openQuoteModal = React.useCallback((request) => {
     if (actionLockRef.current || quoteModalVisible) {
       return;
     }
@@ -2393,6 +3792,13 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     const requestData = normalizeRequestData(request);
     const bookingItems = getBookingItemsFromData(requestData);
     const storedQuoteBreakdown = requestData?.quote_breakdown;
+    const nextFlowerContext = buildFlowerPricingContext(request);
+    const nextBookingItems = getBookingRequestItems(request);
+    const nextArrangementBreakdownItems = buildQuoteArrangementBreakdownItems({
+      arrangementSelections: nextFlowerContext?.arrangementSelections || [],
+      customOrderItems: nextBookingItems,
+      flowerTypes: nextFlowerContext?.flowerTypes || [],
+    });
 
     const hasStoredQuoteShipping = storedQuoteBreakdown?.shipping_fee !== null && storedQuoteBreakdown?.shipping_fee !== undefined;
     const isPendingCustomOrderQuote = request?.type === 'booking' && String(request?.status || '').toLowerCase() === 'pending';
@@ -2410,10 +3816,14 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
 
     setQuoteAmount(initialPrice);
     setQuoteShippingFee(initialShipping > 0 ? String(initialShipping) : '');
-    setQuoteFlowerContext(buildFlowerPricingContext(request));
-    setQuoteManualRows(buildManualQuoteRows(bookingItems, storedQuoteBreakdown));
+    setQuoteFlowerContext(nextFlowerContext);
+    setQuoteManualRows(buildQuoteChargeRows({
+      bookingItems: nextBookingItems.length ? nextBookingItems : bookingItems,
+      arrangementBreakdownItems: nextArrangementBreakdownItems,
+      storedQuoteBreakdown,
+    }));
     setQuoteModalVisible(true);
-  };
+  }, [quoteModalVisible]);
 
   const handleProvideQuote = async () => {
     if (!requestToQuote) return;
@@ -2424,31 +3834,51 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     let quoteBreakdownPayload = null;
 
     if (isCustomOrderQuote) {
-      if (!quoteManualRows.length) {
-        Alert.alert('Missing Details', 'Please add at least one product in the custom order breakdown.');
+      const filledQuoteRows = quoteManualRows.filter(rowHasQuoteContent);
+
+      if (!filledQuoteRows.length) {
+        Alert.alert('Missing Details', 'Please add at least one charge in the custom order breakdown.');
         return;
       }
 
-      const normalizedBreakdownRows = quoteManualRows.map((row) => ({
-        product_name: String(row.productName || '').trim(),
-        price: parseCurrencyNumber(row.price),
-        ...(row.arrangementGroup ? { arrangement_group: row.arrangementGroup } : {}),
-      }));
+      const normalizedBreakdownRows = filledQuoteRows.map((row) => {
+        const label = String(row.label || '').trim();
+        const amountInput = String(row.amount || '').trim();
+        const amount = parseCurrencyNumber(row.amount);
+        const arrangementGroup = String(row.arrangementGroup || '').trim();
+        const reason = String(row.reason || '').trim();
+        const type = normalizeCustomOrderQuoteType(row.type, label);
+
+        return {
+          type,
+          label,
+          amount_input: amountInput,
+          amount,
+          ...(reason ? { reason } : {}),
+          ...(arrangementGroup ? {
+            arrangement_group: arrangementGroup,
+            arrangementGroup,
+          } : {}),
+          product_name: label,
+          price: amount,
+        };
+      });
 
       const hasInvalidBreakdownRow = normalizedBreakdownRows.some((row) => (
-        !row.product_name
-        || !Number.isFinite(row.price)
-        || row.price < 0
+        !row.label
+        || row.amount_input === ''
+        || !Number.isFinite(row.amount)
+        || row.amount < 0
       ));
 
       if (hasInvalidBreakdownRow) {
-        Alert.alert('Invalid Input', 'Please complete each product with a name and a valid price.');
+        Alert.alert('Invalid Input', 'Please complete each charge with a label and a valid amount.');
         return;
       }
 
       parsedItemPrice = quoteFlowerSubtotal;
       quoteBreakdownPayload = {
-        line_items: normalizedBreakdownRows,
+        line_items: normalizedBreakdownRows.map(({ amount_input, ...row }) => row),
         computed_subtotal: quoteFlowerSubtotal,
         shipping_fee: parsedShippingFee,
         computed_total: quoteFlowerSubtotal + parsedShippingFee,
@@ -2545,10 +3975,29 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     });
   };
 
-  const openDetailsModal = (item) => {
+  const openDetailsModal = React.useCallback(async (item) => {
     setSelectedRequest(item);
     setModalVisible(true);
-  };
+    setSelectedRequestLoading(true);
+
+    try {
+      const response = await adminAPI.getAllRequests({
+        requestId: item.id,
+        limit: 1,
+        includeUsers: true,
+        includeRefunds: true,
+      });
+      const fullRequest = response?.data?.requests?.[0] || null;
+
+      if (fullRequest) {
+        setSelectedRequest(fullRequest);
+      }
+    } catch (error) {
+      console.error('Error refreshing request details:', error);
+    } finally {
+      setSelectedRequestLoading(false);
+    }
+  }, []);
 
   const openPaymentModal = (request, editMode = false) => {
     if (actionLockRef.current || paymentModalVisible) {
@@ -2568,10 +4017,10 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     setIsEditPaymentMode(false);
   };
 
-  const openCustomizedItemModal = (request, customizedItem) => {
+  const openCustomizedItemModal = React.useCallback((request, customizedItem) => {
     setSelectedCustomizedItem({ request, item: customizedItem });
     setCustomizedItemModalVisible(true);
-  };
+  }, []);
 
   const closeCustomizedItemModal = () => {
     setCustomizedItemModalVisible(false);
@@ -2587,10 +4036,15 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     setRiderSearchQuery('');
   };
 
-  const handleAssignRider = (request) => {
+  const handleAssignRider = React.useCallback(async (request) => {
     if (actionLockRef.current || assignRiderModalVisible) {
       return;
     }
+
+    const availableRiders = await loadRiders();
+    const availableRiderLookup = Array.isArray(availableRiders) && availableRiders.length
+      ? Object.fromEntries(availableRiders.map((rider) => [String(rider.id), rider]))
+      : riderLookup;
 
     const groupedDestinations = getGroupedDestinations(request);
     setRequestToAssignRider(request);
@@ -2602,14 +4056,17 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
 
       setStopRiderAssignments(initialAssignments);
       setSelectedStopGroupKey(firstGroup?.groupKey || null);
-      setSelectedRider(initialRiderId ? riderLookup[String(initialRiderId)] || null : null);
+      setSelectedRider(initialRiderId ? availableRiderLookup[String(initialRiderId)] || null : null);
     } else {
       setStopRiderAssignments({});
       setSelectedStopGroupKey(null);
-      setSelectedRider(request.rider || null);
+      setSelectedRider(
+        request.rider
+        || (request.assigned_rider ? availableRiderLookup[String(request.assigned_rider)] || null : null)
+      );
     }
     setAssignRiderModalVisible(true);
-  };
+  }, [assignRiderModalVisible, getGroupedDestinations, getInitialStopRiderAssignments, loadRiders, riderLookup]);
 
   const handleSelectStopGroup = (group) => {
     const riderId = stopRiderAssignments[group.groupKey] || '';
@@ -2976,7 +4433,8 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                     {bookingItem.imageUri ? (
                       <Image
                         source={{ uri: bookingItem.imageUri }}
-                        style={{ width: '100%', height: '100%', resizeMode: 'cover' }}
+                        style={{ width: '100%', height: '100%' }}
+                        resizeMode="cover"
                       />
                     ) : (
                       <Ionicons name="image-outline" size={24} color="#666" />
@@ -3281,6 +4739,37 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     );
   };
 
+  const renderRequestCard = React.useCallback(({ item }) => (
+    <EnhancedRequestCard
+      item={item}
+      onMessageCustomer={handleMessageCustomer}
+      onPhoneCall={handlePhoneCall}
+      openDetailsModal={openDetailsModal}
+      openReceiptModal={openReceiptModal}
+      onAssignRider={handleAssignRider}
+      onUpdateStatus={openRequestStatusModal}
+      onProvidePrice={(requestItem) => {
+        closeDetailsModal();
+        openQuoteModal(requestItem);
+      }}
+      onDecline={handleDeclineRequest}
+      onPrintReceipt={handlePrintReceipt}
+      onOpenCustomizedItem={openCustomizedItemModal}
+    />
+  ), [
+    closeDetailsModal,
+    handleAssignRider,
+    handleDeclineRequest,
+    handleMessageCustomer,
+    handlePhoneCall,
+    handlePrintReceipt,
+    openDetailsModal,
+    openQuoteModal,
+    openReceiptModal,
+    openRequestStatusModal,
+    openCustomizedItemModal,
+  ]);
+
   if (loading && !refreshing) {
     return (
       <View style={styles.loadingContainer}>
@@ -3292,7 +4781,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
 
   return (
     <View style={styles.tabContent}>
-      <Text style={styles.tabTitle}>Custom Order Requests</Text>
+      <Text style={styles.tabTitle}>Requests & Bookings</Text>
 
       {/* Scrollable Status Filters */}
       <View style={{ marginBottom: 15 }}>
@@ -3321,6 +4810,27 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
           ))}
         </ScrollView>
       </View>
+
+      {listErrorMessage ? (
+        <View
+          style={{
+            marginHorizontal: 16,
+            marginBottom: 14,
+            padding: 12,
+            borderRadius: 14,
+            backgroundColor: '#FFF7ED',
+            borderWidth: 1,
+            borderColor: '#FDBA74',
+          }}
+        >
+          <Text style={{ fontSize: 13, fontWeight: '700', color: '#C2410C', marginBottom: 4 }}>
+            Requests list needs attention
+          </Text>
+          <Text style={{ fontSize: 12, lineHeight: 18, color: '#9A3412' }}>
+            {listErrorMessage}
+          </Text>
+        </View>
+      ) : null}
 
       {focusedEntityTarget?.entityType === 'request' ? (
         <View
@@ -3363,22 +4873,21 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
 
       <FlatList
         data={displayedRequests}
-        renderItem={({ item }) => <EnhancedRequestCard
-          item={item}
-          onMessageCustomer={handleMessageCustomer}
-          onPhoneCall={handlePhoneCall}
-          openDetailsModal={openDetailsModal}
-          openReceiptModal={openReceiptModal}
-          onAssignRider={handleAssignRider}
-          onUpdateStatus={openRequestStatusModal}
-          onProvidePrice={(req) => { closeDetailsModal(); openQuoteModal(req); }}
-          onDecline={handleDeclineRequest}
-          onPrintReceipt={(item) => generateAndShareReceipt(item, true)}
-          onOpenCustomizedItem={openCustomizedItemModal}
-        />}
+        renderItem={renderRequestCard}
         keyExtractor={item => item.id.toString()}
         contentContainerStyle={{ paddingBottom: 20, paddingHorizontal: 16 }}
+        initialNumToRender={6}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        onEndReached={loadMoreRequests}
+        onEndReachedThreshold={0.35}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ec4899']} />}
+        ListFooterComponent={isLoadingMore ? (
+          <View style={{ paddingVertical: 14 }}>
+            <ActivityIndicator size="small" color="#ec4899" />
+            <Text style={[styles.emptyText, { marginTop: 6 }]}>Loading more requests...</Text>
+          </View>
+        ) : null}
         ListEmptyComponent={
           <Text style={styles.emptyText}>
             {focusedEntityTarget?.entityType === 'request' ? 'That request could not be found' : 'No requests found'}
@@ -3397,6 +4906,14 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
             </View>
             {selectedRequest && (
               <ScrollView showsVerticalScrollIndicator={false}>
+                {selectedRequestLoading ? (
+                  <View style={{ paddingHorizontal: 20, paddingTop: 4, paddingBottom: 12 }}>
+                    <ActivityIndicator size="small" color="#ec4899" />
+                    <Text style={{ textAlign: 'center', marginTop: 8, color: '#6B7280', fontSize: 12 }}>
+                      Refreshing request details...
+                    </Text>
+                  </View>
+                ) : null}
                 {selectedRequest.type !== 'booking' && (
                   <>
                     <View style={styles.detailSection}>
@@ -3420,7 +4937,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                   <View style={styles.imageSection}>
                     <Text style={styles.detailLabel}>Inspiration Photo:</Text>
                     <Image
-                      source={{ uri: selectedRequest.image_url.startsWith('http') ? selectedRequest.image_url : `http://192.168.111.94:5000${selectedRequest.image_url}` }}
+                      source={{ uri: toAbsoluteImageUrl(selectedRequest.image_url) }}
                       style={styles.fullImage}
                       resizeMode="contain"
                     />
@@ -3532,6 +5049,201 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
       </Modal>
 
       {/* Request Change Status Modal (Timeline UI) */}
+      <Modal
+        visible={deliveryStopModalVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={closeDeliveryStopModal}
+      >
+        <View style={styles.statusModalBackdrop}>
+          <View style={[styles.timelineModalContainer, { maxHeight: deliveryStopModalMaxHeight }]}>
+            <View style={styles.statusModalHeader}>
+              <Text style={styles.statusModalTitle}>Complete Delivery Stop</Text>
+            </View>
+
+            <View style={{ padding: 20, gap: 16 }}>
+              {requestToCompleteStops ? (
+                <Text style={styles.timelineOrderNumber}>Request #{requestToCompleteStops.request_number}</Text>
+              ) : null}
+
+              <ScrollView
+                style={{ maxHeight: deliveryStopListMaxHeight }}
+                contentContainerStyle={{ gap: 10, paddingBottom: 4 }}
+                showsVerticalScrollIndicator={false}
+              >
+                {deliveryStopModalStops.map((stop, index) => {
+                  const isSelected = selectedDeliveryStopKey === stop.unit_key;
+                  const isConfirmed = stop.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED;
+                  const isCustomerOwned = stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER;
+
+                  return (
+                    <TouchableOpacity
+                      key={stop.unit_key || `request-stop-${index + 1}`}
+                      activeOpacity={0.88}
+                      disabled={isCustomerOwned || isConfirmed}
+                      onPress={() => {
+                        setSelectedDeliveryStopKey(stop.unit_key);
+                        setSelectedDeliveryProof(null);
+                        setDeliveryProofNote('');
+                      }}
+                      style={{
+                        borderWidth: 1,
+                        borderColor: isSelected ? '#EC4899' : '#E5E7EB',
+                        backgroundColor: isSelected ? '#FFF1F7' : '#FFFFFF',
+                        borderRadius: 16,
+                        padding: 14,
+                        opacity: isCustomerOwned ? 0.9 : 1,
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 15, fontWeight: '700', color: '#111827' }}>
+                            {getDeliveryStopDisplayLabel(stop, index)}
+                          </Text>
+                          <Text style={{ marginTop: 4, fontSize: 12, color: '#6B7280' }}>
+                            {stop.recipient_name || `Stop ${index + 1}`}
+                            {stop.recipient_phone ? ` • ${stop.recipient_phone}` : ''}
+                          </Text>
+                          {stop.addressText ? (
+                            <Text style={{ marginTop: 4, fontSize: 12, color: '#6B7280' }}>
+                              {stop.addressText}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                          <View style={{
+                            paddingHorizontal: 10,
+                            paddingVertical: 4,
+                            borderRadius: 999,
+                            backgroundColor: isCustomerOwned ? '#FCE7F3' : '#EDE9FE',
+                          }}>
+                            <Text style={{
+                              fontSize: 11,
+                              fontWeight: '700',
+                              color: isCustomerOwned ? '#BE185D' : '#6D28D9',
+                            }}>
+                              {isCustomerOwned ? 'Customer confirms' : 'Rider proof'}
+                            </Text>
+                          </View>
+                          <View style={{
+                            paddingHorizontal: 10,
+                            paddingVertical: 4,
+                            borderRadius: 999,
+                            backgroundColor: isConfirmed ? '#DCFCE7' : '#FEF3C7',
+                          }}>
+                            <Text style={{
+                              fontSize: 11,
+                              fontWeight: '700',
+                              color: isConfirmed ? '#166534' : '#92400E',
+                            }}>
+                              {isConfirmed ? 'Confirmed' : (isCustomerOwned ? 'Awaiting customer' : 'Pending proof')}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      {stop.proof_image_url ? (
+                        <Text style={{ marginTop: 10, fontSize: 12, color: '#059669', fontWeight: '600' }}>
+                          Proof uploaded
+                        </Text>
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              {selectedDeliveryStop && selectedDeliveryStop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.RIDER && selectedDeliveryStop.confirmation_status !== DELIVERY_CONFIRMATION_STATUS.CONFIRMED ? (
+                <View style={{ gap: 12 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#374151' }}>
+                    Proof for {getDeliveryStopDisplayLabel(selectedDeliveryStop)}
+                  </Text>
+                  <TouchableOpacity
+                    style={{
+                      borderRadius: 14,
+                      borderWidth: 1,
+                      borderColor: '#F9A8D4',
+                      borderStyle: 'dashed',
+                      paddingVertical: 14,
+                      paddingHorizontal: 16,
+                      alignItems: 'center',
+                      backgroundColor: '#FFF7FB',
+                    }}
+                    onPress={pickDeliveryProofImage}
+                    disabled={isCompletingDeliveryStop}
+                  >
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#BE185D' }}>
+                      {selectedDeliveryProof ? 'Change Proof Photo' : 'Upload Proof Photo'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {selectedDeliveryProof?.uri ? (
+                    <Image
+                      source={{ uri: selectedDeliveryProof.uri }}
+                      style={{ width: '100%', height: 180, borderRadius: 16, backgroundColor: '#F3F4F6' }}
+                      resizeMode="cover"
+                    />
+                  ) : null}
+
+                  <TextInput
+                    value={deliveryProofNote}
+                    onChangeText={setDeliveryProofNote}
+                    placeholder="Optional note about the delivery proof"
+                    multiline
+                    style={[
+                      styles.input,
+                      {
+                        minHeight: 92,
+                        textAlignVertical: 'top',
+                      },
+                    ]}
+                  />
+                </View>
+              ) : selectedDeliveryStop ? (
+                <View style={{
+                  borderRadius: 14,
+                  backgroundColor: '#F9FAFB',
+                  borderWidth: 1,
+                  borderColor: '#E5E7EB',
+                  padding: 14,
+                }}>
+                  <Text style={{ fontSize: 13, lineHeight: 20, color: '#6B7280' }}>
+                    {selectedDeliveryStop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER
+                      ? 'This stop will stay open until the ordering customer confirms it on tracking.'
+                      : 'This stop is already confirmed.'}
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={closeDeliveryStopModal}
+                  disabled={isCompletingDeliveryStop}
+                >
+                  <Text style={styles.buttonText}>Close</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.saveButton]}
+                  onPress={handleConfirmDeliveryStop}
+                  disabled={
+                    isCompletingDeliveryStop
+                    || !selectedDeliveryStop
+                    || selectedDeliveryStop.confirmation_owner !== DELIVERY_CONFIRMATION_OWNER.RIDER
+                    || selectedDeliveryStop.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED
+                    || !selectedDeliveryProof?.base64
+                  }
+                >
+                  <Text style={styles.buttonText}>
+                    {isCompletingDeliveryStop ? 'Saving...' : 'Complete Stop'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       < Modal visible={requestStatusModalVisible} transparent animationType="fade" onRequestClose={closeRequestStatusModal}>
         <View style={styles.statusModalBackdrop}>
           <View style={styles.timelineModalContainer}>
@@ -3648,185 +5360,189 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
             </View>
             <Text style={[styles.modalSubtitle, { textAlign: 'left', paddingHorizontal: 20 }]}>Request #{requestToQuote?.request_number}</Text>
 
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={quoteStyles.quoteScrollContent}>
+            <ScrollView
+              style={{ flex: 1 }}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={[quoteStyles.quoteScrollContent, { paddingBottom: 20 }]}
+            >
               {isCustomOrderQuote ? (
                 <>
-                  <View style={quoteStyles.quoteHeroCard}>
-                    <Text style={quoteStyles.quoteHeroTitle}>{quoteFlowerContext?.arrangementType || 'Arrangement details unavailable'}</Text>
-                    <Text style={quoteStyles.quoteHeroSubtitle}>
-                      {(quoteFlowerContext?.itemCount || quoteCustomOrderItems.length || 1)} custom order item{(quoteFlowerContext?.itemCount || quoteCustomOrderItems.length || 1) > 1 ? 's are' : ' is'} included in this request.
+                  <View style={quoteStyles.quoteSummaryCard}>
+                    <Text style={quoteStyles.quoteSummaryTitle}>{quoteFlowerContext?.arrangementType || 'Custom order quote'}</Text>
+                    <Text style={quoteStyles.quoteSummaryMeta}>
+                      Build a clear explanation for the customer by listing the arrangement, flowers, labor, materials, extras, and delivery separately.
                     </Text>
 
-                    {quoteCustomOrderItems.length ? (
-                      <View style={quoteStyles.quoteBreakdownSection}>
-                        <Text style={quoteStyles.quoteSectionLabel}>Included Custom Orders</Text>
-                        {quoteCustomOrderItems.map((customOrderItem, index) => (
-                          <View key={customOrderItem.key} style={quoteStyles.quoteBreakdownRow}>
-                            <View style={quoteStyles.quoteBreakdownIndex}>
-                              <Text style={quoteStyles.quoteBreakdownIndexText}>{index + 1}</Text>
-                            </View>
-                            <View style={{ flex: 1 }}>
-                              <Text style={quoteStyles.quoteBreakdownTitle}>{customOrderItem.title}</Text>
-                              <Text style={quoteStyles.quoteBreakdownMeta}>
-                                {[
-                                  customOrderItem.arrangementText ? `Arrangement: ${customOrderItem.arrangementText}` : null,
-                                  customOrderItem.eventDateText ? `Date: ${customOrderItem.eventDateText}${customOrderItem.eventTimeText ? ` at ${customOrderItem.eventTimeText}` : ''}` : null,
-                                  customOrderItem.venueText ? `Venue: ${customOrderItem.venueText}` : null,
-                                ].filter(Boolean).join('\n')}
-                              </Text>
-                            </View>
-                          </View>
-                        ))}
+                    {quoteHasSubtotalEstimate && quoteSubtotalRangeText ? (
+                      <View style={quoteStyles.quoteRangeCard}>
+                        <Text style={quoteStyles.quoteRangeLabel}>Catalogue Subtotal Range</Text>
+                        <Text style={quoteStyles.quoteRangeValue}>{quoteSubtotalRangeText}</Text>
+                        <Text style={quoteStyles.quoteRangeHint}>Use this as the guide for arrangement-related charges. Delivery fee is checked separately.</Text>
                       </View>
                     ) : null}
 
-                    {quoteArrangementBreakdownItems.length ? (
-                      <View style={quoteStyles.quoteBreakdownSection}>
-                        <Text style={quoteStyles.quoteSectionLabel}>Arrangement Breakdown</Text>
-                        {quoteArrangementBreakdownItems.map((selection, index) => (
-                          <View key={`${selection.arrangementLabel}-${index}`} style={quoteStyles.quoteBreakdownRow}>
-                            <View style={quoteStyles.quoteBreakdownIndex}>
-                              <Text style={quoteStyles.quoteBreakdownIndexText}>{index + 1}</Text>
-                            </View>
-                            <View style={{ flex: 1 }}>
-                              <Text style={quoteStyles.quoteBreakdownTitle}>{selection.arrangementLabel}</Text>
-                              <Text style={quoteStyles.quoteBreakdownMeta}>
-                                {selection.quantity} arrangement{selection.quantity > 1 ? 's' : ''}
-                                {selection.flowersPerArrangement > 0 ? ' ? ' + selection.flowersPerArrangement + ' flowers each' : ''}
-                              </Text>
-                              {selection.preferredFlowersText ? (
-                                <Text style={quoteStyles.quoteBreakdownMeta}>
-                                  Preferred flowers: {selection.preferredFlowersText}
-                                </Text>
-                              ) : null}
-                            </View>
-                            {Array.isArray(selection.preferredFlowerNames) && selection.preferredFlowerNames.length ? (
-                              <View style={quoteStyles.quoteBreakdownFlowerRail}>
-                                {selection.preferredFlowerNames.map((flowerName) => {
-                                  const imageUri = getFlowerPreviewImageUri(flowerName);
-                                  const shortLabel = String(flowerName || '').trim();
-                                  return (
-                                    <View key={`${selection.arrangementLabel}-${flowerName}`} style={quoteStyles.quoteBreakdownFlowerTile}>
-                                      {imageUri ? (
-                                        <Image
-                                          source={{ uri: imageUri }}
-                                          style={quoteStyles.quoteBreakdownFlowerThumb}
-                                        />
-                                      ) : (
-                                        <View style={quoteStyles.quoteBreakdownFlowerFallback}>
-                                          <Text style={quoteStyles.quoteBreakdownFlowerFallbackText}>
-                                            {shortLabel ? shortLabel.charAt(0).toUpperCase() : '?'}
-                                          </Text>
-                                        </View>
-                                      )}
-                                      <Text numberOfLines={2} style={quoteStyles.quoteBreakdownFlowerLabel}>{shortLabel}</Text>
-                                    </View>
-                                  );
-                                })}
-                              </View>
-                            ) : null}
-                          </View>
-                        ))}
+                    {quoteSubtotalRangeWarning.rangeWarningText ? (
+                      <View style={quoteStyles.quoteWarningBox}>
+                        <Text style={quoteStyles.quoteWarningText}>{quoteSubtotalRangeWarning.rangeWarningText}</Text>
                       </View>
                     ) : null}
+
+                    <View style={quoteStyles.quoteSummaryTagRow}>
+                      <View style={quoteStyles.quoteSummaryTag}>
+                        <Text style={quoteStyles.quoteSummaryTagText}>
+                          {quoteCustomOrderItems.length || quoteFlowerContext?.itemCount || 1} item{(quoteCustomOrderItems.length || quoteFlowerContext?.itemCount || 1) > 1 ? 's' : ''}
+                        </Text>
+                      </View>
+                      <View style={quoteStyles.quoteSummaryTag}>
+                        <Text style={quoteStyles.quoteSummaryTagText}>
+                          {quoteArrangementBreakdownItems.length || 1} arrangement{(quoteArrangementBreakdownItems.length || 1) > 1 ? 's' : ''}
+                        </Text>
+                      </View>
+                      <View style={quoteStyles.quoteSummaryTag}>
+                        <Text style={quoteStyles.quoteSummaryTagText}>
+                          {quoteFlowerTypes.length || 0} flower type{quoteFlowerTypes.length === 1 ? '' : 's'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {quoteFlowerTypes.length ? (
+                      <Text style={quoteStyles.quoteSummaryMeta}>
+                        Preferred flowers: {quoteFlowerTypes.join(', ')}
+                      </Text>
+                    ) : null}
+
+                    {quoteCustomOrderItems.slice(0, 3).map((customOrderItem) => (
+                      <Text key={customOrderItem.key} style={quoteStyles.quoteSummaryMeta}>
+                        - {customOrderItem.title}
+                        {customOrderItem.arrangementText ? ` | ${customOrderItem.arrangementText}` : ''}
+                        {customOrderItem.venueText ? ` | ${customOrderItem.venueText}` : ''}
+                      </Text>
+                    ))}
                   </View>
 
                   <View style={quoteStyles.quoteSectionHeader}>
-                    <Text style={quoteStyles.quoteSectionTitle}>Custom Order Breakdown</Text>
-                    <Text style={quoteStyles.quoteSectionHint}>Enter the price for each product, then set the delivery fee for the exact venue.</Text>
+                    <Text style={quoteStyles.quoteSectionTitle}>Charge Breakdown</Text>
+                    <Text style={quoteStyles.quoteSectionHint}>Keep the quote simple: add a label, amount, and short reason for each charge so the customer understands the price.</Text>
                   </View>
 
-                  {quoteManualRows.length ? (() => {
-                    const groups = [];
-                    const groupMap = new Map();
-                    quoteManualRows.forEach((row) => {
-                      const key = row.arrangementGroup || '';
-                      if (!groupMap.has(key)) {
-                        groupMap.set(key, []);
-                        groups.push(key);
-                      }
-                      groupMap.get(key).push(row);
-                    });
+                  {quoteChargeGroups.map((group, groupIndex) => {
+                    return (
+                      <View key={group.key} style={quoteStyles.quoteGroupCard}>
+                        <View style={quoteStyles.quoteGroupHeader}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={quoteStyles.quoteGroupTitle}>{group.title}</Text>
+                            <Text style={quoteStyles.quoteGroupMeta}>
+                              {group.preferredFlowersText
+                                ? `Preferred flowers: ${group.preferredFlowersText}`
+                                : 'Add the charges that explain this arrangement price.'}
+                            </Text>
+                            {group.hasEstimate && group.formattedLineRange ? (
+                              <Text style={quoteStyles.quoteGroupMeta}>
+                                Catalogue range: {group.formattedLineRange}
+                              </Text>
+                            ) : null}
+                            {group.hasEstimate && group.rangeWarningText ? (
+                              <Text style={quoteStyles.quoteAlertText}>{group.rangeWarningText}</Text>
+                            ) : group.hasEstimate && group.formattedLineRange ? (
+                              <Text style={quoteStyles.quoteInfoHint}>Delivery fee is excluded from this range check.</Text>
+                            ) : null}
+                          </View>
+                          <Text style={quoteStyles.quoteGroupSubtotal}>{formatCurrency(group.subtotal)}</Text>
+                        </View>
 
-                    return groups.map((groupKey) => {
-                      const groupRows = groupMap.get(groupKey);
-                      const groupSubtotal = groupRows.reduce((sum, row) => sum + parseCurrencyNumber(row.price), 0);
-                      const globalOffset = quoteManualRows.indexOf(groupRows[0]);
-
-                      return (
-                        <View key={groupKey || 'ungrouped'}>
-                          {groupKey ? (
-                            <View style={{ marginTop: 14, marginBottom: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                              <Text style={[quoteStyles.quoteSectionLabel, { marginBottom: 0, flex: 1 }]}>{groupKey}</Text>
-                              <Text style={{ fontSize: 13, fontWeight: '700', color: '#be185d' }}>{formatCurrency(groupSubtotal)}</Text>
-                            </View>
-                          ) : null}
-
-                          {groupRows.map((manualRow, localIndex) => {
-                            const previewName = String(manualRow.productName || '').trim();
-                            const parsedPrice = parseCurrencyNumber(manualRow.price);
-
-                            return (
-                              <View key={manualRow.id} style={quoteStyles.quoteInputCard}>
-                                <View style={quoteStyles.quoteInputHeader}>
-                                  <View style={{ flex: 1 }}>
-                                    <Text style={quoteStyles.quoteInputTitle}>Product {globalOffset + localIndex + 1}</Text>
-                                    <Text style={quoteStyles.quoteInputHint}>{previewName || 'Set product name and price'}</Text>
+                        {group.items.length ? group.items.map((manualRow, chargeIndex) => {
+                          const parsedAmount = parseCurrencyNumber(manualRow.amount);
+                          return (
+                            <View key={manualRow.id} style={quoteStyles.quoteChargeCard}>
+                              <View style={quoteStyles.quoteChargeHeader}>
+                                <View style={{ flex: 1 }}>
+                                  <Text style={quoteStyles.quoteChargeTitle}>
+                                    Charge {groupIndex + 1}.{chargeIndex + 1}
+                                  </Text>
+                                  <View style={quoteStyles.quoteChargeTypeBadge}>
+                                    <Text style={quoteStyles.quoteChargeTypeBadgeText}>
+                                      {getCustomOrderQuoteTypeLabel(manualRow.type)}
+                                    </Text>
                                   </View>
-                                  <Text style={quoteStyles.quoteInputLineTotal}>{formatCurrency(parsedPrice)}</Text>
                                 </View>
+                                <Text style={quoteStyles.quoteChargeAmount}>{formatCurrency(parsedAmount)}</Text>
+                              </View>
 
-                                <Text style={quoteStyles.quoteFieldLabel}>Product Name</Text>
+                              <Text style={quoteStyles.quoteFieldLabel}>Label</Text>
+                              <TextInput
+                                style={quoteStyles.quoteTextField}
+                                placeholder={getQuoteChargeLabelPlaceholder(manualRow.type)}
+                                value={manualRow.label}
+                                onChangeText={(value) => updateQuoteManualRow(manualRow.id, 'label', value)}
+                              />
+
+                              <Text style={quoteStyles.quoteFieldLabel}>Amount</Text>
+                              <View style={quoteStyles.quoteCurrencyInputRow}>
+                                <View style={quoteStyles.quoteCurrencyPrefix}>
+                                  <Text style={quoteStyles.quoteCurrencyPrefixText}>PHP</Text>
+                                </View>
                                 <TextInput
-                                  style={[quoteStyles.quoteCurrencyInput, { marginBottom: 10, borderWidth: 1, borderColor: '#fdba74', borderRadius: 10, paddingHorizontal: 12 }]}
-                                  placeholder="Product name (e.g. Signature Bouquet)"
-                                  value={manualRow.productName}
-                                  onChangeText={(value) => updateQuoteManualRow(manualRow.id, 'productName', value)}
+                                  style={quoteStyles.quoteCurrencyInput}
+                                  placeholder="0.00"
+                                  keyboardType="decimal-pad"
+                                  value={manualRow.amount}
+                                  onChangeText={(value) => updateQuoteManualRow(manualRow.id, 'amount', value)}
                                 />
+                              </View>
 
-                                <Text style={quoteStyles.quoteFieldLabel}>Product Price</Text>
-                                <View style={quoteStyles.quoteCurrencyInputRow}>
-                                  <View style={quoteStyles.quoteCurrencyPrefix}>
-                                    <Text style={quoteStyles.quoteCurrencyPrefixText}>PHP</Text>
-                                  </View>
-                                  <TextInput
-                                    style={quoteStyles.quoteCurrencyInput}
-                                    placeholder="0.00"
-                                    keyboardType="decimal-pad"
-                                    value={manualRow.price}
-                                    onChangeText={(value) => updateQuoteManualRow(manualRow.id, 'price', value)}
-                                  />
-                                </View>
+                              <Text style={[quoteStyles.quoteFieldLabel, { marginTop: 12 }]}>Reason</Text>
+                              <TextInput
+                                style={quoteStyles.quoteReasonInput}
+                                placeholder={getQuoteChargeReasonPlaceholder(manualRow.type)}
+                                multiline
+                                value={manualRow.reason}
+                                onChangeText={(value) => updateQuoteManualRow(manualRow.id, 'reason', value)}
+                              />
 
+                              <View style={quoteStyles.quoteChargeFooter}>
+                                <Text style={quoteStyles.quoteChargeFooterHint}>
+                                  {getCustomOrderQuoteTypeLabel(manualRow.type)} charge{manualRow.reason ? ' ready for customer view.' : ' can include a short explanation.'}
+                                </Text>
                                 <TouchableOpacity
-                                  style={{ marginTop: 10, alignSelf: 'flex-start', backgroundColor: '#fee2e2', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, opacity: quoteManualRows.length <= 1 ? 0.5 : 1 }}
+                                  style={[quoteStyles.quoteRemoveChip, { opacity: quoteManualRows.length <= 1 ? 0.5 : 1 }]}
                                   onPress={() => removeQuoteManualRow(manualRow.id)}
                                   disabled={quoteManualRows.length <= 1}
                                 >
-                                  <Text style={{ color: '#b91c1c', fontWeight: '700' }}>Remove</Text>
+                                  <Text style={quoteStyles.quoteRemoveChipText}>Remove</Text>
                                 </TouchableOpacity>
                               </View>
-                            );
-                          })}
-                        </View>
-                      );
-                    });
-                  })() : (
-                    <Text style={quoteStyles.quoteAlertText}>No products added yet.</Text>
-                  )}
+                            </View>
+                          );
+                        }) : (
+                          <Text style={quoteStyles.quoteAlertText}>No charges in this section yet.</Text>
+                        )}
 
-                  <TouchableOpacity
-                    style={{ marginTop: 6, marginBottom: 8, alignSelf: 'flex-start', backgroundColor: '#ffedd5', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 }}
-                    onPress={addQuoteManualRow}
-                  >
-                    <Text style={{ color: '#9a3412', fontWeight: '700' }}>+ Add Product</Text>
-                  </TouchableOpacity>
+                        <View style={quoteStyles.quoteAddActionsRow}>
+                          <TouchableOpacity
+                            style={quoteStyles.quoteAddChargeButton}
+                            onPress={() => addQuoteManualRow('flower', group.arrangementGroup)}
+                          >
+                            <Ionicons name="add" size={16} color="#be185d" />
+                            <Text style={quoteStyles.quoteAddChargeText}>Add Flower</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={quoteStyles.quoteAddChargeButton}
+                            onPress={() => addQuoteManualRow('extra', group.arrangementGroup)}
+                          >
+                            <Ionicons name="add" size={16} color="#be185d" />
+                            <Text style={quoteStyles.quoteAddChargeText}>Add Charge</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    );
+                  })}
 
                   <View style={quoteStyles.quoteInputCard}>
                     <View style={quoteStyles.quoteInputHeader}>
                       <View style={{ flex: 1 }}>
                         <Text style={quoteStyles.quoteInputTitle}>Delivery Fee</Text>
-                        <Text style={quoteStyles.quoteInputHint}>Enter the delivery fee manually for this venue. Use 0.00 for pickup or free delivery.</Text>
+                        <Text style={quoteStyles.quoteInputHint}>Keep delivery separate from arrangement charges. Use 0.00 for pickup or free delivery.</Text>
                       </View>
                       <Text style={quoteStyles.quoteInputLineTotal}>{formatCurrency(quoteShippingValue)}</Text>
                     </View>
@@ -3846,58 +5562,15 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                     </View>
 
                     <Text style={quoteStyles.quoteInfoHint}>
-                      Enter the admin-reviewed delivery fee for this custom order before sending the quote.
+                      Saved request fee: {formatCurrency(
+                        requestToQuote?.shipping_fee !== null && requestToQuote?.shipping_fee !== undefined
+                          ? parseCurrencyNumber(requestToQuote.shipping_fee)
+                          : 0
+                      )}. Update it here if the final rider or venue cost changed.
                     </Text>
                   </View>
 
-                  <View style={quoteStyles.quoteTotalCard}>
-                    <Text style={quoteStyles.quoteSectionLabel}>Live Quote</Text>
-
-                    {(() => {
-                      const groups = [];
-                      const groupMap = new Map();
-                      quoteBreakdownRows.forEach((row) => {
-                        const key = quoteManualRows.find((manualRow) => manualRow.productName === row.productName)?.arrangementGroup || '';
-                        if (!groupMap.has(key)) {
-                          groupMap.set(key, []);
-                          groups.push(key);
-                        }
-                        groupMap.get(key).push(row);
-                      });
-
-                      return groups.map((groupKey) => {
-                        const groupRows = groupMap.get(groupKey);
-                        return (
-                          <View key={groupKey || 'ungrouped'}>
-                            {groupKey ? (
-                              <Text style={[quoteStyles.quoteTotalMeta, { marginBottom: 4, marginTop: 4, fontWeight: '700', color: '#9a3412' }]}>{groupKey}</Text>
-                            ) : null}
-                            {groupRows.map((row, index) => (
-                              <View key={`${row.productName}-${index}`} style={quoteStyles.quoteLiveItemRow}>
-                                <Text style={quoteStyles.quoteLiveItemName}>{row.productName}</Text>
-                                <Text style={quoteStyles.quoteLiveItemPrice}>{formatCurrency(row.price)}</Text>
-                              </View>
-                            ))}
-                          </View>
-                        );
-                      });
-                    })()}
-
-                    <View style={[quoteStyles.quoteTotalRow, quoteStyles.quoteTotalDivider]}>
-                      <Text style={quoteStyles.quoteTotalLabel}>Product Subtotal</Text>
-                      <Text style={quoteStyles.quoteTotalValue}>{formatCurrency(quoteFlowerSubtotal)}</Text>
-                    </View>
-
-                    <View style={quoteStyles.quoteTotalRow}>
-                    <Text style={quoteStyles.quoteTotalLabel}>Delivery Fee</Text>
-                      <Text style={quoteStyles.quoteTotalValue}>{formatCurrency(quoteShippingValue)}</Text>
-                    </View>
-
-                    <View style={[quoteStyles.quoteTotalRow, quoteStyles.quoteTotalDivider]}>
-                      <Text style={quoteStyles.quoteGrandTotalLabel}>Total Price to Pay</Text>
-                      <Text style={quoteStyles.quoteGrandTotalValue}>{formatCurrency(quoteTotalToPay)}</Text>
-                    </View>
-                  </View>
+                  {renderCustomOrderLiveQuoteSummary()}
                 </>
               ) : (
                 <>

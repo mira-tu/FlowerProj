@@ -3,9 +3,17 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabase';
 import TrackingPaymentDetails from '../components/TrackingPaymentDetails';
 import DeliveryDestinationsSummary from '../components/DeliveryDestinationsSummary';
+import TrackingDeliveryStops from '../components/TrackingDeliveryStops';
 import InfoModal from '../components/InfoModal';
 import { buildTimelineTimestampMap, formatTimelineTimestamp } from '../utils/timelineTimestamps';
-import { parseOrderDeliveryDestinations } from '../utils/deliveryDestinations';
+import {
+    areAllDeliveryStopsConfirmed,
+    confirmDeliveryStop,
+    hasStopConfirmationFlow,
+    parseMultiDeliveryNotes,
+    parseOrderDeliveryDestinations,
+    serializeMultiDeliveryNotes,
+} from '../utils/deliveryDestinations';
 import {
     canRequestRefund,
     createRefundRequest,
@@ -51,6 +59,7 @@ const OrderTracking = ({ user }) => {
     const [gcashName, setGcashName] = useState('');
     const [gcashNumber, setGcashNumber] = useState('');
     const [submittingRefundDetails, setSubmittingRefundDetails] = useState(false);
+    const [confirmingStopKey, setConfirmingStopKey] = useState(null);
 
     useEffect(() => {
         const generateTrackingSteps = (orderObj) => {
@@ -375,6 +384,86 @@ const OrderTracking = ({ user }) => {
         }
     };
 
+    const handleConfirmDeliveryStop = async (stop) => {
+        if (!order || !stop?.unit_key) {
+            return;
+        }
+
+        setConfirmingStopKey(stop.unit_key);
+
+        try {
+            const confirmedAt = new Date().toISOString();
+            const parsedNotes = parseMultiDeliveryNotes(order.notes);
+            const updatedDestinations = confirmDeliveryStop(parsedNotes.destinations, stop.unit_key, {
+                actorType: 'customer',
+                actorUserId: user?.id || order.user_id || null,
+                confirmedAt,
+            });
+            const allConfirmed = areAllDeliveryStopsConfirmed(updatedDestinations);
+            const updatePayload = {
+                notes: serializeMultiDeliveryNotes({
+                    destinations: updatedDestinations,
+                    note: parsedNotes.note,
+                }),
+            };
+
+            if (allConfirmed) {
+                updatePayload.status = 'completed';
+                updatePayload.status_timestamps = {
+                    ...(order.status_timestamps || {}),
+                    completed: confirmedAt,
+                };
+
+                if (String(order.payment_method || '').trim().toLowerCase() === 'cod') {
+                    updatePayload.payment_status = 'paid';
+                    updatePayload.amount_received = Math.max(
+                        Number(order.amount_received || 0),
+                        Number(order.total || 0)
+                    );
+                }
+            }
+
+            const { data, error } = await supabase
+                .from('orders')
+                .update(updatePayload)
+                .eq('id', order.id)
+                .select('notes, status, status_timestamps, payment_status, amount_received, updated_at')
+                .single();
+
+            if (error) {
+                throw error;
+            }
+
+            const nextDestinations = parseMultiDeliveryNotes(data.notes).destinations;
+            setOrder((prevOrder) => prevOrder ? ({
+                ...prevOrder,
+                ...data,
+                multiDeliveryDestinations: nextDestinations,
+            }) : prevOrder);
+
+            if (data.status === 'completed') {
+                setCurrentStep(trackingSteps.length + 1);
+            }
+
+            setInfoModal({
+                show: true,
+                title: allConfirmed ? 'Order Confirmed' : 'Delivery Stop Confirmed',
+                message: allConfirmed
+                    ? 'Thank you for confirming the final delivery stop. Your order is now completed.'
+                    : 'This delivery stop was confirmed successfully.',
+            });
+        } catch (error) {
+            console.error('Error confirming delivery stop:', error);
+            setInfoModal({
+                show: true,
+                title: 'Confirmation Failed',
+                message: error.message || 'We could not confirm this delivery stop right now. Please try again.',
+            });
+        } finally {
+            setConfirmingStopKey(null);
+        }
+    };
+
     const handleRequestRefund = async () => {
         if (!order || !user) {
             setInfoModal({ show: true, title: 'Login Required', message: 'Please sign in to request a refund.' });
@@ -480,6 +569,7 @@ const OrderTracking = ({ user }) => {
         refundRequest,
     }) && ['completed', 'claimed', 'cancelled'].includes(String(order?.status || '').toLowerCase());
     const showRefundGcashForm = String(refundRequest?.status || '').toLowerCase() === 'approved';
+    const usesStopConfirmationFlow = hasStopConfirmationFlow(order?.multiDeliveryDestinations || []);
 
     if (loading) {
         return (
@@ -539,7 +629,7 @@ const OrderTracking = ({ user }) => {
                             </span>
                         </div>
                         <div className="tracking-current-status">
-                            {order.status === 'out_for_delivery' && (
+                            {order.status === 'out_for_delivery' && !usesStopConfirmationFlow && (
                                 <button
                                     style={{
                                         display: 'inline-block',
@@ -607,13 +697,21 @@ const OrderTracking = ({ user }) => {
                             shippingFee={order.shipping_fee}
                         />
 
-                        {!isPickup && (
+                        {!isPickup && usesStopConfirmationFlow ? (
+                            <TrackingDeliveryStops
+                                destinations={order.multiDeliveryDestinations}
+                                title="Delivery Stop Status"
+                                fallbackRider={order.rider}
+                                confirmingUnitKey={confirmingStopKey}
+                                onConfirmStop={handleConfirmDeliveryStop}
+                            />
+                        ) : (!isPickup && (
                             <DeliveryDestinationsSummary
                                 destinations={order.multiDeliveryDestinations}
                                 title="Delivery Stops"
                                 fallbackRider={order.rider}
                             />
-                        )}
+                        ))}
 
                         {(refundRequest || canShowRefundRequest) && (
                             <div className="tracking-items p-4 rounded-4 shadow-sm bg-white mb-4">

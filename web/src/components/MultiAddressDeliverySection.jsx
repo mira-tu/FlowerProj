@@ -1,5 +1,10 @@
 import React from 'react';
-import { createDeliveryAssignments, syncDeliveryAssignments } from '../utils/deliveryDestinations';
+import {
+    createDeliveryAssignments,
+    DELIVERY_CONFIRMATION_OWNER,
+    getDefaultDeliveryConfirmationOwner,
+    syncDeliveryAssignments,
+} from '../utils/deliveryDestinations';
 
 const MultiAddressDeliverySection = ({
     checkoutItems,
@@ -35,7 +40,19 @@ const MultiAddressDeliverySection = ({
     const handleAddressChange = (unitKey, addressId) => {
         setAssignments((prevAssignments) => prevAssignments.map((assignment) => (
             assignment.unitKey === unitKey
-                ? { ...assignment, addressId }
+                ? {
+                    ...assignment,
+                    addressId,
+                    confirmationOwner: assignment.confirmationOwner || getDefaultDeliveryConfirmationOwner(addressId, selectedAddressId),
+                }
+                : assignment
+        )));
+    };
+
+    const handleConfirmationOwnerChange = (unitKey, confirmationOwner) => {
+        setAssignments((prevAssignments) => prevAssignments.map((assignment) => (
+            assignment.unitKey === unitKey
+                ? { ...assignment, confirmationOwner }
                 : assignment
         )));
     };
@@ -76,7 +93,7 @@ const MultiAddressDeliverySection = ({
                 <>
                     <div className="alert alert-info mt-3 mb-0">
                         <i className="fas fa-info-circle me-2"></i>
-                        Each bouquet unit below can be assigned to its own saved address.
+                        Each arrangement unit below can be assigned to its own saved address.
                     </div>
 
                     <div className="mt-3 d-grid gap-3">
@@ -93,7 +110,9 @@ const MultiAddressDeliverySection = ({
                                         <div>
                                             <div className="fw-bold">{assignment.itemName}</div>
                                             <div className="small text-muted">
-                                                Bouquet {assignment.unitNumber} of {assignment.quantity}
+                                                {assignment.quantity > 1
+                                                    ? `Unit ${assignment.unitNumber} of ${assignment.quantity}`
+                                                    : 'Single delivery unit'}
                                             </div>
                                         </div>
                                         <span
@@ -124,6 +143,33 @@ const MultiAddressDeliverySection = ({
                                             <div><strong>Phone:</strong> {selectedAddress.phone}</div>
                                         </div>
                                     )}
+
+                                    <div className="mt-3">
+                                        <label className="form-label small text-muted fw-bold mb-2">Who confirms delivery?</label>
+                                        <div className="d-flex gap-2 flex-wrap">
+                                            <button
+                                                type="button"
+                                                className={`btn btn-sm ${assignment.confirmationOwner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER ? 'btn-primary' : 'btn-outline-secondary'}`}
+                                                style={assignment.confirmationOwner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER ? { background: 'var(--shop-pink)', border: 'none' } : {}}
+                                                onClick={() => handleConfirmationOwnerChange(assignment.unitKey, DELIVERY_CONFIRMATION_OWNER.CUSTOMER)}
+                                            >
+                                                Delivered to me
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className={`btn btn-sm ${assignment.confirmationOwner === DELIVERY_CONFIRMATION_OWNER.RIDER ? 'btn-primary' : 'btn-outline-secondary'}`}
+                                                style={assignment.confirmationOwner === DELIVERY_CONFIRMATION_OWNER.RIDER ? { background: '#7c3aed', border: 'none' } : {}}
+                                                onClick={() => handleConfirmationOwnerChange(assignment.unitKey, DELIVERY_CONFIRMATION_OWNER.RIDER)}
+                                            >
+                                                Delivered to recipient
+                                            </button>
+                                        </div>
+                                        <div className="small text-muted mt-2">
+                                            {assignment.confirmationOwner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER
+                                                ? 'You will confirm this stop after delivery.'
+                                                : 'The rider or staff must upload photo proof for this stop.'}
+                                        </div>
+                                    </div>
                                 </div>
                             );
                         })}

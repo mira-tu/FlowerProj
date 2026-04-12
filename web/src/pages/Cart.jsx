@@ -340,8 +340,12 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
     };
 
     const handleBookingSubmit = () => {
-        // BookingCheckout.jsx reads from the non-scoped 'bookingCart' key
         const selectedBookings = bookingItems.filter(item => item.selected);
+        if (user?.id) {
+            localStorage.setItem(`bookingCheckoutItems_${user.id}`, JSON.stringify(selectedBookings));
+        } else {
+            localStorage.setItem('bookingCheckoutItems_guest', JSON.stringify(selectedBookings));
+        }
         localStorage.setItem('bookingCart', JSON.stringify(selectedBookings));
         navigate('/booking-checkout');
     };

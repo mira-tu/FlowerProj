@@ -21,6 +21,7 @@ import { fetchCustomOrderCatalog } from '../utils/customOrderCatalog';
 
 const pickupTimes = PICKUP_TIME_OPTIONS;
 const DEFAULT_SHIPPING_FEE = 100;
+const getBookingCheckoutStorageKey = (userId) => `bookingCheckoutItems_${userId || 'guest'}`;
 
 const getBookingItemTitle = (item = {}) => (
     item.name
@@ -38,6 +39,22 @@ const normalizeInquiryItems = (items = []) => (
         name: getBookingItemTitle(item),
         serviceType: String(item?.serviceType || 'Custom Order').replace(/\s*v\d+$/i, '').trim() || 'Custom Order',
     }))
+);
+
+const getBookingCheckoutItemKey = (item = {}) => (
+    String(
+        item?.id
+        || [
+            item?.occasion,
+            item?.eventDate,
+            item?.eventTime,
+            item?.venue,
+            item?.arrangementSummary,
+            item?.arrangementType,
+            item?.customerName,
+            item?.recipientName,
+        ].filter(Boolean).join('|')
+    ).trim()
 );
 
 const buildBookingAssignments = (items = [], fallbackAddressId = null) => (
@@ -89,6 +106,88 @@ const buildBookingSummary = (items = []) => {
     };
 };
 
+const summarizeUploadedArrangementSelections = (items = []) => {
+    const groupedSelections = new Map();
+
+    (Array.isArray(items) ? items : []).forEach((item) => {
+        const arrangementSelections = Array.isArray(item?.arrangementSelections) ? item.arrangementSelections : [];
+        arrangementSelections.forEach((selection) => {
+            const label = String(
+                selection?.arrangement_label
+                || selection?.arrangementLabel
+                || selection?.arrangement_type
+                || selection?.arrangementType
+                || ''
+            ).trim();
+            if (!label) {
+                return;
+            }
+
+            if (!groupedSelections.has(label)) {
+                groupedSelections.set(label, {
+                    ...selection,
+                    arrangement_label: label,
+                    arrangementLabel: label,
+                    quantity: 0,
+                    arrangement_quantity: 0,
+                    total_flowers: 0,
+                    totalFlowers: 0,
+                    preferred_flowers: [],
+                    preferredFlowers: [],
+                });
+            }
+
+            const current = groupedSelections.get(label);
+            const selectionQuantity = Number(selection?.quantity || selection?.arrangement_quantity || 1) || 1;
+            const totalFlowers = Number(selection?.total_flowers || selection?.totalFlowers || 0) || 0;
+            const preferredFlowers = Array.isArray(selection?.preferred_flowers)
+                ? selection.preferred_flowers
+                : (Array.isArray(selection?.preferredFlowers) ? selection.preferredFlowers : []);
+
+            current.quantity += selectionQuantity;
+            current.arrangement_quantity += selectionQuantity;
+            current.total_flowers += totalFlowers;
+            current.totalFlowers += totalFlowers;
+            current.preferred_flowers = Array.from(new Set([...(current.preferred_flowers || []), ...preferredFlowers]));
+            current.preferredFlowers = current.preferred_flowers;
+        });
+    });
+
+    return Array.from(groupedSelections.values());
+};
+
+const buildBookingArrangementSummary = (arrangementSelections = []) => (
+    (Array.isArray(arrangementSelections) ? arrangementSelections : [])
+        .map((selection) => {
+            const label = String(
+                selection?.arrangement_label
+                || selection?.arrangementLabel
+                || selection?.arrangement_type
+                || selection?.arrangementType
+                || ''
+            ).trim();
+            const quantity = Number(selection?.quantity || selection?.arrangement_quantity || 1) || 1;
+            if (!label) {
+                return null;
+            }
+            return quantity > 1 ? `${label} x${quantity}` : label;
+        })
+        .filter(Boolean)
+        .join(', ')
+);
+
+const parseStoredBookingItems = (value) => {
+    if (!value) return [];
+
+    try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+        console.error('Error parsing stored booking items:', error);
+        return [];
+    }
+};
+
 const BookingCheckout = ({ user }) => {
     const navigate = useNavigate();
     const [inquiryItems, setInquiryItems] = useState([]);
@@ -118,25 +217,30 @@ const BookingCheckout = ({ user }) => {
 
     useEffect(() => {
         const cartKey = `bookingCart_${user?.id || 'guest'}`;
-        const savedInquiry = localStorage.getItem(cartKey);
+        const checkoutKey = getBookingCheckoutStorageKey(user?.id);
+        const checkoutSelectionItems = parseStoredBookingItems(localStorage.getItem(checkoutKey));
+        const legacySelectionItems = parseStoredBookingItems(localStorage.getItem('bookingCart'));
+        const scopedCartItems = parseStoredBookingItems(localStorage.getItem(cartKey));
+        const sourceItems = checkoutSelectionItems.length
+            ? checkoutSelectionItems
+            : legacySelectionItems.length
+                ? legacySelectionItems
+                : scopedCartItems;
 
-        if (!savedInquiry) {
+        if (!sourceItems.length) {
             navigate('/');
             return;
         }
 
         try {
-            const parsedItems = JSON.parse(savedInquiry);
-            const normalizedItems = normalizeInquiryItems(parsedItems);
-
+            const normalizedItems = normalizeInquiryItems(sourceItems);
             if (!normalizedItems.length) {
                 navigate('/');
                 return;
             }
-
             setInquiryItems(normalizedItems);
         } catch (error) {
-            console.error('Error parsing booking checkout items:', error);
+            console.error('Error preparing booking checkout items:', error);
             navigate('/');
         }
     }, [navigate, user]);
@@ -293,10 +397,36 @@ const BookingCheckout = ({ user }) => {
             const pickupDateTime = deliveryMethod === 'pickup'
                 ? `${selectedPickupDate} - ${selectedPickupTime}`
                 : null;
-            const commonNotes = uploadedItems
-                .map((item) => String(item?.specialInstructions || '').trim())
-                .filter(Boolean)
-                .join('\n\n');
+            const commonNotes = Array.from(
+                new Set(
+                    uploadedItems
+                        .map((item) => String(item?.specialInstructions || '').trim())
+                        .filter(Boolean)
+                )
+            ).join('\n\n');
+            const combinedArrangementSelections = summarizeUploadedArrangementSelections(uploadedItems);
+            const combinedSelectedFlowers = Array.from(
+                new Set(
+                    uploadedItems.flatMap((item) => (
+                        Array.isArray(item?.selectedFlowers)
+                            ? item.selectedFlowers
+                            : Array.isArray(item?.preferredFlowers)
+                                ? item.preferredFlowers
+                                : (Array.isArray(item?.customerPreferredFlowers) ? item.customerPreferredFlowers : [])
+                    ))
+                        .map((flowerName) => String(flowerName || '').trim())
+                        .filter(Boolean)
+                )
+            );
+            const combinedColorPreference = Array.from(
+                new Set(
+                    uploadedItems
+                        .map((item) => String(item?.colorPreference || '').trim())
+                        .filter(Boolean)
+                )
+            ).join(' | ');
+            const combinedArrangementSummary = buildBookingArrangementSummary(combinedArrangementSelections);
+            const firstItemImage = uploadedItems.find((item) => item?.image_url)?.image_url || null;
 
             const newRequest = {
                 request_number: requestNumber,
@@ -308,7 +438,7 @@ const BookingCheckout = ({ user }) => {
                 pickup_time: pickupDateTime,
                 shipping_fee: customOrderReviewShippingFee,
                 payment_status: 'to_pay',
-                image_url: firstItem.image_url || null,
+                image_url: firstItemImage,
                 notes: commonNotes || null,
                 data: {
                     items: uploadedItems,
@@ -322,15 +452,7 @@ const BookingCheckout = ({ user }) => {
                         : uploadedItems.some((item) => item.custom_order_version === 2)
                             ? 2
                             : null,
-                    item_count: uploadedItems.reduce((sum, item) => (
-                        sum + (Number(
-                            item?.arrangementQuantity
-                            ?? item?.arrangement_quantity
-                            ?? item?.quantity
-                            ?? item?.qty
-                            ?? 1,
-                        ) || 1)
-                    ), 0),
+                    item_count: uploadedItems.length,
                     summary_label: inquirySummary.summaryLabel,
                     combined_occasions: inquirySummary.combinedOccasions,
                     combined_dates: inquirySummary.combinedDates,
@@ -339,18 +461,18 @@ const BookingCheckout = ({ user }) => {
                     eventDate: firstItem.eventDate || null,
                     eventTime: firstItem.eventTime || null,
                     venue: firstItem.venue || null,
-                    arrangementSummary: firstItem.arrangementSummary || firstItem.arrangementType || null,
-                    arrangementSelections: Array.isArray(firstItem.arrangementSelections) ? firstItem.arrangementSelections : [],
-                    selectedFlowers: firstItem.selectedFlowers || [],
-                    flowers: firstItem.flowers || null,
+                    arrangementSummary: combinedArrangementSummary || firstItem.arrangementSummary || firstItem.arrangementType || null,
+                    arrangementSelections: combinedArrangementSelections,
+                    selectedFlowers: combinedSelectedFlowers,
+                    flowers: combinedSelectedFlowers.join(', ') || null,
                     estimated_total: hasEstimatedInquiryTotal ? estimatedInquiryTotal : null,
                     tentative_pricing: combinedPricingSummary.hasAnyEstimate ? {
                         has_complete_estimate: combinedPricingSummary.hasCompleteEstimate,
                         subtotal_min: combinedPricingSummary.subtotalMin,
                         subtotal_max: combinedPricingSummary.subtotalMax,
                     } : null,
-                    colorPreference: firstItem.colorPreference || null,
-                    specialInstructions: firstItem.specialInstructions || null,
+                    colorPreference: combinedColorPreference || firstItem.colorPreference || null,
+                    specialInstructions: commonNotes || firstItem.specialInstructions || null,
                     address: deliveryMethod === 'delivery' ? address : null,
                     address_id: deliveryMethod === 'delivery' ? (primaryDestination?.address_id || selectedAddressId) : null,
                     multi_delivery_destinations: multiDeliveryDestinations,
@@ -401,7 +523,25 @@ const BookingCheckout = ({ user }) => {
             }
 
             localStorage.removeItem('bookingCart');
-            localStorage.removeItem(`bookingCart_${user.id}`);
+            localStorage.removeItem(getBookingCheckoutStorageKey(user.id));
+
+            const scopedCartKey = `bookingCart_${user.id}`;
+            const submittedItemKeys = new Set(uploadedItems.map((item) => getBookingCheckoutItemKey(item)).filter(Boolean));
+
+            try {
+                const persistedCart = JSON.parse(localStorage.getItem(scopedCartKey) || '[]');
+                const remainingItems = persistedCart.filter((item) => !submittedItemKeys.has(getBookingCheckoutItemKey(item)));
+
+                if (remainingItems.length > 0) {
+                    localStorage.setItem(scopedCartKey, JSON.stringify(remainingItems));
+                } else {
+                    localStorage.removeItem(scopedCartKey);
+                }
+            } catch (storageError) {
+                console.error('Error updating booking cart after request submission:', storageError);
+                localStorage.removeItem(scopedCartKey);
+            }
+
             localStorage.removeItem(`bookSelection_${user.id}`);
 
             navigate(`/request-tracking/${requestNumber}`);

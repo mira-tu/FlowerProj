@@ -13,6 +13,7 @@ import {
     getUserFullName,
 } from '../utils/customerProfile';
 import InfoModal from '../components/InfoModal';
+import CustomOrderQuoteBreakdown from '../components/CustomOrderQuoteBreakdown';
 import CustomOrderQuotePaymentModal from '../components/CustomOrderQuotePaymentModal';
 import { insertUserNotification } from '../utils/notificationApi';
 import {
@@ -21,6 +22,7 @@ import {
     normalizeCancellationItem,
     summarizeCancellationItems,
 } from '../utils/orderCancellation';
+import { summarizeCustomOrderQuoteBreakdown } from '../utils/customOrderQuoteBreakdown';
 
 const parseJsonObject = (value) => {
     if (!value) return {};
@@ -55,48 +57,6 @@ const getRequestIdFromOrder = (order) => (
     || (order?.isRequest && typeof order?.id === 'string' ? order.id.replace(/^request-/, '') : null)
     || null
 );
-
-const summarizeCustomOrderQuoteBreakdown = (breakdown = {}, fallbackShipping = 0) => {
-    const rawLineItems = Array.isArray(breakdown?.line_items) ? breakdown.line_items : [];
-    const lineItems = rawLineItems.length
-        ? rawLineItems
-            .map((item, index) => {
-                const label = String(item?.product_name || item?.flowerName || item?.name || `Item ${index + 1}`).trim();
-                const hasQuantity = item?.quantity != null || item?.qty != null;
-                const quantity = hasQuantity ? (Number(item?.quantity ?? item?.qty) || 0) : 1;
-                const unitPrice = Number(item?.unit_price ?? item?.unitPrice ?? item?.price) || 0;
-                const explicitTotal = Number(item?.total ?? item?.line_total ?? item?.lineTotal);
-
-                return {
-                    key: `${label}-${index}`,
-                    label,
-                    quantity,
-                    unitPrice,
-                    total: Number.isFinite(explicitTotal) ? explicitTotal : (hasQuantity ? quantity * unitPrice : unitPrice),
-                    showQuantity: hasQuantity,
-                };
-            })
-            .filter((item) => item.label)
-        : Object.keys(breakdown?.quantity_per_flower || {}).map((flowerName, index) => {
-            const quantity = Number(breakdown?.quantity_per_flower?.[flowerName]) || 0;
-            const unitPrice = Number(breakdown?.price_per_flower?.[flowerName]) || 0;
-
-            return {
-                key: `${flowerName}-${index}`,
-                label: flowerName,
-                quantity,
-                unitPrice,
-                total: quantity * unitPrice,
-                showQuantity: true,
-            };
-        });
-
-    const subtotal = Number(breakdown?.computed_subtotal ?? breakdown?.subtotal ?? lineItems.reduce((sum, item) => sum + item.total, 0));
-    const shipping = Number(breakdown?.shipping_fee ?? breakdown?.shippingFee ?? fallbackShipping ?? 0);
-    const total = Number(breakdown?.computed_total ?? breakdown?.total ?? (subtotal + shipping));
-
-    return { lineItems, subtotal, shipping, total };
-};
 
 const PROFILE_MENUS = ['orders', 'messages', 'addresses', 'settings'];
 
@@ -1379,16 +1339,15 @@ const Profile = ({ user, logout }) => {
 
                                 {order.type === 'booking' && order.status === 'quoted' && (order.quoteBreakdown || order.data?.quote_breakdown) && (() => {
                                     const breakdown = order.quoteBreakdown || order.data?.quote_breakdown;
-                                    const { lineItems, subtotal, shipping, total } = summarizeCustomOrderQuoteBreakdown(breakdown, order.shipping_fee);
-
                                     return (
-                                        <div className="mt-3 pt-3 border-top">
-                                            <div className="small fw-bold mb-2" style={{ color: 'var(--shop-pink)' }}>Price Breakdown</div>
-                                            {lineItems.length > 0 ? (
-                                                lineItems.map((item) => (
-                                                    <div key={item.key} className="d-flex justify-content-between small mb-1">
-                                                        <span>
-                                                            {item.label}
+                                        <>
+                                            <CustomOrderQuoteBreakdown
+                                            breakdown={breakdown}
+                                            shippingFee={order.shipping_fee}
+                                            title="Price Breakdown"
+                                                className="mt-3 pt-3 border-top"
+                                            />
+                                            {/*
                                                             {item.showQuantity ? ` (${item.quantity} x ₱${item.unitPrice.toLocaleString()})` : ''}
                                                         </span>
                                                         <span className="fw-semibold">₱{item.total.toLocaleString()}</span>
@@ -1410,6 +1369,8 @@ const Profile = ({ user, logout }) => {
                                                 <span>₱{total.toLocaleString()}</span>
                                             </div>
                                         </div>
+                                            */}
+                                        </>
                                     );
                                 })()}
 

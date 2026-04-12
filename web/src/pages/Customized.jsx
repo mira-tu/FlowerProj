@@ -199,6 +199,94 @@ const cropCanvasToContent = (sourceCanvas, padding = 24) => {
   return croppedCanvas;
 };
 
+const resizeCanvasToFit = (sourceCanvas, maxDimension = 420) => {
+  if (!sourceCanvas) return sourceCanvas;
+
+  const { width, height } = sourceCanvas;
+  if (!width || !height) return sourceCanvas;
+
+  const safeMaxDimension = Number.parseInt(maxDimension, 10);
+  if (!Number.isFinite(safeMaxDimension) || safeMaxDimension <= 0) {
+    return sourceCanvas;
+  }
+
+  if (width <= safeMaxDimension && height <= safeMaxDimension) {
+    return sourceCanvas;
+  }
+
+  const ratio = Math.min(safeMaxDimension / width, safeMaxDimension / height);
+  const nextWidth = Math.max(1, Math.round(width * ratio));
+  const nextHeight = Math.max(1, Math.round(height * ratio));
+  const resizedCanvas = document.createElement('canvas');
+  resizedCanvas.width = nextWidth;
+  resizedCanvas.height = nextHeight;
+
+  const resizedContext = resizedCanvas.getContext('2d');
+  if (!resizedContext) return sourceCanvas;
+
+  resizedContext.drawImage(sourceCanvas, 0, 0, width, height, 0, 0, nextWidth, nextHeight);
+  return resizedCanvas;
+};
+
+const buildStorageFriendlySnapshot = (sourceCanvas) => {
+  if (!sourceCanvas) return null;
+
+  const dimensionSteps = [420, 320, 240];
+
+  for (const maxDimension of dimensionSteps) {
+    const resizedCanvas = resizeCanvasToFit(sourceCanvas, maxDimension);
+    const dataUrl = resizedCanvas.toDataURL('image/png');
+    if (dataUrl.length <= 450000 || maxDimension === dimensionSteps[dimensionSteps.length - 1]) {
+      return dataUrl;
+    }
+  }
+
+  return null;
+};
+
+const stripSelectionAssetFields = (selectionItem = {}) => {
+  if (!selectionItem || typeof selectionItem !== 'object') {
+    return selectionItem;
+  }
+
+  const {
+    img: _img,
+    image: _image,
+    layerImg: _layerImg,
+    layer_img: _layerImgAlt,
+    stemImg: _stemImg,
+    stem_img: _stemImgAlt,
+    ...rest
+  } = selectionItem;
+
+  return rest;
+};
+
+const buildStorageFriendlyCustomizedBouquet = (bouquet = {}, { includeImage = true } = {}) => ({
+  ...bouquet,
+  image: includeImage ? (bouquet.image || null) : null,
+  flowers: (Array.isArray(bouquet.flowers) ? bouquet.flowers : []).map((flower) => stripSelectionAssetFields(flower)),
+  wrapper: bouquet.wrapper ? stripSelectionAssetFields(bouquet.wrapper) : null,
+  ribbon: bouquet.ribbon ? stripSelectionAssetFields(bouquet.ribbon) : null,
+});
+
+const persistCustomizedCart = (cartKey, items = []) => {
+  const safeItems = (Array.isArray(items) ? items : []).map((item) => buildStorageFriendlyCustomizedBouquet(item, { includeImage: true }));
+
+  try {
+    localStorage.setItem(cartKey, JSON.stringify(safeItems));
+    return { usedImageFallback: false };
+  } catch (error) {
+    if (error?.name !== 'QuotaExceededError') {
+      throw error;
+    }
+
+    const imageLightItems = safeItems.map((item) => buildStorageFriendlyCustomizedBouquet(item, { includeImage: false }));
+    localStorage.setItem(cartKey, JSON.stringify(imageLightItems));
+    return { usedImageFallback: true };
+  }
+};
+
 const clampPreviewRatio = (value) => {
   if (!Number.isFinite(value)) return 0;
   return Math.min(1, Math.max(0, value));
@@ -1210,7 +1298,7 @@ const Customized = ({ addToCart }) => {
             backgroundColor: null, scale: 1, logging: false, useCORS: true,
           });
           const croppedCanvas = cropCanvasToContent(canvas);
-          photoBase64 = croppedCanvas.toDataURL('image/png');
+          photoBase64 = buildStorageFriendlySnapshot(croppedCanvas);
         } catch (canvasError) {
           console.error('Error capturing screenshot:', canvasError);
         }
@@ -1267,13 +1355,19 @@ const Customized = ({ addToCart }) => {
       const cartKey = `customizedCart_${session?.user?.id || 'guest'}`;
       const existingCart = JSON.parse(localStorage.getItem(cartKey) || '[]');
       const updatedCart = [...existingCart, customizedBouquet];
-      localStorage.setItem(cartKey, JSON.stringify(updatedCart));
+      persistCustomizedCart(cartKey, updatedCart);
 
       navigate('/cart', { state: { justAdded: 'customized' } });
 
     } catch (error) {
       console.error('Error adding to cart:', error);
-      setInfoModal({ show: true, title: 'Error', message: 'Error adding to cart. Please try again.' });
+      setInfoModal({
+        show: true,
+        title: 'Storage Full',
+        message: error?.name === 'QuotaExceededError'
+          ? 'Your browser storage is full for saved custom bouquets. Please remove older Customizer Studio drafts from the cart and try again.'
+          : 'Error adding to cart. Please try again.',
+      });
     }
   };
 

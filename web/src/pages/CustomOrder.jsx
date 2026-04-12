@@ -165,6 +165,60 @@ const buildCombinedOtherFlowersText = (otherFlowersTextByArrangement = {}) => (
     ).join(', ')
 );
 
+const cloneFlowerOptionList = (options = []) => (
+    Array.isArray(options)
+        ? options.filter(Boolean).slice()
+        : []
+);
+
+const buildArrangementUnitKey = (arrangementValue, unitIndex) => (
+    `${String(arrangementValue || '').trim()}::unit-${Number(unitIndex) || 1}`
+);
+
+const buildArrangementFlowerUnitMaps = ({
+    selectedValues = [],
+    arrangementQuantities = {},
+    existingPreferredByUnit = {},
+    existingOtherFlowersByUnit = {},
+    fallbackPreferredByArrangement = {},
+    fallbackOtherFlowersByArrangement = {},
+}) => {
+    const nextPreferredFlowersByUnit = {};
+    const nextOtherFlowersTextByUnit = {};
+
+    (Array.isArray(selectedValues) ? selectedValues : []).forEach((arrangementValue) => {
+        const parsedQty = Number.parseInt(arrangementQuantities?.[arrangementValue], 10);
+        const quantity = Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1;
+        const arrangementFallbackFlowers = cloneFlowerOptionList(fallbackPreferredByArrangement?.[arrangementValue]);
+        const arrangementFallbackOtherFlowers = String(
+            fallbackOtherFlowersByArrangement?.[arrangementValue] || ''
+        );
+
+        let lastUnitFlowers = arrangementFallbackFlowers;
+        let lastUnitOtherFlowersText = arrangementFallbackOtherFlowers;
+
+        for (let unitIndex = 1; unitIndex <= quantity; unitIndex += 1) {
+            const unitKey = buildArrangementUnitKey(arrangementValue, unitIndex);
+            const existingFlowers = cloneFlowerOptionList(existingPreferredByUnit?.[unitKey]);
+            const existingOtherFlowersText = String(existingOtherFlowersByUnit?.[unitKey] || '');
+            const nextFlowers = existingFlowers.length
+                ? existingFlowers
+                : cloneFlowerOptionList(lastUnitFlowers);
+            const nextOtherFlowersText = existingOtherFlowersText || lastUnitOtherFlowersText || '';
+
+            nextPreferredFlowersByUnit[unitKey] = nextFlowers;
+            nextOtherFlowersTextByUnit[unitKey] = nextOtherFlowersText;
+            lastUnitFlowers = nextFlowers;
+            lastUnitOtherFlowersText = nextOtherFlowersText;
+        }
+    });
+
+    return {
+        nextPreferredFlowersByUnit,
+        nextOtherFlowersTextByUnit,
+    };
+};
+
 const colorOptions = [
     { value: 'Pastel Pinks and Whites', label: 'Pastel Pinks and Whites', colors: ['#ffc0cb', '#ffffff'] },
     { value: 'Rustic Autumn Colors', label: 'Rustic Autumn Colors', colors: ['#d2691e', '#8b4513', '#cd853f'] },
@@ -595,6 +649,8 @@ const CustomOrder = ({ user }) => {
         selectedFlowers: [],
         preferredFlowersByArrangement: {},
         otherFlowersTextByArrangement: {},
+        preferredFlowersByUnit: {},
+        otherFlowersTextByUnit: {},
         colorPreferenceByArrangement: {},
         otherColorPreferenceByArrangement: {},
         inspirationImageByArrangement: {},
@@ -812,7 +868,23 @@ const CustomOrder = ({ user }) => {
                 inspirationImageByArrangement: {
                     ...(prev.inspirationImageByArrangement || {}),
                     [arrangementOption.value]: prev.inspirationImageByArrangement?.[arrangementOption.value] || null
-                }
+                },
+                ...buildArrangementFlowerUnitMaps({
+                    selectedValues: nextArrangementTypes,
+                    arrangementQuantities: nextArrangementQuantities,
+                    existingPreferredByUnit: prev.preferredFlowersByUnit || {},
+                    existingOtherFlowersByUnit: prev.otherFlowersTextByUnit || {},
+                    fallbackPreferredByArrangement: {
+                        ...(prev.preferredFlowersByArrangement || {}),
+                        [arrangementOption.value]: Array.isArray(prev.preferredFlowersByArrangement?.[arrangementOption.value])
+                            ? prev.preferredFlowersByArrangement[arrangementOption.value]
+                            : []
+                    },
+                    fallbackOtherFlowersByArrangement: {
+                        ...(prev.otherFlowersTextByArrangement || {}),
+                        [arrangementOption.value]: prev.otherFlowersTextByArrangement?.[arrangementOption.value] || ''
+                    },
+                }),
             };
         });
     }, [arrangementOptionLookup, preselectedArrangementValue]);
@@ -842,22 +914,24 @@ const CustomOrder = ({ user }) => {
         setFormData(prev => ({ ...prev, [name]: nextValue }));
     };
 
-    const handleArrangementFlowerSelect = (arrangementValue, selectedOptions) => {
+    const handleArrangementUnitFlowerSelect = (arrangementValue, unitIndex, selectedOptions) => {
+        const unitKey = buildArrangementUnitKey(arrangementValue, unitIndex);
         setFormData(prev => ({
             ...prev,
-            preferredFlowersByArrangement: {
-                ...prev.preferredFlowersByArrangement,
-                [arrangementValue]: selectedOptions || []
+            preferredFlowersByUnit: {
+                ...prev.preferredFlowersByUnit,
+                [unitKey]: selectedOptions || []
             }
         }));
     };
 
-    const handleArrangementOtherFlowersChange = (arrangementValue, value) => {
+    const handleArrangementUnitOtherFlowersChange = (arrangementValue, unitIndex, value) => {
+        const unitKey = buildArrangementUnitKey(arrangementValue, unitIndex);
         setFormData(prev => ({
             ...prev,
-            otherFlowersTextByArrangement: {
-                ...prev.otherFlowersTextByArrangement,
-                [arrangementValue]: value
+            otherFlowersTextByUnit: {
+                ...prev.otherFlowersTextByUnit,
+                [unitKey]: value
             }
         }));
     };
@@ -942,14 +1016,33 @@ const CustomOrder = ({ user }) => {
         [arrangementDetails]
     );
 
+    const arrangementUnitDetails = useMemo(
+        () => arrangementDetails.flatMap((detail) => (
+            Array.from({ length: detail.quantity }, (_, index) => {
+                const unitIndex = index + 1;
+                const unitKey = buildArrangementUnitKey(detail.value, unitIndex);
+                const unitLabel = detail.quantity > 1 ? `Unit ${unitIndex}` : null;
+                return {
+                    ...detail,
+                    unitIndex,
+                    unitKey,
+                    unitCount: detail.quantity,
+                    unitLabel,
+                    unitDisplayLabel: unitLabel || 'Unit 1',
+                };
+            })
+        )),
+        [arrangementDetails]
+    );
+
     const combinedSelectedFlowers = useMemo(
-        () => dedupeFlowerOptions(Object.values(formData.preferredFlowersByArrangement || {})),
-        [formData.preferredFlowersByArrangement]
+        () => dedupeFlowerOptions(Object.values(formData.preferredFlowersByUnit || {})),
+        [formData.preferredFlowersByUnit]
     );
 
     const combinedOtherFlowersText = useMemo(
-        () => buildCombinedOtherFlowersText(formData.otherFlowersTextByArrangement),
-        [formData.otherFlowersTextByArrangement]
+        () => buildCombinedOtherFlowersText(formData.otherFlowersTextByUnit),
+        [formData.otherFlowersTextByUnit]
     );
 
     const combinedArrangementColorSummary = useMemo(
@@ -1000,6 +1093,14 @@ const CustomOrder = ({ user }) => {
                 arrangementQuantities: nextQuantities,
                 preferredFlowersByArrangement: nextPreferredFlowersByArrangement,
                 otherFlowersTextByArrangement: nextOtherFlowersTextByArrangement,
+                ...buildArrangementFlowerUnitMaps({
+                    selectedValues,
+                    arrangementQuantities: nextQuantities,
+                    existingPreferredByUnit: prev.preferredFlowersByUnit || {},
+                    existingOtherFlowersByUnit: prev.otherFlowersTextByUnit || {},
+                    fallbackPreferredByArrangement: nextPreferredFlowersByArrangement,
+                    fallbackOtherFlowersByArrangement: nextOtherFlowersTextByArrangement,
+                }),
                 colorPreferenceByArrangement: nextColorPreferenceByArrangement,
                 otherColorPreferenceByArrangement: nextOtherColorPreferenceByArrangement,
                 inspirationImageByArrangement: nextInspirationImageByArrangement
@@ -1017,13 +1118,25 @@ const CustomOrder = ({ user }) => {
     const handleArrangementQuantityChange = (arrangementValue, value) => {
         const digitsOnly = value.replace(/[^\d]/g, '');
         const nextValue = digitsOnly === '' ? '' : String(Math.max(1, Number.parseInt(digitsOnly, 10)));
-        setFormData(prev => ({
-            ...prev,
-            arrangementQuantities: {
+        setFormData(prev => {
+            const nextArrangementQuantities = {
                 ...prev.arrangementQuantities,
                 [arrangementValue]: nextValue
-            }
-        }));
+            };
+
+            return {
+                ...prev,
+                arrangementQuantities: nextArrangementQuantities,
+                ...buildArrangementFlowerUnitMaps({
+                    selectedValues: prev.arrangementTypes,
+                    arrangementQuantities: nextArrangementQuantities,
+                    existingPreferredByUnit: prev.preferredFlowersByUnit || {},
+                    existingOtherFlowersByUnit: prev.otherFlowersTextByUnit || {},
+                    fallbackPreferredByArrangement: prev.preferredFlowersByArrangement || {},
+                    fallbackOtherFlowersByArrangement: prev.otherFlowersTextByArrangement || {},
+                }),
+            };
+        });
     };
 
     const handleArrangementQuantityStep = (arrangementValue, direction) => {
@@ -1218,27 +1331,27 @@ const CustomOrder = ({ user }) => {
     const handleSubmit = async () => {
         setIsSubmitting(true);
 
-        const arrangementSelections = arrangementDetails.map((detail) => {
-            const arrangementFlowers = Array.isArray(formData.preferredFlowersByArrangement?.[detail.value])
-                ? formData.preferredFlowersByArrangement[detail.value]
+        const expandedUnitItems = arrangementUnitDetails.map((detail, itemIndex) => {
+            const arrangementFlowers = Array.isArray(formData.preferredFlowersByUnit?.[detail.unitKey])
+                ? formData.preferredFlowersByUnit[detail.unitKey]
                 : [];
-            const arrangementOtherFlowersText = String(formData.otherFlowersTextByArrangement?.[detail.value] || '').trim();
+            const arrangementOtherFlowersText = String(formData.otherFlowersTextByUnit?.[detail.unitKey] || '').trim();
             const arrangementFlowerLabels = arrangementFlowers.map((flower) => flower?.label).filter(Boolean);
             const selectedColor = formData.colorPreferenceByArrangement?.[detail.value] || '';
             const otherColor = String(formData.otherColorPreferenceByArrangement?.[detail.value] || '').trim();
             const inspirationImageBase64 = formData.inspirationImageByArrangement?.[detail.value] || null;
-
-            return {
+            const isCustomArrangement = isSharedCustomCatalogOption(arrangementOptionLookup.get(detail.value));
+            const arrangementSelection = {
                 arrangement_type: detail.value,
                 arrangement_label: detail.label,
-                quantity: detail.quantity,
+                quantity: 1,
                 flowers_per_arrangement: detail.flowersPerArrangement || 0,
-                total_flowers: detail.totalFlowers || 0,
+                total_flowers: detail.flowersPerArrangement || 0,
                 estimated_price_min: detail.estimatedPriceMin || 0,
                 estimated_price_max: detail.estimatedPriceMax || 0,
                 estimated_price_note: detail.estimatedPriceNote || '',
-                tentative_subtotal_min: detail.tentativeSubtotalMin || 0,
-                tentative_subtotal_max: detail.tentativeSubtotalMax || 0,
+                tentative_subtotal_min: detail.estimatedPriceMin || 0,
+                tentative_subtotal_max: detail.estimatedPriceMax || 0,
                 preferredFlowers: arrangementFlowerLabels,
                 preferred_flowers: arrangementFlowerLabels,
                 otherFlowersText: arrangementOtherFlowersText || null,
@@ -1253,47 +1366,81 @@ const CustomOrder = ({ user }) => {
                 inspirationImageBase64,
                 inspiration_image_base64: inspirationImageBase64
             };
-        });
+            const unitLabel = detail.unitLabel || null;
+            const itemName = unitLabel ? `${detail.label} - ${unitLabel}` : detail.label;
+            const unitTentativeBreakdown = buildTentativeBreakdownFromSelections([{
+                arrangementLabel: detail.label,
+                quantity: 1,
+                estimatedPriceMin: detail.estimatedPriceMin,
+                estimatedPriceMax: detail.estimatedPriceMax,
+                estimatedPriceNote: detail.estimatedPriceNote,
+                tentativeSubtotalMin: detail.estimatedPriceMin,
+                tentativeSubtotalMax: detail.estimatedPriceMax,
+            }]);
+            const hasCustomFlowerSelection = arrangementFlowers.some((flower) => isSharedCustomCatalogOption(flower));
 
-        // 1. Prepare Cart Item
-        const newCartItem = {
-            id: Date.now(),
-            serviceType: "Custom Order",
-            name: arrangementSummary || selectedArrangementOptions.map((option) => option.label).join(', ') || 'Custom Order',
-            customerName: formData.customerName,
-            email: formData.email,
-            contactNumber: formData.contactNumber,
-            recipientName: formData.recipientName,
-            occasion: formData.occasion === 'Other' ? formData.otherOccasion : formData.occasion,
-            eventDate: formData.eventDate,
-            eventTime: formData.eventTime,
-            venue: formData.venue,
-            arrangementType: arrangementSummary || selectedArrangementOptions.map((option) => option.label).join(', '),
-            arrangementTypes: selectedArrangementOptions.map((option) => isSharedCustomCatalogOption(option) ? (formData.otherArrangementType?.trim() || option.label) : option.label),
-            arrangementTypeValues: selectedArrangementOptions.map((option) => option.value),
-            arrangementQuantities: formData.arrangementQuantities,
-            arrangementSelections,
-            tentativeBreakdown,
-            arrangementSummary,
-            arrangementQuantity: totalArrangementQuantity || 1,
-            flowerQuantity: hasOtherArrangement ? (formData.flowerQuantity || null) : null,
-            otherArrangementImageBase64: otherArrangementImagePreview,
-            totalFlowers: totalEstimatedFlowers > 0 ? totalEstimatedFlowers : null,
-            customerPreferredFlowers: combinedSelectedFlowers.map((flower) => flower.label),
-            customer_preferred_flowers: combinedSelectedFlowers.map((flower) => flower.label),
-            selectedFlowers: combinedSelectedFlowers.map((flower) => flower.label),
-            flowers: combinedSelectedFlowers.map((flower) => flower.label).join(', ') + (combinedOtherFlowersText ? ` (${combinedOtherFlowersText})` : ''),
-            otherFlowersText: combinedOtherFlowersText,
-            otherFlowersImageBase64: otherFlowersImagePreview,
-            colorPreference: combinedArrangementColorSummary || null,
-            specialInstructions: formData.specialInstructions,
-            inspirationImageBase64: leadArrangementInspirationImage,
-            requestVariant: 'custom_order_v2',
-            custom_order_version: 2,
-            flow: 'custom_order_v2',
-            qty: 1,
-            price: null
-        };
+            return {
+                id: `${Date.now()}-${detail.value}-${detail.unitIndex}-${itemIndex + 1}`,
+                serviceType: 'Custom Order',
+                name: itemName,
+                title: itemName,
+                label: itemName,
+                customerName: formData.customerName,
+                email: formData.email,
+                contactNumber: formData.contactNumber,
+                recipientName: formData.recipientName,
+                occasion: formData.occasion === 'Other' ? formData.otherOccasion : formData.occasion,
+                eventDate: formData.eventDate,
+                eventTime: formData.eventTime,
+                venue: formData.venue,
+                arrangementType: detail.label,
+                arrangementSummary: itemName,
+                arrangementText: itemName,
+                arrangementLabel: detail.label,
+                arrangementTypes: [detail.label],
+                arrangementTypeValues: [detail.value],
+                arrangementQuantities: { [detail.value]: '1' },
+                arrangementSelections: [arrangementSelection],
+                tentativeBreakdown: unitTentativeBreakdown,
+                parent_arrangement_key: detail.value,
+                parentArrangementKey: detail.value,
+                parent_arrangement_label: detail.label,
+                parentArrangementLabel: detail.label,
+                unit_key: detail.unitKey,
+                unitKey: detail.unitKey,
+                unit_index: detail.unitIndex,
+                unitIndex: detail.unitIndex,
+                unit_count: detail.unitCount,
+                unitCount: detail.unitCount,
+                unit_label: unitLabel,
+                unitLabel,
+                arrangementQuantity: 1,
+                arrangement_quantity: 1,
+                quantity: 1,
+                qty: 1,
+                flowerQuantity: isCustomArrangement ? (formData.flowerQuantity || null) : null,
+                otherArrangementImageBase64: isCustomArrangement ? otherArrangementImagePreview : null,
+                totalFlowers: detail.flowersPerArrangement > 0 ? detail.flowersPerArrangement : null,
+                total_flower_count: detail.flowersPerArrangement > 0 ? detail.flowersPerArrangement : null,
+                customerPreferredFlowers: arrangementFlowerLabels,
+                customer_preferred_flowers: arrangementFlowerLabels,
+                preferredFlowers: arrangementFlowerLabels,
+                preferred_flowers: arrangementFlowerLabels,
+                selectedFlowers: arrangementFlowerLabels,
+                flowers: arrangementFlowerLabels.join(', ') + (arrangementOtherFlowersText ? ` (${arrangementOtherFlowersText})` : ''),
+                otherFlowersText: arrangementOtherFlowersText || null,
+                other_flowers_text: arrangementOtherFlowersText || null,
+                otherFlowersImageBase64: hasCustomFlowerSelection ? otherFlowersImagePreview : null,
+                colorPreference: isSharedCustomCatalogOption(colorOptionLookup.get(selectedColor)) ? otherColor : selectedColor || null,
+                specialInstructions: formData.specialInstructions,
+                inspirationImageBase64,
+                image_url: inspirationImageBase64 || null,
+                requestVariant: 'custom_order_v2',
+                custom_order_version: 2,
+                flow: 'custom_order_v2',
+                price: null,
+            };
+        });
 
         // 2. Save to Local Storage
         let currentCart = [];
@@ -1307,7 +1454,7 @@ const CustomOrder = ({ user }) => {
             console.error("Failed to parse bookingCart from localStorage", e);
         }
 
-        currentCart.push(newCartItem);
+        currentCart.push(...expandedUnitItems);
         // Prevent Local Storage Quota Limit by keeping only the 5 most recent Custom Booking drafts
         if (currentCart.length > 5) {
             currentCart = currentCart.slice(-5);
@@ -1317,7 +1464,7 @@ const CustomOrder = ({ user }) => {
             localStorage.setItem(cartKey, JSON.stringify(currentCart));
         } catch (e) {
             console.error("Quota Exceeded! Resetting tracking cart forcefully", e);
-            localStorage.setItem(cartKey, JSON.stringify([newCartItem])); // Reset with newest item only
+            localStorage.setItem(cartKey, JSON.stringify(expandedUnitItems.slice(-5))); // Reset with newest items only
         }
 
         // 3. Clear modal and navigate
@@ -1681,13 +1828,9 @@ const CustomOrder = ({ user }) => {
                                             </div>
                                         </div>
                                         <div className="col-12 mt-3 position-relative">
-                                            <label className="form-label fw-semibold">Preferred Flowers Per Arrangement <span className="text-danger">*</span></label>
+                                            <label className="form-label fw-semibold">Preferred Flowers Per Arrangement Unit <span className="text-danger">*</span></label>
                                             <div className="d-grid gap-3">
                                                 {arrangementDetails.map((detail) => {
-                                                    const selectedArrangementFlowers = formData.preferredFlowersByArrangement?.[detail.value] || [];
-                                                    const selectedArrangementOtherFlowers = formData.otherFlowersTextByArrangement?.[detail.value] || '';
-                                                    const hasArrangementFlowerError = validated && selectedArrangementFlowers.length === 0;
-
                                                     return (
                                                         <div key={`flowers-${detail.value}`} className="arrangement-other-panel">
                                                             <div className="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-2">
@@ -1699,45 +1842,70 @@ const CustomOrder = ({ user }) => {
                                                                     </div>
                                                                 </div>
                                                             </div>
+                                                            <div className="d-grid gap-3">
+                                                                {Array.from({ length: detail.quantity }, (_, unitArrayIndex) => {
+                                                                    const unitIndex = unitArrayIndex + 1;
+                                                                    const unitKey = buildArrangementUnitKey(detail.value, unitIndex);
+                                                                    const selectedUnitFlowers = formData.preferredFlowersByUnit?.[unitKey] || [];
+                                                                    const selectedUnitOtherFlowers = formData.otherFlowersTextByUnit?.[unitKey] || '';
+                                                                    const hasArrangementFlowerError = validated && selectedUnitFlowers.length === 0;
+                                                                    const unitLabel = detail.quantity > 1 ? `Unit ${unitIndex}` : 'Unit 1';
 
-                                                            <Select
-                                                                isMulti
-                                                                options={catalogFlowerOptions}
-                                                                placeholder={`Select flowers for ${detail.label}...`}
-                                                                onChange={(selectedOptions) => handleArrangementFlowerSelect(detail.value, selectedOptions)}
-                                                                value={selectedArrangementFlowers}
-                                                                formatOptionLabel={flowerOptionLabel}
-                                                                styles={buildMultiSelectStyles(hasArrangementFlowerError)}
-                                                            />
-                                                            <input
-                                                                type="text"
-                                                                tabIndex={-1}
-                                                                style={{ opacity: 0, height: 0, position: 'absolute', left: 0 }}
-                                                                value={selectedArrangementFlowers.length > 0 ? 'selected' : ''}
-                                                                onChange={() => { }}
-                                                                required
-                                                            />
-                                                            {hasArrangementFlowerError && (
-                                                                <div className="text-danger small mt-1">Please select at least one preferred flower for this arrangement.</div>
-                                                            )}
+                                                                    return (
+                                                                        <div key={unitKey} className="rounded-4 border bg-white p-3">
+                                                                            <div className="d-flex justify-content-between align-items-center gap-3 flex-wrap mb-2">
+                                                                                <div className="fw-semibold">{unitLabel}</div>
+                                                                                <div className="text-muted small">
+                                                                                    {detail.flowersPerArrangement > 0
+                                                                                        ? `${detail.flowersPerArrangement} flowers guide`
+                                                                                        : 'Custom flower count pending'}
+                                                                                </div>
+                                                                            </div>
 
-                                                            {selectedArrangementFlowers.some((flower) => isSharedCustomCatalogOption(flower)) && (
-                                                                <input
-                                                                    type="text"
-                                                                    className="form-control bg-light border-0 py-3 mt-3"
-                                                                    placeholder={`Please specify flowers for ${detail.label}`}
-                                                                    value={selectedArrangementOtherFlowers}
-                                                                    onChange={(e) => handleArrangementOtherFlowersChange(detail.value, e.target.value)}
-                                                                    required
-                                                                />
-                                                            )}
+                                                                            <Select
+                                                                                isMulti
+                                                                                options={catalogFlowerOptions}
+                                                                                placeholder={`Select flowers for ${detail.label}${detail.quantity > 1 ? ` (${unitLabel})` : ''}...`}
+                                                                                onChange={(selectedOptions) => handleArrangementUnitFlowerSelect(detail.value, unitIndex, selectedOptions)}
+                                                                                value={selectedUnitFlowers}
+                                                                                formatOptionLabel={flowerOptionLabel}
+                                                                                styles={buildMultiSelectStyles(hasArrangementFlowerError)}
+                                                                            />
+                                                                            <input
+                                                                                type="text"
+                                                                                tabIndex={-1}
+                                                                                style={{ opacity: 0, height: 0, position: 'absolute', left: 0 }}
+                                                                                value={selectedUnitFlowers.length > 0 ? 'selected' : ''}
+                                                                                onChange={() => { }}
+                                                                                required
+                                                                            />
+                                                                            {hasArrangementFlowerError && (
+                                                                                <div className="text-danger small mt-1">Please select at least one preferred flower for this unit.</div>
+                                                                            )}
+
+                                                                            {selectedUnitFlowers.some((flower) => isSharedCustomCatalogOption(flower)) && (
+                                                                                <input
+                                                                                    type="text"
+                                                                                    className="form-control bg-light border-0 py-3 mt-3"
+                                                                                    placeholder={`Please specify flowers for ${detail.label}${detail.quantity > 1 ? ` (${unitLabel})` : ''}`}
+                                                                                    value={selectedUnitOtherFlowers}
+                                                                                    onChange={(e) => handleArrangementUnitOtherFlowersChange(detail.value, unitIndex, e.target.value)}
+                                                                                    required
+                                                                                />
+                                                                            )}
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
                                                         </div>
                                                     );
                                                 })}
                                             </div>
 
                                             {arrangementDetails.some((detail) => (
-                                                (formData.preferredFlowersByArrangement?.[detail.value] || []).some((flower) => isSharedCustomCatalogOption(flower))
+                                                Array.from({ length: detail.quantity }, (_, unitArrayIndex) => (
+                                                    formData.preferredFlowersByUnit?.[buildArrangementUnitKey(detail.value, unitArrayIndex + 1)] || []
+                                                )).some((selectedUnitFlowers) => selectedUnitFlowers.some((flower) => isSharedCustomCatalogOption(flower)))
                                             )) && (
                                                 <div className="arrangement-other-panel mt-3">
                                                     <div className="mt-1">
@@ -1988,14 +2156,17 @@ const CustomOrder = ({ user }) => {
                                     <img src={otherArrangementImagePreview} alt="Arrangement reference" className="rounded-3 border" style={{ maxHeight: '120px', maxWidth: '100%', objectFit: 'cover' }} />
                                 </div>
                             )}
-                            {arrangementDetails.map((detail) => {
-                                const arrangementFlowers = formData.preferredFlowersByArrangement?.[detail.value] || [];
-                                const arrangementOtherFlowers = formData.otherFlowersTextByArrangement?.[detail.value] || '';
+                            {arrangementUnitDetails.map((detail) => {
+                                const arrangementFlowers = formData.preferredFlowersByUnit?.[detail.unitKey] || [];
+                                const arrangementOtherFlowers = formData.otherFlowersTextByUnit?.[detail.unitKey] || '';
                                 if (!arrangementFlowers.length) return null;
 
                                 return (
-                                    <div key={`summary-flowers-${detail.value}`} className="d-flex justify-content-between mb-2">
-                                        <span className="text-muted">{detail.label} Flowers:</span>
+                                    <div key={`summary-flowers-${detail.unitKey}`} className="d-flex justify-content-between mb-2">
+                                        <span className="text-muted">
+                                            {detail.label}
+                                            {detail.unitLabel ? ` (${detail.unitLabel})` : ''} Flowers:
+                                        </span>
                                         <span className="fw-semibold text-end" style={{ maxWidth: '60%' }}>
                                             {arrangementFlowers.map((flower) => flower.label).join(', ')}
                                             {arrangementOtherFlowers ? ` (${arrangementOtherFlowers})` : ''}

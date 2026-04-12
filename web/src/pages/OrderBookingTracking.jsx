@@ -3,16 +3,24 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import { supabase } from '../config/supabase';
 import TrackingPaymentDetails from '../components/TrackingPaymentDetails';
 import DeliveryDestinationsSummary from '../components/DeliveryDestinationsSummary';
+import TrackingDeliveryStops from '../components/TrackingDeliveryStops';
 import InfoModal from '../components/InfoModal';
+import CustomOrderQuoteBreakdown from '../components/CustomOrderQuoteBreakdown';
 import CustomOrderQuotePaymentModal from '../components/CustomOrderQuotePaymentModal';
 import { buildTimelineTimestampMap, formatTimelineTimestamp } from '../utils/timelineTimestamps';
 import { formatCustomOrderV4Currency, getSelectedEstimateFromItem, isCustomOrderV4Item } from '../utils/customOrderV4';
+import { summarizeCustomOrderQuoteBreakdown } from '../utils/customOrderQuoteBreakdown';
 import {
     applyRequestItemCancellation,
     getCancellationItemDisplayLabel,
     normalizeCancellationItem,
     summarizeCancellationItems,
 } from '../utils/orderCancellation';
+import {
+    areAllDeliveryStopsConfirmed,
+    confirmDeliveryStop,
+    hasStopConfirmationFlow,
+} from '../utils/deliveryDestinations';
 import {
     canRequestRefund,
     createRefundRequest,
@@ -138,13 +146,19 @@ const getArrangementSelectionPreferredFlowerNames = (selection = {}, fallbackOth
 );
 
 const formatBookingArrangement = (item = {}) => {
+    const unitLabel = String(item?.unit_label || item?.unitLabel || '').trim();
+    if (unitLabel && String(item?.name || '').trim()) {
+        return String(item.name).trim();
+    }
+
     const arrangementSelections = Array.isArray(item.arrangementSelections) ? item.arrangementSelections : [];
     if (arrangementSelections.length) {
         return arrangementSelections
             .map((selection) => {
                 const label = selection?.arrangement_label || selection?.arrangementLabel || selection?.arrangement_type || selection?.arrangementType;
                 const quantity = Number(selection?.quantity || selection?.arrangement_quantity || 1);
-                return label ? `${label} x${quantity}` : null;
+                if (!label) return null;
+                return quantity > 1 ? `${label} x${quantity}` : label;
             })
             .filter(Boolean)
             .join(', ');
@@ -260,48 +274,6 @@ const buildBookingOverview = (requestData = {}) => {
     };
 };
 
-const summarizeCustomOrderQuoteBreakdown = (breakdown = {}, fallbackShipping = 0) => {
-    const rawLineItems = Array.isArray(breakdown?.line_items) ? breakdown.line_items : [];
-    const lineItems = rawLineItems.length
-        ? rawLineItems
-            .map((item, index) => {
-                const label = String(item?.product_name || item?.flowerName || item?.name || `Item ${index + 1}`).trim();
-                const hasQuantity = item?.quantity != null || item?.qty != null;
-                const quantity = hasQuantity ? (Number(item?.quantity ?? item?.qty) || 0) : 1;
-                const unitPrice = Number(item?.unit_price ?? item?.unitPrice ?? item?.price) || 0;
-                const explicitTotal = Number(item?.total ?? item?.line_total ?? item?.lineTotal);
-
-                return {
-                    key: `${label}-${index}`,
-                    label,
-                    quantity,
-                    unitPrice,
-                    total: Number.isFinite(explicitTotal) ? explicitTotal : (hasQuantity ? quantity * unitPrice : unitPrice),
-                    showQuantity: hasQuantity,
-                };
-            })
-            .filter((item) => item.label)
-        : Object.keys(breakdown?.quantity_per_flower || {}).map((flowerName, index) => {
-            const quantity = Number(breakdown?.quantity_per_flower?.[flowerName]) || 0;
-            const unitPrice = Number(breakdown?.price_per_flower?.[flowerName]) || 0;
-
-            return {
-                key: `${flowerName}-${index}`,
-                label: flowerName,
-                quantity,
-                unitPrice,
-                total: quantity * unitPrice,
-                showQuantity: true,
-            };
-        });
-
-    const subtotal = Number(breakdown?.computed_subtotal ?? breakdown?.subtotal ?? lineItems.reduce((sum, item) => sum + item.total, 0));
-    const shipping = Number(breakdown?.shipping_fee ?? breakdown?.shippingFee ?? fallbackShipping ?? 0);
-    const total = Number(breakdown?.computed_total ?? breakdown?.total ?? (subtotal + shipping));
-
-    return { lineItems, subtotal, shipping, total };
-};
-
 const OrderBookingTracking = () => {
     const navigate = useNavigate();
     const { requestNumber } = useParams();
@@ -325,6 +297,7 @@ const OrderBookingTracking = () => {
     const [submittingRefundDetails, setSubmittingRefundDetails] = useState(false);
     const [feedbackMessage, setFeedbackMessage] = useState('');
     const [submittingFeedback, setSubmittingFeedback] = useState(false);
+    const [confirmingStopKey, setConfirmingStopKey] = useState(null);
 
     const loadRequest = async (showLoader = true) => {
         if (!requestNumber) {
@@ -938,6 +911,73 @@ const OrderBookingTracking = () => {
         }
     };
 
+    const handleConfirmDeliveryStop = async (stop) => {
+        if (!request || !stop?.unit_key) {
+            return;
+        }
+
+        setConfirmingStopKey(stop.unit_key);
+
+        try {
+            const confirmedAt = new Date().toISOString();
+            const updatedDestinations = confirmDeliveryStop(
+                request?.requestData?.multi_delivery_destinations || [],
+                stop.unit_key,
+                {
+                    actorType: 'customer',
+                    actorUserId: request.user_id || null,
+                    confirmedAt,
+                }
+            );
+            const allConfirmed = areAllDeliveryStopsConfirmed(updatedDestinations);
+            const updatePayload = {
+                data: {
+                    ...(request.data || request.requestData || {}),
+                    multi_delivery_destinations: updatedDestinations,
+                },
+            };
+
+            if (allConfirmed) {
+                updatePayload.status = 'completed';
+                updatePayload.status_timestamps = {
+                    ...(request.status_timestamps || {}),
+                    completed: confirmedAt,
+                };
+
+                if (String(request.payment_method || '').trim().toLowerCase() === 'cod') {
+                    updatePayload.payment_status = 'paid';
+                }
+            }
+
+            const { error } = await supabase
+                .from('requests')
+                .update(updatePayload)
+                .eq('id', request.id);
+
+            if (error) {
+                throw error;
+            }
+
+            await loadRequest(false);
+            setInfoModal({
+                show: true,
+                title: allConfirmed ? 'Request Confirmed' : 'Delivery Stop Confirmed',
+                message: allConfirmed
+                    ? 'Thank you for confirming the final delivery stop. Your request is now completed.'
+                    : 'This delivery stop was confirmed successfully.',
+            });
+        } catch (error) {
+            console.error('Error confirming request delivery stop:', error);
+            setInfoModal({
+                show: true,
+                title: 'Confirmation Failed',
+                message: error.message || 'We could not confirm this delivery stop right now. Please try again.',
+            });
+        } finally {
+            setConfirmingStopKey(null);
+        }
+    };
+
     const handleRequestRefund = async () => {
         if (!request) {
             setInfoModal({ show: true, title: 'Request Not Ready', message: 'This request is not ready for refund processing yet.' });
@@ -1055,6 +1095,7 @@ const OrderBookingTracking = () => {
     const bookingDestinations = Array.isArray(request?.requestData?.multi_delivery_destinations)
         ? request.requestData.multi_delivery_destinations
         : [];
+    const usesStopConfirmationFlow = hasStopConfirmationFlow(bookingDestinations);
     const canShowRefundRequest = Boolean(request) && canRequestRefund({
         paymentStatus: request?.payment_status,
         amountPaid: request?.amount_received,
@@ -1127,7 +1168,7 @@ const OrderBookingTracking = () => {
                             </span>
                         </div>
                         <div className="tracking-current-status">
-                            {request.status === 'out_for_delivery' && (
+                            {request.status === 'out_for_delivery' && !usesStopConfirmationFlow && (
                                 <button
                                     style={{
                                         display: 'inline-block',
@@ -1456,7 +1497,17 @@ const OrderBookingTracking = () => {
                                             <div className="delivery-value">{bookingOverview.venueText}</div>
                                         </div>
                                     )}
-                                    {bookingDestinations.length > 0 && (
+                                    {usesStopConfirmationFlow ? (
+                                        <div className="mt-4">
+                                            <TrackingDeliveryStops
+                                                destinations={bookingDestinations}
+                                                title="Delivery Stop Status"
+                                                fallbackRider={request.rider}
+                                                confirmingUnitKey={confirmingStopKey}
+                                                onConfirmStop={handleConfirmDeliveryStop}
+                                            />
+                                        </div>
+                                    ) : bookingDestinations.length > 0 && (
                                         <div className="mt-4">
                                             <DeliveryDestinationsSummary destinations={bookingDestinations} title="Assigned Delivery Stops" fallbackRider={request.rider} />
                                         </div>
@@ -1615,11 +1666,17 @@ const OrderBookingTracking = () => {
 
                             {request.status === 'quoted' && request.requestData?.quote_breakdown && (() => {
                                 const breakdown = request.requestData.quote_breakdown;
-                                const { lineItems, subtotal, shipping, total } = summarizeCustomOrderQuoteBreakdown(breakdown, request.shipping_fee);
+                                const { lineItems } = summarizeCustomOrderQuoteBreakdown(breakdown, request.shipping_fee);
 
                                 return (
-                                    <div className="mt-2 mb-3 p-3 rounded-3" style={{ background: '#fff5f8', border: '1px solid #fbcfe8' }}>
-                                        <div className="text-muted small fw-medium mb-2">Quote Price Breakdown</div>
+                                    <>
+                                        <CustomOrderQuoteBreakdown
+                                            breakdown={breakdown}
+                                            shippingFee={request.shipping_fee}
+                                            title={lineItems.length ? 'Quote Price Breakdown' : 'Quote Breakdown'}
+                                            className="mt-2 mb-3"
+                                        />
+                                        {/*
                                         {lineItems.length > 0 ? lineItems.map((item) => (
                                             <div key={item.key} className="d-flex justify-content-between small mb-1">
                                                 <span>
@@ -1644,6 +1701,8 @@ const OrderBookingTracking = () => {
                                             <span>₱{total.toLocaleString()}</span>
                                         </div>
                                     </div>
+                                        */}
+                                    </>
                                 );
                             })()}
 

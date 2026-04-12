@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import * as ImagePicker from 'expo-image-picker';
 import {
   ActivityIndicator,
   Alert,
@@ -23,7 +24,14 @@ import styles from '../../AdminDashboard.styles';
 import { formatTimestamp, getPaymentStatusDisplay, getStatusLabel } from '../adminHelpers';
 import PaymentDetailsSection from '../components/PaymentDetailsSection';
 import { generateAndShareReceipt } from '../../../utils/receiptGenerator';
-import { groupDeliveryDestinations } from '../../../utils/deliveryDestinations';
+import {
+  DELIVERY_CONFIRMATION_OWNER,
+  DELIVERY_CONFIRMATION_STATUS,
+  getDeliveryStopDisplayLabel,
+  groupDeliveryDestinations,
+  hasStopConfirmationFlow,
+  normalizeDeliveryDestinations,
+} from '../../../utils/deliveryDestinations';
 import { filterOrderForAssignedRider, shouldRestrictOrderToAssignedRider } from '../../../utils/riderAssignmentFilter';
 
 const getNormalizedPaymentMethod = (paymentMethod) => String(paymentMethod || '').trim().toLowerCase();
@@ -109,6 +117,12 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
   const [riderSearchQuery, setRiderSearchQuery] = useState('');
   const [selectedStopGroupKey, setSelectedStopGroupKey] = useState(null);
   const [stopRiderAssignments, setStopRiderAssignments] = useState({});
+  const [deliveryStopModalVisible, setDeliveryStopModalVisible] = useState(false);
+  const [orderToCompleteStops, setOrderToCompleteStops] = useState(null);
+  const [selectedDeliveryStopKey, setSelectedDeliveryStopKey] = useState(null);
+  const [selectedDeliveryProof, setSelectedDeliveryProof] = useState(null);
+  const [deliveryProofNote, setDeliveryProofNote] = useState('');
+  const [isCompletingDeliveryStop, setIsCompletingDeliveryStop] = useState(false);
 
   const filteredAndSortedRiders = React.useMemo(() => {
     let result = [...riders];
@@ -129,6 +143,11 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
 
   const getGroupedDestinations = React.useCallback(
     (order) => groupDeliveryDestinations(order?.multi_delivery_destinations || []),
+    []
+  );
+
+  const getNormalizedStopDestinations = React.useCallback(
+    (order) => normalizeDeliveryDestinations(order?.multi_delivery_destinations || []),
     []
   );
 
@@ -448,8 +467,113 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
     setSelectedStatus(null);
   };
 
+  const closeDeliveryStopModal = React.useCallback(() => {
+    setDeliveryStopModalVisible(false);
+    setOrderToCompleteStops(null);
+    setSelectedDeliveryStopKey(null);
+    setSelectedDeliveryProof(null);
+    setDeliveryProofNote('');
+    setIsCompletingDeliveryStop(false);
+  }, []);
+
+  const pickDeliveryProofImage = React.useCallback(async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.8,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets?.[0]) {
+      setSelectedDeliveryProof(result.assets[0]);
+    }
+  }, []);
+
+  const openDeliveryStopModal = React.useCallback((order) => {
+    const stops = getNormalizedStopDestinations(order).filter((stop) => stop.confirmation_owner);
+    const firstActionableStop = stops.find((stop) => (
+      stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.RIDER
+      && stop.confirmation_status !== DELIVERY_CONFIRMATION_STATUS.CONFIRMED
+    ));
+
+    setOrderToCompleteStops(order);
+    setSelectedDeliveryStopKey(firstActionableStop?.unit_key || stops[0]?.unit_key || null);
+    setSelectedDeliveryProof(null);
+    setDeliveryProofNote('');
+    setDeliveryStopModalVisible(true);
+  }, [getNormalizedStopDestinations]);
+
+  const handleConfirmDeliveryStop = React.useCallback(async () => {
+    if (!orderToCompleteStops || !selectedDeliveryStopKey || isCompletingDeliveryStop) {
+      return;
+    }
+
+    const stops = getNormalizedStopDestinations(orderToCompleteStops);
+    const selectedStop = stops.find((stop) => stop.unit_key === selectedDeliveryStopKey);
+
+    if (!selectedStop) {
+      Alert.alert('Stop Not Found', 'Please choose a valid delivery stop.');
+      return;
+    }
+
+    if (selectedStop.confirmation_owner !== DELIVERY_CONFIRMATION_OWNER.RIDER) {
+      Alert.alert('Customer Confirmation Needed', 'This stop must be confirmed by the ordering customer.');
+      return;
+    }
+
+    if (selectedStop.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED) {
+      Alert.alert('Already Confirmed', 'This delivery stop already has a proof record.');
+      return;
+    }
+
+    if (!selectedDeliveryProof?.base64) {
+      Alert.alert('Proof Required', 'Please upload a delivery proof photo before completing this stop.');
+      return;
+    }
+
+    setIsCompletingDeliveryStop(true);
+
+    try {
+      const actorType = currentUser?.role === 'employee' ? 'rider' : 'staff';
+      const response = await adminAPI.completeOrderDeliveryStop(orderToCompleteStops.id, selectedDeliveryStopKey, {
+        actorId: currentUser?.id || null,
+        actorType,
+        proofFile: selectedDeliveryProof,
+        proofNote: deliveryProofNote,
+      });
+      const updatedOrder = response?.data?.order || null;
+
+      Toast.show({
+        type: 'success',
+        text1: updatedOrder?.status === 'completed' ? 'Order Completed' : 'Delivery Stop Completed',
+        text2: updatedOrder?.status === 'completed'
+          ? 'All delivery stops are now confirmed.'
+          : `${getDeliveryStopDisplayLabel(selectedStop)} now includes proof of delivery.`,
+      });
+
+      closeDeliveryStopModal();
+      await loadOrders({ showLoader: false });
+    } catch (error) {
+      const errorMessage = error?.message || 'Failed to complete this delivery stop.';
+      Toast.show({ type: 'error', text1: 'Completion Failed', text2: errorMessage });
+      Alert.alert('Completion Failed', errorMessage);
+    } finally {
+      setIsCompletingDeliveryStop(false);
+    }
+  }, [
+    closeDeliveryStopModal,
+    currentUser?.id,
+    currentUser?.role,
+    deliveryProofNote,
+    getNormalizedStopDestinations,
+    isCompletingDeliveryStop,
+    orderToCompleteStops,
+    selectedDeliveryProof,
+    selectedDeliveryStopKey,
+  ]);
+
   const openStatusModal = (order) => {
-    if (actionLockRef.current || statusModalVisible) {
+    if (actionLockRef.current || statusModalVisible || deliveryStopModalVisible) {
       return;
     }
 
@@ -462,6 +586,15 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
         'Assign Rider First',
         'Please assign a rider before changing the status of this delivery order.'
       );
+      return;
+    }
+
+    if (
+      order?.delivery_method === 'delivery'
+      && order?.status === 'out_for_delivery'
+      && hasStopConfirmationFlow(order?.multi_delivery_destinations || [])
+    ) {
+      openDeliveryStopModal(order);
       return;
     }
 
@@ -1239,6 +1372,18 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
     () => (orderToAssignRider ? getGroupedDestinations(orderToAssignRider) : []),
     [getGroupedDestinations, orderToAssignRider]
   );
+  const deliveryStopModalStops = React.useMemo(
+    () => (
+      orderToCompleteStops
+        ? getNormalizedStopDestinations(orderToCompleteStops).filter((stop) => stop.confirmation_owner)
+        : []
+    ),
+    [getNormalizedStopDestinations, orderToCompleteStops]
+  );
+  const selectedDeliveryStop = React.useMemo(
+    () => deliveryStopModalStops.find((stop) => stop.unit_key === selectedDeliveryStopKey) || null,
+    [deliveryStopModalStops, selectedDeliveryStopKey]
+  );
 
   const selectedStopGroup = React.useMemo(
     () => assignableStopGroups.find((group) => group.groupKey === selectedStopGroupKey) || assignableStopGroups[0] || null,
@@ -1249,6 +1394,8 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
   const assignRiderModalMaxHeight = Math.max(420, Math.min(screenHeight - 36, 760));
   const assignRiderStopListMaxHeight = Math.max(120, Math.min(screenHeight * 0.22, 220));
   const assignRiderListMaxHeight = Math.max(180, Math.min(screenHeight * 0.34, 320));
+  const deliveryStopModalMaxHeight = Math.max(460, Math.min(screenHeight - 36, 780));
+  const deliveryStopListMaxHeight = Math.max(180, Math.min(screenHeight * 0.32, 280));
 
   if (loading && !refreshing) {
     return (
@@ -1543,6 +1690,201 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
               >
                 <Text style={styles.buttonText}>Confirm</Text>
               </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={deliveryStopModalVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={closeDeliveryStopModal}
+      >
+        <View style={styles.statusModalBackdrop}>
+          <View style={[styles.timelineModalContainer, { maxHeight: deliveryStopModalMaxHeight }]}>
+            <View style={styles.statusModalHeader}>
+              <Text style={styles.statusModalTitle}>Complete Delivery Stop</Text>
+            </View>
+
+            <View style={{ padding: 20, gap: 16 }}>
+              {orderToCompleteStops ? (
+                <Text style={styles.timelineOrderNumber}>Order #{orderToCompleteStops.order_number}</Text>
+              ) : null}
+
+              <ScrollView
+                style={{ maxHeight: deliveryStopListMaxHeight }}
+                contentContainerStyle={{ gap: 10, paddingBottom: 4 }}
+                showsVerticalScrollIndicator={false}
+              >
+                {deliveryStopModalStops.map((stop, index) => {
+                  const isSelected = selectedDeliveryStopKey === stop.unit_key;
+                  const isConfirmed = stop.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED;
+                  const isCustomerOwned = stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER;
+
+                  return (
+                    <TouchableOpacity
+                      key={stop.unit_key || `order-stop-${index + 1}`}
+                      activeOpacity={0.88}
+                      disabled={isCustomerOwned || isConfirmed}
+                      onPress={() => {
+                        setSelectedDeliveryStopKey(stop.unit_key);
+                        setSelectedDeliveryProof(null);
+                        setDeliveryProofNote('');
+                      }}
+                      style={{
+                        borderWidth: 1,
+                        borderColor: isSelected ? '#EC4899' : '#E5E7EB',
+                        backgroundColor: isSelected ? '#FFF1F7' : '#FFFFFF',
+                        borderRadius: 16,
+                        padding: 14,
+                        opacity: isCustomerOwned ? 0.9 : 1,
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 15, fontWeight: '700', color: '#111827' }}>
+                            {getDeliveryStopDisplayLabel(stop, index)}
+                          </Text>
+                          <Text style={{ marginTop: 4, fontSize: 12, color: '#6B7280' }}>
+                            {stop.recipient_name || `Stop ${index + 1}`}
+                            {stop.recipient_phone ? ` • ${stop.recipient_phone}` : ''}
+                          </Text>
+                          {stop.addressText ? (
+                            <Text style={{ marginTop: 4, fontSize: 12, color: '#6B7280' }}>
+                              {stop.addressText}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                          <View style={{
+                            paddingHorizontal: 10,
+                            paddingVertical: 4,
+                            borderRadius: 999,
+                            backgroundColor: isCustomerOwned ? '#FCE7F3' : '#EDE9FE',
+                          }}>
+                            <Text style={{
+                              fontSize: 11,
+                              fontWeight: '700',
+                              color: isCustomerOwned ? '#BE185D' : '#6D28D9',
+                            }}>
+                              {isCustomerOwned ? 'Customer confirms' : 'Rider proof'}
+                            </Text>
+                          </View>
+                          <View style={{
+                            paddingHorizontal: 10,
+                            paddingVertical: 4,
+                            borderRadius: 999,
+                            backgroundColor: isConfirmed ? '#DCFCE7' : '#FEF3C7',
+                          }}>
+                            <Text style={{
+                              fontSize: 11,
+                              fontWeight: '700',
+                              color: isConfirmed ? '#166534' : '#92400E',
+                            }}>
+                              {isConfirmed ? 'Confirmed' : (isCustomerOwned ? 'Awaiting customer' : 'Pending proof')}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      {stop.proof_image_url ? (
+                        <Text style={{ marginTop: 10, fontSize: 12, color: '#059669', fontWeight: '600' }}>
+                          Proof uploaded
+                        </Text>
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              {selectedDeliveryStop && selectedDeliveryStop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.RIDER && selectedDeliveryStop.confirmation_status !== DELIVERY_CONFIRMATION_STATUS.CONFIRMED ? (
+                <View style={{ gap: 12 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#374151' }}>
+                    Proof for {getDeliveryStopDisplayLabel(selectedDeliveryStop)}
+                  </Text>
+                  <TouchableOpacity
+                    style={{
+                      borderRadius: 14,
+                      borderWidth: 1,
+                      borderColor: '#F9A8D4',
+                      borderStyle: 'dashed',
+                      paddingVertical: 14,
+                      paddingHorizontal: 16,
+                      alignItems: 'center',
+                      backgroundColor: '#FFF7FB',
+                    }}
+                    onPress={pickDeliveryProofImage}
+                    disabled={isCompletingDeliveryStop}
+                  >
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#BE185D' }}>
+                      {selectedDeliveryProof ? 'Change Proof Photo' : 'Upload Proof Photo'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {selectedDeliveryProof?.uri ? (
+                    <Image
+                      source={{ uri: selectedDeliveryProof.uri }}
+                      style={{ width: '100%', height: 180, borderRadius: 16, backgroundColor: '#F3F4F6' }}
+                      resizeMode="cover"
+                    />
+                  ) : null}
+
+                  <TextInput
+                    value={deliveryProofNote}
+                    onChangeText={setDeliveryProofNote}
+                    placeholder="Optional note about the delivery proof"
+                    multiline
+                    style={[
+                      styles.input,
+                      {
+                        minHeight: 92,
+                        textAlignVertical: 'top',
+                      },
+                    ]}
+                  />
+                </View>
+              ) : selectedDeliveryStop ? (
+                <View style={{
+                  borderRadius: 14,
+                  backgroundColor: '#F9FAFB',
+                  borderWidth: 1,
+                  borderColor: '#E5E7EB',
+                  padding: 14,
+                }}>
+                  <Text style={{ fontSize: 13, lineHeight: 20, color: '#6B7280' }}>
+                    {selectedDeliveryStop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER
+                      ? 'This stop will stay open until the ordering customer confirms it on tracking.'
+                      : 'This stop is already confirmed.'}
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={closeDeliveryStopModal}
+                  disabled={isCompletingDeliveryStop}
+                >
+                  <Text style={styles.buttonText}>Close</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.saveButton]}
+                  onPress={handleConfirmDeliveryStop}
+                  disabled={
+                    isCompletingDeliveryStop
+                    || !selectedDeliveryStop
+                    || selectedDeliveryStop.confirmation_owner !== DELIVERY_CONFIRMATION_OWNER.RIDER
+                    || selectedDeliveryStop.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED
+                    || !selectedDeliveryProof?.base64
+                  }
+                >
+                  <Text style={styles.buttonText}>
+                    {isCompletingDeliveryStop ? 'Saving...' : 'Complete Stop'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </View>

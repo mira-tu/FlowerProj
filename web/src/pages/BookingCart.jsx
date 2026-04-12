@@ -8,6 +8,7 @@ const BookingCart = ({ user }) => {
     const navigate = useNavigate();
     const [inquiryItems, setInquiryItems] = useState([]);
     const [catalogArrangements, setCatalogArrangements] = useState([]);
+    const bookingCheckoutKey = `bookingCheckoutItems_${user?.id || 'guest'}`;
 
     const normalizeInquiryItem = (item = {}) => ({
         ...item,
@@ -60,6 +61,7 @@ const BookingCart = ({ user }) => {
     };
 
     const handleProceedToCheckout = () => {
+        localStorage.setItem(bookingCheckoutKey, JSON.stringify(inquiryItems));
         navigate('/booking-checkout');
     };
 

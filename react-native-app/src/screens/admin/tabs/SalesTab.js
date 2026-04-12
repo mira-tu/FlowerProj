@@ -324,6 +324,46 @@ const createEmptyChartData = () => ({
   datasets: [{ data: [0] }],
 });
 
+const createEmptyBestSellerSections = () => ({
+  combined: [],
+  catalogProducts: [],
+  bookingFlowers: [],
+  customizedFlowers: [],
+});
+
+const normalizeBestSellerSections = (payload) => {
+  if (Array.isArray(payload)) {
+    return {
+      combined: payload,
+      catalogProducts: payload.filter((item) => String(item?.entry_type || '') === 'catalog_product'),
+      bookingFlowers: payload.filter((item) => String(item?.entry_type || '') === 'booking_flower'),
+      customizedFlowers: payload.filter((item) => String(item?.entry_type || '') === 'customized_flower'),
+    };
+  }
+
+  const combined = Array.isArray(payload?.combined)
+    ? payload.combined
+    : Array.isArray(payload?.data)
+      ? payload.data
+      : [];
+  const catalogProducts = Array.isArray(payload?.catalogProducts)
+    ? payload.catalogProducts
+    : combined.filter((item) => String(item?.entry_type || '') === 'catalog_product');
+  const bookingFlowers = Array.isArray(payload?.bookingFlowers)
+    ? payload.bookingFlowers
+    : combined.filter((item) => String(item?.entry_type || '') === 'booking_flower');
+  const customizedFlowers = Array.isArray(payload?.customizedFlowers)
+    ? payload.customizedFlowers
+    : combined.filter((item) => String(item?.entry_type || '') === 'customized_flower');
+
+  return {
+    combined,
+    catalogProducts,
+    bookingFlowers,
+    customizedFlowers,
+  };
+};
+
 const SalesTab = () => {
   const { width } = useWindowDimensions();
   const isWeb = Platform.OS === 'web';
@@ -348,7 +388,7 @@ const SalesTab = () => {
   const [selectedMonthKey, setSelectedMonthKey] = useState(formatMonthKey(new Date()));
   const [rangeStartKey, setRangeStartKey] = useState(todayKey);
   const [rangeEndKey, setRangeEndKey] = useState(todayKey);
-  const [bestSellers, setBestSellers] = useState([]);
+  const [bestSellers, setBestSellers] = useState(createEmptyBestSellerSections);
   const [transactions, setTransactions] = useState([]);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [selectedPipelineItem, setSelectedPipelineItem] = useState(null);
@@ -378,6 +418,7 @@ const SalesTab = () => {
   const overviewLoaded = sectionLoadKey.overview === activeFilterKey;
   const historyLoaded = sectionLoadKey.history === activeFilterKey;
   const productsLoaded = sectionLoadKey.products === activeFilterKey;
+  const hasBestSellerResults = bestSellers.catalogProducts.length > 0 || bestSellers.bookingFlowers.length > 0 || bestSellers.customizedFlowers.length > 0;
   const isCompactSalesSheet = !isWeb && width <= 420;
   const salesSheetHorizontalPadding = isCompactSalesSheet ? 16 : 20;
   const salesSheetWidth = isWeb ? 580 : Math.min(width - (isCompactSalesSheet ? 20 : 28), 500);
@@ -604,7 +645,7 @@ const SalesTab = () => {
         activeRangeStartKey,
         activeRangeEndKey
       );
-      const nextBestSellers = res.data || [];
+      const nextBestSellers = normalizeBestSellerSections(res);
       setBestSellers(nextBestSellers);
       setSectionLoadKey((prev) => ({
         ...prev,
@@ -613,12 +654,13 @@ const SalesTab = () => {
       return nextBestSellers;
     } catch (error) {
       console.error('Error loading best sellers:', error);
-      setBestSellers([]);
+      const emptyBestSellers = createEmptyBestSellerSections();
+      setBestSellers(emptyBestSellers);
       setSectionLoadKey((prev) => ({
         ...prev,
         products: activeFilterKey,
       }));
-      return [];
+      return emptyBestSellers;
     } finally {
       if (!background) {
         setSectionBusy(['products'], false);
@@ -924,6 +966,9 @@ const SalesTab = () => {
       });
       const exportOutstandingItems = exportSalesState.outstandingItems || [];
       const exportUpcomingItems = exportSalesState.upcomingItems || [];
+      const exportCatalogBestSellers = exportBestSellers?.catalogProducts || [];
+      const exportBookingFlowers = exportBestSellers?.bookingFlowers || [];
+      const exportCustomizedFlowers = exportBestSellers?.customizedFlowers || [];
 
       const renderHtmlTable = (columns, rows, emptyMessage) => {
         if (!rows.length) {
@@ -942,15 +987,23 @@ const SalesTab = () => {
         `;
       };
 
-      const bestSellerRows = exportBestSellers.map((product, index) => `
-        <tr>
-          <td style="padding: 8px; text-align: center; font-weight: ${index === 0 ? 'bold' : 'normal'}; color: ${index === 0 ? '#D97706' : '#333'};">#${index + 1}</td>
-          <td style="padding: 8px;">${product.name}</td>
-          <td style="padding: 8px;">${product.source_label || 'Item'}</td>
-          <td style="padding: 8px; text-align: center;">${product.total_sold}</td>
-          <td style="padding: 8px; text-align: right;">&#8369;${Number(product.total_revenue || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-        </tr>
-      `).join('');
+      const renderBestSellerTable = (items, emptyMessage) => {
+        if (!items.length) {
+          return `<p class="empty-note">${emptyMessage}</p>`;
+        }
+
+        const rows = items.map((product, index) => `
+          <tr>
+            <td style="padding: 8px; text-align: center; font-weight: ${index === 0 ? 'bold' : 'normal'}; color: ${index === 0 ? '#D97706' : '#333'};">#${index + 1}</td>
+            <td style="padding: 8px;">${product.name}</td>
+            <td style="padding: 8px;">${product.source_label || 'Item'}</td>
+            <td style="padding: 8px; text-align: center;">${product.total_sold}</td>
+            <td style="padding: 8px; text-align: right;">&#8369;${Number(product.total_revenue || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+          </tr>
+        `).join('');
+
+        return `<table><thead><tr><th style="text-align: center;">Rank</th><th>Product</th><th>Type</th><th style="text-align: center;">Units Sold</th><th style="text-align: right;">Revenue</th></tr></thead><tbody>${rows}</tbody></table>`;
+      };
 
       const transactionRows = exportTransactions.map((transaction) => `
         <tr>
@@ -1044,7 +1097,16 @@ const SalesTab = () => {
             ${outstandingTable}
             <h3>Upcoming Items</h3>
             ${upcomingTable}` : ''}
-          ${exportOptions.products ? `<h2>Products</h2>${exportBestSellers.length > 0 ? `<table><thead><tr><th style="text-align: center;">Rank</th><th>Product</th><th>Type</th><th style="text-align: center;">Units Sold</th><th style="text-align: right;">Revenue</th></tr></thead><tbody>${bestSellerRows}</tbody></table>` : `<p class="empty-note">No best-selling products for this filter.</p>`}` : ''}
+          ${exportOptions.products ? `
+            <h2>Products</h2>
+            <h3>Best-Selling Normal Orders</h3>
+            ${renderBestSellerTable(exportCatalogBestSellers, 'No best-selling normal-order products for this filter.')}
+            <h3>Best-Selling Flowers</h3>
+            <h4 style="color: #6B7280; margin-top: 14px; margin-bottom: 6px;">From Custom Orders</h4>
+            ${renderBestSellerTable(exportBookingFlowers, 'No best-selling flowers from Custom Orders for this filter.')}
+            <h4 style="color: #6B7280; margin-top: 14px; margin-bottom: 6px;">From Customizer Studio</h4>
+            ${renderBestSellerTable(exportCustomizedFlowers, 'No best-selling flowers from Customizer Studio for this filter.')}
+          ` : ''}
           ${exportOptions.history ? `<h2>History</h2>${exportTransactions.length > 0 ? `<table><thead><tr><th>Date</th><th>Reference</th><th>Type</th><th>Customer</th><th style="text-align: right;">Amount</th></tr></thead><tbody>${transactionRows}</tbody></table>` : `<p class="empty-note">No payment history for this filter.</p>`}` : ''}
         </body></html>
       `;
@@ -1193,19 +1255,24 @@ const SalesTab = () => {
     if (sectionLoading.products && !productsLoaded) {
       return renderSectionLoading('Loading best sellers...');
     }
-    if (bestSellers.length === 0) {
+    if (!hasBestSellerResults) {
       return renderEmptyState('flower-outline', 'No sales data yet');
     }
 
-    return (
-      <View>
-        <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 12 }}>
-          Top sellers across catalog products, custom orders, and Customizer Studio for the selected sales period.
-        </Text>
+    const renderBestSellerCarousel = (items, emptyMessage) => {
+      if (!items.length) {
+        return (
+          <View style={{ backgroundColor: '#fff', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#F3F4F6' }}>
+            <Text style={{ fontSize: 12, color: '#6B7280' }}>{emptyMessage}</Text>
+          </View>
+        );
+      }
+
+      return (
         <FlatList
           horizontal
           showsHorizontalScrollIndicator={false}
-          data={bestSellers}
+          data={items}
           keyExtractor={(item) => String(item.item_key || item.product_id || item.name)}
           renderItem={({ item, index }) => (
             <View style={{ backgroundColor: '#fff', borderRadius: 14, padding: 12, marginRight: 12, width: 148, alignItems: 'center', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 4, borderWidth: index === 0 ? 2 : 0, borderColor: index === 0 ? '#D97706' : 'transparent' }}>
@@ -1229,6 +1296,29 @@ const SalesTab = () => {
             </View>
           )}
         />
+      );
+    };
+
+    return (
+      <View>
+        <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 12 }}>
+          Normal order best sellers stay at the top. Flower stems are split below into Custom Orders and Customizer Studio.
+        </Text>
+        <Text style={{ fontSize: 16, fontWeight: '700', color: '#111827', marginBottom: 10 }}>
+          Best-Selling Normal Orders
+        </Text>
+        {renderBestSellerCarousel(bestSellers.catalogProducts, 'No best-selling normal-order products for this filter.')}
+        <Text style={{ fontSize: 16, fontWeight: '700', color: '#111827', marginTop: 20, marginBottom: 10 }}>
+          Best-Selling Flowers
+        </Text>
+        <Text style={{ fontSize: 13, fontWeight: '600', color: '#4B5563', marginBottom: 10 }}>
+          From Custom Orders
+        </Text>
+        {renderBestSellerCarousel(bestSellers.bookingFlowers, 'No best-selling flowers from Custom Orders for this filter.')}
+        <Text style={{ fontSize: 13, fontWeight: '600', color: '#4B5563', marginTop: 18, marginBottom: 10 }}>
+          From Customizer Studio
+        </Text>
+        {renderBestSellerCarousel(bestSellers.customizedFlowers, 'No best-selling flowers from Customizer Studio for this filter.')}
       </View>
     );
   };

@@ -2,10 +2,20 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 import { decode } from 'base64-arraybuffer';
 import {
+    areAllDeliveryStopsConfirmed,
+    confirmDeliveryStop,
+    getDeliveryStopDisplayLabel,
     groupDeliveryDestinations,
+    hasStopConfirmationFlow,
+    normalizeDeliveryDestinations,
     parseMultiDeliveryNotes,
     serializeMultiDeliveryNotes,
 } from '../utils/deliveryDestinations';
+import {
+    getCustomOrderQuoteTypeLabel,
+    normalizeCustomOrderQuoteLineItems,
+    summarizeCustomOrderQuoteBreakdown,
+} from '../utils/customOrderQuoteBreakdown';
 
 const ADMIN_WORKFLOW_FUNCTION = 'manage-admin-workflows';
 
@@ -261,6 +271,81 @@ const insertNotificationRecord = async (notification) => {
     if (error) {
         throw error;
     }
+};
+
+const getImageFileExtension = (file = {}) => {
+    const mimeType = String(file?.mimeType || '').trim().toLowerCase();
+
+    if (mimeType.includes('png')) return 'png';
+    if (mimeType.includes('webp')) return 'webp';
+    if (mimeType.includes('heic')) return 'heic';
+    if (mimeType.includes('heif')) return 'heif';
+    if (mimeType.includes('gif')) return 'gif';
+    if (mimeType.includes('jpeg') || mimeType.includes('jpg')) return 'jpg';
+
+    const fileName = String(file?.fileName || file?.name || '').trim();
+    const uri = String(file?.uri || '').trim();
+    const source = fileName || uri;
+    const sourceMatch = source.match(/\.([a-z0-9]+)(?:\?|$)/i);
+
+    return sourceMatch?.[1]?.toLowerCase?.() || 'jpg';
+};
+
+const uploadDeliveryProofImage = async (file, { entityType, entityId, unitKey }) => {
+    if (!file?.base64) {
+        throw new Error('Proof photo is required.');
+    }
+
+    const safeEntityType = String(entityType || 'delivery').trim().toLowerCase();
+    const safeUnitKey = String(unitKey || 'stop').trim().replace(/[^a-z0-9_-]+/gi, '-');
+    const extension = getImageFileExtension(file);
+    const contentType = file?.mimeType || `image/${extension === 'jpg' ? 'jpeg' : extension}`;
+    const fileName = `delivery-proofs/${safeEntityType}-${entityId || 'record'}-${safeUnitKey}-${Date.now()}.${extension}`;
+    const arrayBuffer = decode(file.base64);
+
+    const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('receipts')
+        .upload(fileName, arrayBuffer, {
+            cacheControl: '3600',
+            upsert: false,
+            contentType,
+        });
+
+    if (uploadError) {
+        throw uploadError;
+    }
+
+    const { data: publicUrlData } = supabase.storage.from('receipts').getPublicUrl(uploadData.path);
+    return publicUrlData?.publicUrl || null;
+};
+
+const normalizeDeliveryProofNote = (value) => {
+    const trimmed = String(value || '').trim();
+    return trimmed || '';
+};
+
+const buildDeliveryStopNotificationPayload = ({ entityType, record, stop }) => {
+    const referenceNumber = entityType === 'request'
+        ? record?.request_number || record?.id
+        : record?.order_number || record?.id;
+    const stopLabel = getDeliveryStopDisplayLabel(stop);
+    const link = entityType === 'request'
+        ? (
+            String(record?.type || '').trim().toLowerCase() === 'customized'
+                ? `/customized-request-tracking/${record?.request_number}`
+                : `/request-tracking/${record?.request_number}`
+        )
+        : `/order-tracking/${record?.order_number}`;
+
+    return {
+        user_id: record?.user_id,
+        title: 'Delivery proof uploaded',
+        message: stopLabel
+            ? `Proof of delivery for ${stopLabel} in ${entityType === 'request' ? 'request' : 'order'} #${referenceNumber} is now available.`
+            : `Proof of delivery for ${entityType === 'request' ? 'request' : 'order'} #${referenceNumber} is now available.`,
+        type: 'delivery_update',
+        link,
+    };
 };
 
 const maybeNotifyAssignedStopRiders = async ({ order, destinations }) => {
@@ -598,6 +683,126 @@ const assignOrderStopRidersDirect = async (orderId, stopAssignments = []) => {
     return { success: true, order: orderRecord };
 };
 
+const completeOrderDeliveryStopDirect = async (orderId, unitKey, options = {}) => {
+    const currentOrder = await getOrderById(orderId);
+    if (!currentOrder) {
+        throw new Error('Order not found.');
+    }
+
+    const parsedNotes = parseMultiDeliveryNotes(currentOrder?.notes);
+    const normalizedStops = normalizeDeliveryDestinations(parsedNotes.destinations);
+
+    if (!hasStopConfirmationFlow(normalizedStops)) {
+        throw new Error('This order still uses the legacy delivery confirmation flow.');
+    }
+
+    const normalizedUnitKey = String(unitKey || '').trim();
+    const stopToComplete = normalizedStops.find((stop) => stop.unit_key === normalizedUnitKey);
+
+    if (!stopToComplete) {
+        throw new Error('Delivery stop not found.');
+    }
+
+    if (stopToComplete.confirmation_owner !== 'rider') {
+        throw new Error('This delivery stop is waiting for customer confirmation.');
+    }
+
+    if (stopToComplete.confirmation_status === 'confirmed') {
+        return {
+            success: true,
+            order: {
+                ...currentOrder,
+                multi_delivery_destinations: normalizedStops,
+            },
+        };
+    }
+
+    if (!options?.proofFile?.base64) {
+        throw new Error('Proof photo is required before completing this delivery stop.');
+    }
+
+    const actorType = String(options?.actorType || 'staff').trim().toLowerCase() === 'rider'
+        ? 'rider'
+        : 'staff';
+    const confirmedAt = new Date().toISOString();
+    const proofNote = normalizeDeliveryProofNote(options?.proofNote);
+    const proofImageUrl = await uploadDeliveryProofImage(options.proofFile, {
+        entityType: 'order',
+        entityId: orderId,
+        unitKey: normalizedUnitKey,
+    });
+    const updatedDestinations = confirmDeliveryStop(normalizedStops, normalizedUnitKey, {
+        actorType,
+        actorUserId: options?.actorId || null,
+        proofImageUrl,
+        proofNote,
+        confirmedAt,
+    });
+    const allConfirmed = areAllDeliveryStopsConfirmed(updatedDestinations);
+    const updatePayload = {
+        notes: serializeMultiDeliveryNotes({
+            destinations: updatedDestinations,
+            note: parsedNotes.note,
+        }),
+    };
+
+    if (allConfirmed) {
+        updatePayload.status = 'completed';
+        updatePayload.status_timestamps = withStatusTimestamp(currentOrder?.status_timestamps, 'completed');
+
+        if (String(currentOrder?.payment_method || '').trim().toLowerCase() === 'cod') {
+            updatePayload.payment_status = 'paid';
+            updatePayload.amount_received = Math.max(
+                parseMoney(currentOrder?.amount_received),
+                parseMoney(currentOrder?.total)
+            );
+        }
+    }
+
+    const data = await updateOrderRecordAndReload(
+        orderId,
+        updatePayload,
+        (order) => {
+            const nextStops = parseMultiDeliveryNotes(order?.notes).destinations;
+            const matchedStop = normalizeDeliveryDestinations(nextStops).find((stop) => stop.unit_key === normalizedUnitKey);
+
+            if (!matchedStop || matchedStop.confirmation_status !== 'confirmed') {
+                return false;
+            }
+
+            if (allConfirmed && order?.status !== 'completed') {
+                return false;
+            }
+
+            return true;
+        }
+    );
+
+    if (currentOrder?.user_id) {
+        try {
+            await insertNotificationRecord(buildDeliveryStopNotificationPayload({
+                entityType: 'order',
+                record: currentOrder,
+                stop: {
+                    ...stopToComplete,
+                    proof_image_url: proofImageUrl,
+                    proof_note: proofNote,
+                },
+            }));
+        } catch (error) {
+            console.error('Failed to notify customer about order delivery proof:', error);
+        }
+    }
+
+    return {
+        success: true,
+        order: {
+            ...data,
+            multi_delivery_destinations: updatedDestinations,
+        },
+    };
+};
+
 const provideQuoteDirect = async (id, price, shippingFee = 0, quoteBreakdown = null) => {
     const finalItemPrice = parseFloat(price) || 0;
     const finalShippingFee = parseFloat(shippingFee) || 0;
@@ -903,6 +1108,162 @@ const buildRequestSelectColumns = (baseColumns = [], optionalColumns = [], inclu
     return columns.join(', ');
 };
 
+const getMissingTableColumnFallback = (error, tableName, fallbacks, options) => (
+    fallbacks.find(([columnName, optionKey]) => (
+        options[optionKey] !== false
+        && isMissingTableColumnError(error, tableName, columnName)
+    ))
+);
+
+const ADMIN_REQUEST_QUERY_SESSION_CACHE = {
+    requestOptionOverrides: {},
+    disableEmbeddedUsers: false,
+    userLookupOptionOverrides: {},
+};
+
+const REQUEST_QUERY_OPTION_FALLBACKS = [
+    ['image_url', 'includeImageUrl', 'image_url'],
+    ['notes', 'includeNotes', 'notes'],
+    ['cancellation_reason', 'includeCancellationReason', 'cancellation_reason'],
+    ['delivery_method', 'includeDeliveryMethod', 'delivery_method'],
+    ['pickup_time', 'includePickupTime', 'pickup_time'],
+    ['final_price', 'includeFinalPrice', 'final_price'],
+    ['shipping_fee', 'includeShippingFee', 'shipping_fee'],
+    ['payment_status', 'includePaymentStatus', 'payment_status'],
+    ['payment_method', 'includePaymentMethod', 'payment_method'],
+    ['receipt_url', 'includeReceiptUrl', 'receipt_url'],
+    ['amount_received', 'includeAmountReceived', 'amount_received'],
+    ['additional_receipts', 'includeAdditionalReceipts', 'additional_receipts'],
+    ['assigned_rider', 'includeAssignedRider', 'assigned_rider'],
+    ['status_timestamps', 'includeStatusTimestamps', 'status_timestamps'],
+];
+
+const REQUEST_EMBEDDED_USER_FALLBACKS = [
+    ['email', 'includeUserEmail', 'users.email'],
+    ['phone', 'includeUserPhone', 'users.phone'],
+];
+
+const REQUEST_USER_LOOKUP_FALLBACKS = [
+    ['email', 'includeEmail', 'users.email'],
+    ['phone', 'includePhone', 'users.phone'],
+];
+
+const isUsersEmbedRelationshipError = (error) => {
+    const message = String(error?.message || '').toLowerCase();
+    if (!message.includes('users')) {
+        return false;
+    }
+
+    return message.includes('relationship')
+        || message.includes('embedded resource')
+        || message.includes('foreign key')
+        || message.includes('schema cache')
+        || message.includes('could not find')
+        || message.includes('not found in the schema cache');
+};
+
+const buildAdminRequestSelectColumns = (options = {}) => {
+    const columns = [
+        'id',
+        'request_number',
+        'user_id',
+        'type',
+        'status',
+        'contact_number',
+        ...(options.includeImageUrl !== false ? ['image_url'] : []),
+        ...(options.includeNotes !== false ? ['notes'] : []),
+        ...(options.includeCancellationReason !== false ? ['cancellation_reason'] : []),
+        'data',
+        'created_at',
+        ...(options.includeDeliveryMethod !== false ? ['delivery_method'] : []),
+        ...(options.includePickupTime !== false ? ['pickup_time'] : []),
+        ...(options.includeFinalPrice !== false ? ['final_price'] : []),
+        ...(options.includeShippingFee !== false ? ['shipping_fee'] : []),
+        ...(options.includePaymentStatus !== false ? ['payment_status'] : []),
+        ...(options.includePaymentMethod !== false ? ['payment_method'] : []),
+        ...(options.includeReceiptUrl !== false ? ['receipt_url'] : []),
+        ...(options.includeAmountReceived !== false ? ['amount_received'] : []),
+        ...(options.includeAdditionalReceipts !== false ? ['additional_receipts'] : []),
+        ...(options.includeAssignedRider !== false ? ['assigned_rider'] : []),
+        ...(options.includeStatusTimestamps !== false ? ['status_timestamps'] : []),
+    ];
+
+    if (options.includeUsers !== false) {
+        const userColumns = [
+            'id',
+            'name',
+            ...(options.includeUserEmail !== false ? ['email'] : []),
+            ...(options.includeUserPhone !== false ? ['phone'] : []),
+        ];
+
+        columns.push(`users (${userColumns.join(', ')})`);
+    }
+
+    return columns.join(', ');
+};
+
+const buildAdminRequestUserSelectColumns = (options = {}) => [
+    'id',
+    'name',
+    ...(options.includeEmail !== false ? ['email'] : []),
+    ...(options.includePhone !== false ? ['phone'] : []),
+].join(', ');
+
+const fetchAdminRequestUsersByIds = async (userIds = []) => {
+    const normalizedIds = Array.from(new Set((Array.isArray(userIds) ? userIds : []).filter(Boolean)));
+    if (!normalizedIds.length) {
+        return new Map();
+    }
+
+    let queryOptions = {
+        includeEmail: true,
+        includePhone: true,
+        ...ADMIN_REQUEST_QUERY_SESSION_CACHE.userLookupOptionOverrides,
+    };
+
+    const runUserLookup = (options = {}) => supabase
+        .from('users')
+        .select(buildAdminRequestUserSelectColumns(options))
+        .in('id', normalizedIds);
+
+    let { data: users, error } = await runUserLookup(queryOptions);
+
+    let shouldRetry = true;
+    while (error && shouldRetry) {
+        shouldRetry = false;
+
+        const missingUserColumn = getMissingTableColumnFallback(
+            error,
+            'users',
+            REQUEST_USER_LOOKUP_FALLBACKS,
+            queryOptions
+        );
+
+        if (!missingUserColumn) {
+            break;
+        }
+
+        const [, optionKey, columnLabel] = missingUserColumn;
+        console.warn(`Users table is missing the ${columnLabel} column; retrying secondary request user lookup without it.`);
+        queryOptions = { ...queryOptions, [optionKey]: false };
+        ADMIN_REQUEST_QUERY_SESSION_CACHE.userLookupOptionOverrides[optionKey] = false;
+        ({ data: users, error } = await runUserLookup(queryOptions));
+        shouldRetry = Boolean(error);
+    }
+
+    if (error) {
+        console.warn('Unable to hydrate request users from fallback lookup:', error.message || error);
+        return new Map();
+    }
+
+    return (Array.isArray(users) ? users : []).reduce((userMap, user) => {
+        if (user?.id != null) {
+            userMap.set(String(user.id), user);
+        }
+        return userMap;
+    }, new Map());
+};
+
 const parseMoney = (value) => {
     if (value === null || value === undefined || value === '') {
         return 0;
@@ -938,8 +1299,13 @@ const getRequestTentativeAmount = (request) => {
 const getRequestShippingFeeAmount = (request = {}) => {
     const requestData = parseJsonObject(request?.data);
     const quoteBreakdown = parseJsonObject(requestData?.quote_breakdown || requestData?.quoteBreakdown);
+    const quoteSummary = summarizeCustomOrderQuoteBreakdown(
+        quoteBreakdown,
+        request?.shipping_fee ?? requestData?.shipping_fee ?? requestData?.shippingFee ?? 0
+    );
 
     return [
+        quoteSummary?.shipping,
         quoteBreakdown?.shipping_fee,
         quoteBreakdown?.shippingFee,
         request?.shipping_fee,
@@ -1040,16 +1406,10 @@ const getRequestItemUnitAmount = (item = {}, request = {}) => {
 const getRequestSourceSubtotal = (request = {}) => {
     const requestData = parseJsonObject(request?.data);
     const quoteBreakdown = parseJsonObject(requestData?.quote_breakdown || requestData?.quoteBreakdown);
-    const quoteLineItems = Array.isArray(quoteBreakdown?.line_items)
-        ? quoteBreakdown.line_items
-        : [];
+    const quoteSummary = summarizeCustomOrderQuoteBreakdown(quoteBreakdown);
 
-    if (quoteLineItems.length) {
-        return quoteLineItems.reduce((sum, row) => {
-            const quantity = getTransactionQuantity(row?.quantity);
-            const price = parseMoney(row?.price ?? row?.unit_price ?? row?.unitPrice);
-            return sum + (price * quantity);
-        }, 0);
+    if (quoteSummary.lineItems.length) {
+        return quoteSummary.subtotal;
     }
 
     const sourceItems = Array.isArray(requestData?.items)
@@ -1077,6 +1437,10 @@ const getRequestSourceSubtotal = (request = {}) => {
 const getRequestTotalAmount = (request, options = {}) => {
     const requestData = parseJsonObject(request?.data);
     const quoteBreakdown = parseJsonObject(requestData?.quote_breakdown || requestData?.quoteBreakdown);
+    const quoteSummary = summarizeCustomOrderQuoteBreakdown(
+        quoteBreakdown,
+        request?.shipping_fee ?? requestData?.shipping_fee ?? requestData?.shippingFee ?? 0
+    );
     const sourceItems = Array.isArray(requestData?.items)
         ? requestData.items.filter(Boolean)
         : [];
@@ -1090,6 +1454,10 @@ const getRequestTotalAmount = (request, options = {}) => {
             return 0;
         }
 
+        if (quoteSummary.lineItems.length) {
+            return sourceSubtotal + quoteSummary.shipping;
+        }
+
         return sourceSubtotal + shippingFee;
     }
 
@@ -1097,6 +1465,7 @@ const getRequestTotalAmount = (request, options = {}) => {
         hasCancelledItems ? null : request?.final_price,
         hasCancelledItems ? null : requestData?.final_price,
         hasCancelledItems ? null : requestData?.finalPrice,
+        quoteSummary.lineItems.length ? quoteSummary.total : null,
         quoteBreakdown?.computed_total,
     ].map(parseMoney).find((amount) => amount > 0) || 0;
     if (finalPrice > 0) {
@@ -1171,21 +1540,27 @@ const buildRequestItemDescription = (item = {}) => {
 const getRequestTransactionItems = (request = {}, saleAmount = 0) => {
     const requestData = parseJsonObject(request?.data);
     const quoteBreakdown = parseJsonObject(requestData?.quote_breakdown);
-    const quoteLineItems = Array.isArray(quoteBreakdown?.line_items)
-        ? quoteBreakdown.line_items
-        : [];
+    const quoteLineItems = normalizeCustomOrderQuoteLineItems(quoteBreakdown)
+        .filter((row) => row.type !== 'delivery');
 
     if (quoteLineItems.length) {
         return quoteLineItems.map((row, index) => {
-            const quantity = getTransactionQuantity(row?.quantity);
-            const price = parseMoney(row?.price ?? row?.unit_price ?? row?.unitPrice);
+            const quantity = row?.showQuantity ? Math.max(1, row?.quantity || 1) : 1;
+            const lineTotal = parseMoney(row?.amount);
+            const unitPrice = row?.showQuantity
+                ? parseMoney(row?.unitAmount)
+                : lineTotal;
 
             return {
-                name: getFirstTransactionText(row?.product_name, row?.productName, row?.name) || `Product ${index + 1}`,
+                name: getFirstTransactionText(row?.label, row?.product_name, row?.productName, row?.name) || `Charge ${index + 1}`,
                 quantity,
-                price,
-                lineTotal: price * quantity,
-                description: getFirstTransactionText(row?.arrangement_group, row?.arrangementGroup),
+                price: unitPrice,
+                lineTotal,
+                description: [
+                    getCustomOrderQuoteTypeLabel(row?.type),
+                    getFirstTransactionText(row?.arrangementGroup, row?.arrangement_group),
+                    getFirstTransactionText(row?.reason, row?.notes, row?.description),
+                ].filter(Boolean).join(' | '),
             };
         });
     }
@@ -1683,6 +2058,7 @@ const getRequestBestSellerFlowerEntries = (request = {}, saleAmount = 0) => {
         return flowerEntries.map((entry) => ({
             name: entry.name,
             image_url: entry.image_url || null,
+            request_type: requestType,
             quantity: parseMoney(entry.quantity),
             revenue: itemLineAmount > 0
                 ? (itemLineAmount * parseMoney(entry.quantity)) / totalFlowerQuantity
@@ -2098,6 +2474,150 @@ const assignRequestStopRidersDirect = async (requestId, stopAssignments = []) =>
     });
 
     return { success: true, request: requestRecord };
+};
+
+const completeRequestDeliveryStopDirect = async (requestId, unitKey, options = {}) => {
+    const { data: currentRequest, error: fetchError } = await supabase
+        .from('requests')
+        .select('*')
+        .eq('id', requestId)
+        .single();
+
+    if (fetchError) {
+        throw fetchError;
+    }
+
+    const currentData = parseJsonObject(currentRequest?.data);
+    const normalizedStops = normalizeDeliveryDestinations(currentData?.multi_delivery_destinations || []);
+
+    if (!hasStopConfirmationFlow(normalizedStops)) {
+        throw new Error('This request still uses the legacy delivery confirmation flow.');
+    }
+
+    const normalizedUnitKey = String(unitKey || '').trim();
+    const stopToComplete = normalizedStops.find((stop) => stop.unit_key === normalizedUnitKey);
+
+    if (!stopToComplete) {
+        throw new Error('Delivery stop not found.');
+    }
+
+    if (stopToComplete.confirmation_owner !== 'rider') {
+        throw new Error('This delivery stop is waiting for customer confirmation.');
+    }
+
+    if (stopToComplete.confirmation_status === 'confirmed') {
+        return {
+            success: true,
+            request: {
+                ...currentRequest,
+                data: {
+                    ...currentData,
+                    multi_delivery_destinations: normalizedStops,
+                },
+            },
+        };
+    }
+
+    if (!options?.proofFile?.base64) {
+        throw new Error('Proof photo is required before completing this delivery stop.');
+    }
+
+    const actorType = String(options?.actorType || 'staff').trim().toLowerCase() === 'rider'
+        ? 'rider'
+        : 'staff';
+    const confirmedAt = new Date().toISOString();
+    const proofNote = normalizeDeliveryProofNote(options?.proofNote);
+    const proofImageUrl = await uploadDeliveryProofImage(options.proofFile, {
+        entityType: String(currentRequest?.type || 'request').trim().toLowerCase() || 'request',
+        entityId: requestId,
+        unitKey: normalizedUnitKey,
+    });
+    const updatedDestinations = confirmDeliveryStop(normalizedStops, normalizedUnitKey, {
+        actorType,
+        actorUserId: options?.actorId || null,
+        proofImageUrl,
+        proofNote,
+        confirmedAt,
+    });
+    const allConfirmed = areAllDeliveryStopsConfirmed(updatedDestinations);
+    const nextData = {
+        ...currentData,
+        multi_delivery_destinations: updatedDestinations,
+    };
+    const updatePayload = {
+        data: nextData,
+    };
+
+    if (allConfirmed) {
+        updatePayload.status = 'completed';
+        updatePayload.status_timestamps = withStatusTimestamp(currentRequest?.status_timestamps, 'completed');
+
+        if (String(currentRequest?.payment_method || currentData?.payment_method || '').trim().toLowerCase() === 'cod') {
+            const paidAmount = Math.max(
+                parseMoney(currentRequest?.amount_received),
+                parseMoney(currentRequest?.final_price || currentData?.final_price)
+            );
+
+            updatePayload.payment_status = 'paid';
+            updatePayload.amount_received = paidAmount;
+
+            if (String(currentRequest?.type || '').trim().toLowerCase() === 'customized') {
+                updatePayload.data = {
+                    ...nextData,
+                    payment_status: 'paid',
+                };
+            }
+        }
+    }
+
+    const { data, error } = await supabase
+        .from('requests')
+        .update(updatePayload)
+        .eq('id', requestId)
+        .select('*')
+        .single();
+
+    if (error) {
+        throw error;
+    }
+
+    const persistedStops = normalizeDeliveryDestinations(parseJsonObject(data?.data)?.multi_delivery_destinations || []);
+    const persistedStop = persistedStops.find((stop) => stop.unit_key === normalizedUnitKey);
+
+    if (!persistedStop || persistedStop.confirmation_status !== 'confirmed') {
+        throw new Error('The delivery stop confirmation was not saved.');
+    }
+
+    if (allConfirmed && data?.status !== 'completed') {
+        throw new Error('The request was not marked as completed after the final stop confirmation.');
+    }
+
+    if (currentRequest?.user_id) {
+        try {
+            await insertNotificationRecord(buildDeliveryStopNotificationPayload({
+                entityType: 'request',
+                record: currentRequest,
+                stop: {
+                    ...stopToComplete,
+                    proof_image_url: proofImageUrl,
+                    proof_note: proofNote,
+                },
+            }));
+        } catch (error) {
+            console.error('Failed to notify customer about request delivery proof:', error);
+        }
+    }
+
+    return {
+        success: true,
+        request: {
+            ...data,
+            data: {
+                ...parseJsonObject(data?.data),
+                multi_delivery_destinations: updatedDestinations,
+            },
+        },
+    };
 };
 
 const getRefundRequestMap = async (fieldName, ids = []) => {
@@ -3184,6 +3704,10 @@ export const adminAPI = {
         }
     },
 
+    completeOrderDeliveryStop: async (orderId, unitKey, options = {}) => ({
+        data: await completeOrderDeliveryStopDirect(orderId, unitKey, options),
+    }),
+
     approveRefundRequest: async (refundId, options = {}) => {
         try {
             const data = await invokeAdminWorkflow('approve_refund_request', { refundId, ...options });
@@ -3788,12 +4312,14 @@ export const adminAPI = {
                 const request = requestMap.get(String(sale.request_id));
                 getRequestBestSellerFlowerEntries(request, sale?.total_amount).forEach((entry) => {
                     const normalizedName = normalizeBestSellerName(entry?.name);
+                    const requestType = String(entry?.request_type || request?.type || '').trim().toLowerCase();
+                    const isCustomizedFlower = requestType === 'customized';
                     addBestSellerAggregate(aggregateMap, {
-                        item_key: `flower:${normalizedName.toLowerCase()}`,
+                        item_key: `flower:${isCustomizedFlower ? 'customized' : 'booking'}:${normalizedName.toLowerCase()}`,
                         name: normalizedName || 'Unknown flower',
                         image_url: toAbsolutePublicImageUrl(entry?.image_url),
-                        entry_type: 'flower',
-                        source_label: 'Flower',
+                        entry_type: isCustomizedFlower ? 'customized_flower' : 'booking_flower',
+                        source_label: isCustomizedFlower ? 'Customizer Studio Flower' : 'Custom Order Flower',
                         total_sold: entry?.quantity,
                         total_revenue: entry?.revenue,
                     });
@@ -3807,8 +4333,22 @@ export const adminAPI = {
                 || parseMoney(right.total_revenue) - parseMoney(left.total_revenue)
                 || String(left.name || '').localeCompare(String(right.name || ''))
             ));
+        const catalogProducts = sorted
+            .filter((entry) => String(entry?.entry_type || '') === 'catalog_product')
+            .slice(0, 5);
+        const bookingFlowers = sorted
+            .filter((entry) => String(entry?.entry_type || '') === 'booking_flower')
+            .slice(0, 5);
+        const customizedFlowers = sorted
+            .filter((entry) => String(entry?.entry_type || '') === 'customized_flower')
+            .slice(0, 5);
 
-        return { data: sorted.slice(0, 5) };
+        return {
+            data: sorted,
+            catalogProducts,
+            bookingFlowers,
+            customizedFlowers,
+        };
     },
 
     getTransactionHistory: async (period = 'all', monthKey = null, dateKey = null, rangeStartKey = null, rangeEndKey = null) => {
@@ -4045,39 +4585,29 @@ export const adminAPI = {
         return { data: transactions };
     },
 
-    getAllRequests: async (params) => {
-        const buildRequestsQuery = (options = {}) => supabase
-            .from('requests')
-            .select(`
-                id,
-                request_number,
-                type,
-                status,
-                contact_number,
-                ${options.includeImageUrl !== false ? 'image_url,' : ''}
-                ${options.includeNotes !== false ? 'notes,' : ''}
-                ${options.includeCancellationReason !== false ? 'cancellation_reason,' : ''}
-                data,
-                created_at,
-                ${options.includeDeliveryMethod !== false ? 'delivery_method,' : ''}
-                ${options.includePickupTime !== false ? 'pickup_time,' : ''}
-                ${options.includeFinalPrice !== false ? 'final_price,' : ''}
-                ${options.includeShippingFee !== false ? 'shipping_fee,' : ''}
-                ${options.includePaymentStatus !== false ? 'payment_status,' : ''}
-                ${options.includePaymentMethod !== false ? 'payment_method,' : ''}
-                ${options.includeReceiptUrl !== false ? 'receipt_url,' : ''}
-                ${options.includeAmountReceived !== false ? 'amount_received,' : ''}
-                ${options.includeAdditionalReceipts !== false ? 'additional_receipts,' : ''}
-                ${options.includeAssignedRider !== false ? 'assigned_rider,' : ''}
-                ${options.includeStatusTimestamps !== false ? 'status_timestamps,' : ''}
-                users (
-                    id,
-                    name,
-                    email,
-                    phone
-                )
-            `)
-            .order('created_at', { ascending: false });
+    getAllRequests: async (params = {}) => {
+        const safeLimit = Number.isFinite(Number(params?.limit)) ? Math.max(1, Number(params.limit)) : null;
+        const safeOffset = Number.isFinite(Number(params?.offset)) ? Math.max(0, Number(params.offset)) : 0;
+        const requestId = params?.requestId ?? null;
+        const shouldIncludeUsers = params?.includeUsers !== false;
+        const shouldIncludeRefunds = params?.includeRefunds === true;
+
+        const buildRequestsQuery = (options = {}) => {
+            let query = supabase
+                .from('requests')
+                .select(buildAdminRequestSelectColumns(options))
+                .order('created_at', { ascending: false });
+
+            if (requestId != null) {
+                query = query.eq('id', requestId);
+            }
+
+            if (safeLimit && requestId == null) {
+                query = query.range(safeOffset, safeOffset + safeLimit - 1);
+            }
+
+            return query;
+        };
 
         let queryOptions = {
             includeImageUrl: true,
@@ -4094,52 +4624,74 @@ export const adminAPI = {
             includeAdditionalReceipts: true,
             includeAssignedRider: true,
             includeStatusTimestamps: true,
+            includeUsers: shouldIncludeUsers && !ADMIN_REQUEST_QUERY_SESSION_CACHE.disableEmbeddedUsers,
+            includeUserEmail: shouldIncludeUsers,
+            includeUserPhone: shouldIncludeUsers,
+            ...ADMIN_REQUEST_QUERY_SESSION_CACHE.requestOptionOverrides,
         };
 
-        let { data: requests, error } = await buildRequestsQuery(queryOptions);
+        if (!shouldIncludeUsers) {
+            queryOptions = {
+                ...queryOptions,
+                includeUsers: false,
+                includeUserEmail: false,
+                includeUserPhone: false,
+            };
+        }
 
-        const requestColumnFallbacks = [
-            ['requests.image_url', 'includeImageUrl', 'image_url'],
-            ['requests.notes', 'includeNotes', 'notes'],
-            ['requests.cancellation_reason', 'includeCancellationReason', 'cancellation_reason'],
-            ['requests.delivery_method', 'includeDeliveryMethod', 'delivery_method'],
-            ['requests.pickup_time', 'includePickupTime', 'pickup_time'],
-            ['requests.final_price', 'includeFinalPrice', 'final_price'],
-            ['requests.shipping_fee', 'includeShippingFee', 'shipping_fee'],
-            ['requests.payment_status', 'includePaymentStatus', 'payment_status'],
-            ['requests.payment_method', 'includePaymentMethod', 'payment_method'],
-            ['requests.receipt_url', 'includeReceiptUrl', 'receipt_url'],
-            ['requests.amount_received', 'includeAmountReceived', 'amount_received'],
-            ['requests.additional_receipts', 'includeAdditionalReceipts', 'additional_receipts'],
-            ['requests.assigned_rider', 'includeAssignedRider', 'assigned_rider'],
-            ['requests.status_timestamps', 'includeStatusTimestamps', 'status_timestamps'],
-        ];
+        let { data: requests, error } = await buildRequestsQuery(queryOptions);
 
         let shouldRetry = true;
         while (error && shouldRetry) {
             shouldRetry = false;
 
-            const errorCode = String(error?.code || '');
-            const errorMessage = String(error?.message || '');
-            const missingColumnMessage = errorCode === '42703' || errorCode === 'PGRST204' || errorMessage.includes('schema cache')
-                ? errorMessage
-                : '';
+            const missingRequestColumn = getMissingTableColumnFallback(
+                error,
+                'requests',
+                REQUEST_QUERY_OPTION_FALLBACKS,
+                queryOptions
+            );
 
-            if (!missingColumnMessage) {
-                break;
+            if (missingRequestColumn) {
+                const [, optionKey, columnLabel] = missingRequestColumn;
+                console.warn(`Requests table is missing the ${columnLabel} column; retrying admin request fetch without it.`);
+                queryOptions = { ...queryOptions, [optionKey]: false };
+                ADMIN_REQUEST_QUERY_SESSION_CACHE.requestOptionOverrides[optionKey] = false;
+                ({ data: requests, error } = await buildRequestsQuery(queryOptions));
+                shouldRetry = Boolean(error);
+                continue;
             }
 
-            for (const [needle, optionKey, columnLabel] of requestColumnFallbacks) {
-                const matchesMissingColumn = missingColumnMessage.includes(needle)
-                    || missingColumnMessage.includes(`'${columnLabel}' column of 'requests'`);
+            const missingEmbeddedUserColumn = queryOptions.includeUsers !== false
+                ? getMissingTableColumnFallback(
+                    error,
+                    'users',
+                    REQUEST_EMBEDDED_USER_FALLBACKS,
+                    queryOptions
+                )
+                : null;
 
-                if (queryOptions[optionKey] !== false && matchesMissingColumn) {
-                    console.warn(`Requests table is missing the ${columnLabel} column; retrying admin request fetch without it.`);
-                    queryOptions = { ...queryOptions, [optionKey]: false };
-                    ({ data: requests, error } = await buildRequestsQuery(queryOptions));
-                    shouldRetry = true;
-                    break;
-                }
+            if (missingEmbeddedUserColumn) {
+                const [, optionKey, columnLabel] = missingEmbeddedUserColumn;
+                console.warn(`Requests user join is missing the ${columnLabel} column; retrying admin request fetch without it.`);
+                queryOptions = { ...queryOptions, [optionKey]: false };
+                ADMIN_REQUEST_QUERY_SESSION_CACHE.requestOptionOverrides[optionKey] = false;
+                ({ data: requests, error } = await buildRequestsQuery(queryOptions));
+                shouldRetry = Boolean(error);
+                continue;
+            }
+
+            if (queryOptions.includeUsers !== false && shouldIncludeUsers && isUsersEmbedRelationshipError(error)) {
+                console.warn('Requests query cannot embed users in this schema; retrying admin request fetch with a secondary user lookup.');
+                queryOptions = {
+                    ...queryOptions,
+                    includeUsers: false,
+                    includeUserEmail: false,
+                    includeUserPhone: false,
+                };
+                ADMIN_REQUEST_QUERY_SESSION_CACHE.disableEmbeddedUsers = true;
+                ({ data: requests, error } = await buildRequestsQuery(queryOptions));
+                shouldRetry = Boolean(error);
             }
         }
 
@@ -4148,21 +4700,29 @@ export const adminAPI = {
             throw error;
         }
 
-        const formattedRequests = requests.map(req => {
-            const userData = req.users || {};
+        let fallbackUserMap = new Map();
+        if (shouldIncludeUsers && queryOptions.includeUsers === false) {
+            fallbackUserMap = await fetchAdminRequestUsersByIds((requests || []).map((request) => request?.user_id));
+        }
 
-            // Always prefer the top-level DB column for payment fields (they are updated by admin actions).
+        const formattedRequests = (Array.isArray(requests) ? requests : []).map((req) => {
+            const embeddedUser = Array.isArray(req.users) ? req.users[0] || {} : (req.users || {});
+            const fallbackUser = fallbackUserMap.get(String(req.user_id)) || {};
+            const userData = {
+                ...fallbackUser,
+                ...embeddedUser,
+            };
+
             let requestData = req.data;
             if (typeof requestData === 'string') {
                 try {
                     requestData = JSON.parse(requestData);
-                } catch (e) {
-                    console.error("Failed to parse request.data in adminAPI.getAllRequests:", e);
+                } catch (parseError) {
+                    console.error('Failed to parse request.data in adminAPI.getAllRequests:', parseError);
                     requestData = {};
                 }
             }
 
-            // Strip out 'Zamboanga Del Sur' if present in custom request address fields
             if (requestData?.deliveryAddress && typeof requestData.deliveryAddress === 'string') {
                 requestData.deliveryAddress = requestData.deliveryAddress.replace(/, Zamboanga [Dd]el Sur/gi, '');
             }
@@ -4184,7 +4744,7 @@ export const adminAPI = {
                         ) || 1;
                         const cancelledQuantity = Math.min(
                             originalQuantity,
-                            Number(item?.cancelled_quantity || item?.cancelledQuantity || 0) || 0,
+                            Number(item?.cancelled_quantity || item?.cancelledQuantity || 0) || 0
                         );
                         const remainingQuantity = Math.max(0, originalQuantity - cancelledQuantity);
 
@@ -4198,11 +4758,15 @@ export const adminAPI = {
                 };
             }
 
-            // Always prefer the top-level DB column for payment fields (they are updated by admin actions).
-            // Only fall back to JSONB 'data' if the top-level column is null/undefined.
-            const paymentStatusToUse = req.payment_status !== undefined && req.payment_status !== null ? req.payment_status : requestData?.payment_status;
-            const paymentMethodToUse = req.payment_method !== undefined && req.payment_method !== null ? req.payment_method : (requestData?.payment_method || 'gcash');
-            const receiptUrlToUse = req.receipt_url !== undefined && req.receipt_url !== null ? req.receipt_url : requestData?.receipt_url;
+            const paymentStatusToUse = req.payment_status !== undefined && req.payment_status !== null
+                ? req.payment_status
+                : requestData?.payment_status;
+            const paymentMethodToUse = req.payment_method !== undefined && req.payment_method !== null
+                ? req.payment_method
+                : (requestData?.payment_method || 'gcash');
+            const receiptUrlToUse = req.receipt_url !== undefined && req.receipt_url !== null
+                ? req.receipt_url
+                : requestData?.receipt_url;
 
             const deliveryMethodFromData = requestData?.delivery_method;
             const pickupTimeFromData = requestData?.pickup_time;
@@ -4233,9 +4797,9 @@ export const adminAPI = {
                 receipt_url: receiptUrlToUse,
                 delivery_method: deliveryMethodFromData || req.delivery_method,
                 pickup_time: pickupTimeFromData || req.pickup_time,
-                user_name: userData.name,
-                user_email: userData.email,
-                user_phone: userData.phone,
+                user_name: userData.name || requestData?.customerName || requestData?.name || 'N/A',
+                user_email: userData.email || '',
+                user_phone: userData.phone || req.contact_number || requestData?.contactNumber || requestData?.contact_number || '',
                 users: userData,
                 data: requestData,
                 cancellation_reason: req.cancellation_reason || requestData?.cancellation_reason || requestData?.decline_feedback || requestData?.declineFeedback || null,
@@ -4243,17 +4807,19 @@ export const adminAPI = {
         });
 
         let refundMap = new Map();
-        try {
-            refundMap = await getRefundRequestMap('request_id', formattedRequests.map((request) => request.id));
-        } catch (refundError) {
-            console.warn('Unable to load refund requests for requests:', refundError.message);
+        if (shouldIncludeRefunds) {
+            try {
+                refundMap = await getRefundRequestMap('request_id', formattedRequests.map((request) => request.id));
+            } catch (refundError) {
+                console.warn('Unable to load refund requests for requests:', refundError.message);
+            }
         }
 
         return {
             data: {
                 requests: formattedRequests.map((request) => ({
                     ...request,
-                    refund_request: refundMap.get(request.id) || null,
+                    refund_request: shouldIncludeRefunds ? (refundMap.get(request.id) || null) : null,
                 })),
             },
         };
@@ -4350,6 +4916,10 @@ export const adminAPI = {
             return { data: await assignRequestStopRidersDirect(requestId, stopAssignments) };
         }
     },
+
+    completeRequestDeliveryStop: async (requestId, unitKey, options = {}) => ({
+        data: await completeRequestDeliveryStopDirect(requestId, unitKey, options),
+    }),
 
     getAllStock: async () => {
         const { data: stock, error } = await supabase
