@@ -6,10 +6,8 @@ import RequestSuccessModal from '../components/RequestSuccessModal';
 import InfoModal from '../components/InfoModal'; // Import InfoModal
 import { supabase } from '../config/supabase';
 import { stockAPI } from '../config/api'; // Import stockAPI
-import palmHaloRibbonSource from '../assets/ribbons/palm-halo-ribbon-source.jpg';
 import {
   applyNaturalWrapperPreviewCropping,
-  buildPalmHaloRibbonOptions,
   getWrapperFlowerZoneConfig,
   getWrapperPreviewStyle,
   getWrapperRibbonPreviewConfig,
@@ -27,6 +25,7 @@ const placeholderStemImg = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAA
 const placeholderImg = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodGg9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiPjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodGg9IjEwMCIgZmlsbD0iI2UwZTBlMCIvPjx0ZXh0IHg9IjUwIiB5PSI1MCIgZm9udC1mYW1pbHk9ImFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjMzMzIiBhbmNob3ItcGVudD0ibWlkZGxlIiB0ZXh0LWFuY2hvcnM9Im1pZGRsZSI+Tm8gSW1hZ2U8L3RleHQ+PC9zdmc+'; // SVG "No Image" placeholder
 
 const MAX_STEM_COUNT = 500; // Maximum number of stems allowed for performance reasons.
+const PALM_HALO_RIBBON_NAME_PREFIX = 'Palm Halo Ribbon - ';
 const STEM_HANDLE_SIZE = 100;
 const CLASSIC_FLOWER_ZONE_WIDTH = 320;
 const CLASSIC_FLOWER_ZONE_HEIGHT = 250;
@@ -64,47 +63,81 @@ const WRAPPER_COLOR_SWATCH_MAP = {
   Purple: '#8b5cf6',
 };
 const normalizeText = (value) => String(value || '').trim();
-const normalizeColorKey = (value) => String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ');
-const getPalmHaloPreviewKey = (item = {}) => (
-  normalizeColorKey(
-    item?.colorName
-    || item?.wrapper_color
-    || item?.customization_config?.colorName
-    || item?.name
-  )
-);
-const decoratePalmHaloRibbonOptions = (stockOptions = [], generatedOptions = []) => {
-  if (!Array.isArray(stockOptions) || stockOptions.length === 0) {
-    return Array.isArray(generatedOptions) ? generatedOptions : [];
+const DEFAULT_PALM_HALO_RIBBON_PREVIEW_STYLE = Object.freeze({
+  top: '58%',
+  left: '50%',
+  width: '30%',
+  transform: 'translate(-50%, -50%)',
+});
+const parseItemCustomizationConfig = (value) => {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return {};
+  }
+};
+const stripPalmHaloRibbonNamePrefix = (value) => {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+  if (trimmed.toLowerCase().startsWith(PALM_HALO_RIBBON_NAME_PREFIX.toLowerCase())) {
+    return trimmed.slice(PALM_HALO_RIBBON_NAME_PREFIX.length).trim();
+  }
+  return trimmed;
+};
+const resolveStoredRibbonScope = (item = {}) => {
+  const explicitScope = String(item.ribbon_scope || '').trim();
+  if (explicitScope) {
+    return normalizeRibbonScope(explicitScope);
   }
 
-  if (!Array.isArray(generatedOptions) || generatedOptions.length === 0) {
-    return stockOptions;
+  const customizationConfig = parseItemCustomizationConfig(item.customization_config);
+  const configScope = String(
+    customizationConfig?.ribbon_scope
+    || customizationConfig?.ribbonScope
+    || customizationConfig?.scope
+    || ''
+  ).trim();
+
+  if (configScope) {
+    return normalizeRibbonScope(configScope);
   }
 
-  const generatedByKey = new Map(
-    generatedOptions.map((option) => [getPalmHaloPreviewKey(option), option])
-  );
+  const searchableText = [
+    item.name,
+    customizationConfig?.stockLabel,
+    customizationConfig?.scopeLabel,
+    customizationConfig?.wrapperMode,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
 
-  return stockOptions.map((item, index) => {
-    const matchedPreview = generatedByKey.get(getPalmHaloPreviewKey(item))
-      || generatedOptions[index % generatedOptions.length]
-      || null;
+  if (searchableText.includes('palm halo')) {
+    return RIBBON_SCOPE.PALM_HALO_WRAP;
+  }
 
-    if (!matchedPreview) {
-      return item;
-    }
+  return RIBBON_SCOPE.CLASSIC_BOUQUET;
+};
+const decorateStoredRibbonOption = (item = {}) => {
+  const customizationConfig = parseItemCustomizationConfig(item.customization_config);
+  const normalizedScope = resolveStoredRibbonScope(item);
+  const colorName = item.colorName || item.wrapper_color || customizationConfig.colorName || null;
+  const previewStyle = item.previewStyle
+    || customizationConfig.previewStyle
+    || (normalizedScope === RIBBON_SCOPE.PALM_HALO_WRAP ? DEFAULT_PALM_HALO_RIBBON_PREVIEW_STYLE : null);
 
-    return {
-      ...item,
-      img: item.img || matchedPreview.img,
-      layerImg: item.layerImg || matchedPreview.layerImg || matchedPreview.img,
-      colorName: item.colorName || matchedPreview.colorName || null,
-      swatch: item.swatch || matchedPreview.swatch || null,
-      stockLabel: item.stockLabel || 'Included with Palm Halo Wrap',
-      previewStyle: item.previewStyle || matchedPreview.previewStyle || null,
-    };
-  });
+  return {
+    ...item,
+    name: stripPalmHaloRibbonNamePrefix(item.name),
+    ribbon_scope: normalizedScope,
+    colorName,
+    swatch: item.swatch || customizationConfig.swatch || null,
+    stockLabel: item.stockLabel || customizationConfig.stockLabel || (normalizedScope === RIBBON_SCOPE.PALM_HALO_WRAP ? 'Included with Palm Halo Wrap' : ''),
+    previewStyle,
+  };
 };
 
 const normalizeStockCategory = (value) => {
@@ -224,6 +257,8 @@ const resizeCanvasToFit = (sourceCanvas, maxDimension = 420) => {
   const resizedContext = resizedCanvas.getContext('2d');
   if (!resizedContext) return sourceCanvas;
 
+  resizedContext.imageSmoothingEnabled = true;
+  resizedContext.imageSmoothingQuality = 'high';
   resizedContext.drawImage(sourceCanvas, 0, 0, width, height, 0, 0, nextWidth, nextHeight);
   return resizedCanvas;
 };
@@ -231,12 +266,12 @@ const resizeCanvasToFit = (sourceCanvas, maxDimension = 420) => {
 const buildStorageFriendlySnapshot = (sourceCanvas) => {
   if (!sourceCanvas) return null;
 
-  const dimensionSteps = [420, 320, 240];
+  const dimensionSteps = [640, 520, 420];
 
   for (const maxDimension of dimensionSteps) {
     const resizedCanvas = resizeCanvasToFit(sourceCanvas, maxDimension);
     const dataUrl = resizedCanvas.toDataURL('image/png');
-    if (dataUrl.length <= 450000 || maxDimension === dimensionSteps[dimensionSteps.length - 1]) {
+    if (dataUrl.length <= 700000 || maxDimension === dimensionSteps[dimensionSteps.length - 1]) {
       return dataUrl;
     }
   }
@@ -622,9 +657,7 @@ const Customized = ({ addToCart }) => {
   const [flowers, setFlowers] = useState([]);
   const [wrappers, setWrappers] = useState([]);
   const [ribbons, setRibbons] = useState([]);
-  const [palmHaloRibbonPreviewOptions, setPalmHaloRibbonPreviewOptions] = useState([]);
   const [loadingCustomizationData, setLoadingCustomizationData] = useState(true);
-  const [loadingPalmHaloRibbons, setLoadingPalmHaloRibbons] = useState(true);
   const [stemLayouts, setStemLayouts] = useState([]);
   const [draggingStemId, setDraggingStemId] = useState(null);
   const [wrapperColorModal, setWrapperColorModal] = useState({ open: false, groupId: null });
@@ -634,36 +667,6 @@ const Customized = ({ addToCart }) => {
     minimumOrderAmount: 0,
     isConfigured: false,
   });
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadPalmHaloRibbonVariants = async () => {
-      setLoadingPalmHaloRibbons(true);
-
-      try {
-        const options = await buildPalmHaloRibbonOptions(palmHaloRibbonSource);
-        if (isMounted) {
-          setPalmHaloRibbonPreviewOptions(options);
-        }
-      } catch (error) {
-        console.error('Error preparing Palm Halo ribbon options:', error);
-        if (isMounted) {
-          setPalmHaloRibbonPreviewOptions([]);
-        }
-      } finally {
-        if (isMounted) {
-          setLoadingPalmHaloRibbons(false);
-        }
-      }
-    };
-
-    loadPalmHaloRibbonVariants();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -737,7 +740,7 @@ const Customized = ({ addToCart }) => {
 
         const processedRibbons = allStockItems
           .filter(item => normalizeStockCategory(item.category) === 'Ribbons')
-          .map(item => ({
+          .map(item => decorateStoredRibbonOption({
             id: item.id,
             name: item.name,
             price: item.price,
@@ -794,14 +797,12 @@ const Customized = ({ addToCart }) => {
 
   const ribbonMode = useMemo(() => getWrapperRibbonMode(selection.wrapper), [selection.wrapper]);
   const classicRibbonOptions = useMemo(() => (
-    ribbons.filter((item) => normalizeRibbonScope(item.ribbon_scope) !== RIBBON_SCOPE.PALM_HALO_WRAP)
+    ribbons.filter((item) => resolveStoredRibbonScope(item) === RIBBON_SCOPE.CLASSIC_BOUQUET)
   ), [ribbons]);
   const palmHaloStockRibbonOptions = useMemo(() => (
-    ribbons.filter((item) => normalizeRibbonScope(item.ribbon_scope) === RIBBON_SCOPE.PALM_HALO_WRAP)
+    ribbons.filter((item) => resolveStoredRibbonScope(item) === RIBBON_SCOPE.PALM_HALO_WRAP)
   ), [ribbons]);
-  const palmHaloRibbonOptions = useMemo(() => (
-    decoratePalmHaloRibbonOptions(palmHaloStockRibbonOptions, palmHaloRibbonPreviewOptions)
-  ), [palmHaloRibbonPreviewOptions, palmHaloStockRibbonOptions]);
+  const palmHaloRibbonOptions = useMemo(() => palmHaloStockRibbonOptions, [palmHaloStockRibbonOptions]);
   const availableRibbonOptions = useMemo(() => {
     if (ribbonMode === 'classic') {
       return classicRibbonOptions;
@@ -1294,8 +1295,9 @@ const Customized = ({ addToCart }) => {
       });
       if (previewRef.current) {
         try {
+          const captureScale = Math.min(Math.max(window.devicePixelRatio || 1, 1.5), 2.5);
           const canvas = await html2canvas(previewRef.current, {
-            backgroundColor: null, scale: 1, logging: false, useCORS: true,
+            backgroundColor: null, scale: captureScale, logging: false, useCORS: true,
           });
           const croppedCanvas = cropCanvasToContent(canvas);
           photoBase64 = buildStorageFriendlySnapshot(croppedCanvas);
@@ -1498,7 +1500,7 @@ const Customized = ({ addToCart }) => {
       options = availableRibbonOptions;
     }
 
-    if (loadingCustomizationData || (groupKey === 'ribbons' && ribbonMode === 'palm-halo' && loadingPalmHaloRibbons && palmHaloStockRibbonOptions.length === 0)) {
+    if (loadingCustomizationData) {
       return <div className="loading-indicator">Loading options...</div>;
     }
     if (options.length === 0) {

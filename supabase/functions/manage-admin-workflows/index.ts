@@ -20,6 +20,14 @@ const ALLOWED_ROLES = new Set(["admin", "employee"]);
 const CUSTOMER_REFUND_ACTIONS = new Set(["create_refund_request", "submit_refund_gcash_details"]);
 const MULTI_DELIVERY_NOTES_PREFIX = "[multi_delivery_v1]";
 const ACTIVE_REFUND_STATUSES = ["requested", "approved", "gcash_submitted", "processing"];
+const DELIVERY_CONFIRMATION_OWNER = {
+  CUSTOMER: "customer",
+  RIDER: "rider",
+} as const;
+const DELIVERY_CONFIRMATION_STATUS = {
+  PENDING: "pending",
+  CONFIRMED: "confirmed",
+} as const;
 
 const transporter = GMAIL_USER && GMAIL_APP_PASSWORD
   ? nodemailer.createTransport({
@@ -257,6 +265,297 @@ const getUsersByRoles = async (
 const parseAmount = (value: unknown, fallback = 0) => {
   const parsed = Number.parseFloat(String(value ?? fallback));
   return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const normalizeDeliveryConfirmationOwner = (value: unknown, fallback: string | null = null) => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+
+  if (
+    normalized === DELIVERY_CONFIRMATION_OWNER.CUSTOMER
+    || normalized === DELIVERY_CONFIRMATION_OWNER.RIDER
+  ) {
+    return normalized;
+  }
+
+  return fallback;
+};
+
+const normalizeDeliveryConfirmationStatus = (
+  value: unknown,
+  fallback: string | null = DELIVERY_CONFIRMATION_STATUS.PENDING,
+) => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+
+  if (normalized === DELIVERY_CONFIRMATION_STATUS.CONFIRMED) {
+    return DELIVERY_CONFIRMATION_STATUS.CONFIRMED;
+  }
+
+  if (normalized === DELIVERY_CONFIRMATION_STATUS.PENDING) {
+    return DELIVERY_CONFIRMATION_STATUS.PENDING;
+  }
+
+  return fallback;
+};
+
+const buildDeliveryDestinationAddressText = (destination: Record<string, unknown> = {}) => {
+  const snapshot = destination?.address_snapshot && typeof destination.address_snapshot === "object"
+    ? destination.address_snapshot as Record<string, unknown>
+    : {};
+
+  return [
+    snapshot.street,
+    snapshot.barangay,
+    snapshot.city,
+    snapshot.province,
+    snapshot.zip,
+  ]
+    .filter(Boolean)
+    .join(", ");
+};
+
+const normalizeDeliveryDestination = (
+  destination: Record<string, unknown> = {},
+  index = 0,
+) => {
+  const unitNumberCandidate = Number.parseInt(
+    String(destination?.unit_number ?? destination?.unitNumber ?? ""),
+    10,
+  );
+  const unitNumber = Number.isFinite(unitNumberCandidate) && unitNumberCandidate > 0
+    ? unitNumberCandidate
+    : 1;
+  const confirmationOwner = normalizeDeliveryConfirmationOwner(
+    destination?.confirmation_owner ?? destination?.confirmationOwner,
+    null,
+  );
+  const confirmationStatus = normalizeDeliveryConfirmationStatus(
+    destination?.confirmation_status ?? destination?.confirmationStatus,
+    confirmationOwner ? DELIVERY_CONFIRMATION_STATUS.PENDING : null,
+  );
+  const quantityCandidate = Number.parseInt(String(destination?.quantity ?? ""), 10);
+  const quantity = Number.isFinite(quantityCandidate) && quantityCandidate > 0 ? quantityCandidate : 1;
+  const assignedRiderId = String(
+    destination?.assigned_rider_id ?? destination?.assignedRiderId ?? "",
+  ).trim();
+
+  return {
+    ...destination,
+    unit_key: String(destination?.unit_key ?? destination?.unitKey ?? `stop-${index + 1}`).trim(),
+    item_name: destination?.item_name ?? destination?.itemName ?? "Item",
+    quantity,
+    unit_number: unitNumber,
+    unit_label: String(
+      destination?.unit_label
+      ?? destination?.unitLabel
+      ?? `Unit ${unitNumber}`,
+    ).trim(),
+    confirmation_owner: confirmationOwner,
+    confirmation_status: confirmationStatus,
+    confirmed_at: destination?.confirmed_at ?? destination?.confirmedAt ?? null,
+    confirmed_by_actor: destination?.confirmed_by_actor ?? destination?.confirmedByActor ?? null,
+    confirmed_by_user_id: destination?.confirmed_by_user_id ?? destination?.confirmedByUserId ?? null,
+    proof_image_url: destination?.proof_image_url ?? destination?.proofImageUrl ?? null,
+    proof_uploaded_at: destination?.proof_uploaded_at ?? destination?.proofUploadedAt ?? null,
+    proof_note: String(destination?.proof_note ?? destination?.proofNote ?? "").trim(),
+    assigned_rider_id: assignedRiderId || null,
+    addressText: buildDeliveryDestinationAddressText(destination),
+  };
+};
+
+const normalizeDeliveryDestinations = (destinations: unknown) => (
+  (Array.isArray(destinations) ? destinations : [])
+    .filter(Boolean)
+    .map((destination, index) => normalizeDeliveryDestination(
+      destination && typeof destination === "object" ? destination as Record<string, unknown> : {},
+      index,
+    ))
+);
+
+const hasStopConfirmationFlow = (destinations: unknown) => (
+  normalizeDeliveryDestinations(destinations).some((destination) => Boolean(destination.confirmation_owner))
+);
+
+const areAllDeliveryStopsConfirmed = (destinations: unknown) => {
+  const normalizedStops = normalizeDeliveryDestinations(destinations)
+    .filter((destination) => destination.confirmation_owner);
+
+  return normalizedStops.length > 0
+    && normalizedStops.every((destination) => (
+      destination.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED
+    ));
+};
+
+const confirmDeliveryStop = (
+  destinations: unknown,
+  unitKey: unknown,
+  {
+    actorType = "customer",
+    actorUserId = null,
+    proofImageUrl = null,
+    proofNote = "",
+    confirmedAt = new Date().toISOString(),
+  }: {
+    actorType?: string;
+    actorUserId?: unknown;
+    proofImageUrl?: string | null;
+    proofNote?: string | null;
+    confirmedAt?: string;
+  } = {},
+) => normalizeDeliveryDestinations(destinations).map((destination) => {
+  if (destination.unit_key !== String(unitKey ?? "").trim()) {
+    return destination;
+  }
+
+  return {
+    ...destination,
+    confirmation_status: DELIVERY_CONFIRMATION_STATUS.CONFIRMED,
+    confirmed_at: confirmedAt,
+    confirmed_by_actor: actorType,
+    confirmed_by_user_id: actorUserId || null,
+    proof_image_url: proofImageUrl || destination.proof_image_url || null,
+    proof_uploaded_at: proofImageUrl ? confirmedAt : (destination.proof_uploaded_at || null),
+    proof_note: String(proofNote || destination.proof_note || "").trim(),
+  };
+});
+
+const getDeliveryStopDisplayLabel = (destination: Record<string, unknown> = {}, index = 0) => {
+  const normalizedDestination = normalizeDeliveryDestination(destination, index);
+  const itemName = String(normalizedDestination.item_name || "Item").trim();
+  const unitLabel = String(normalizedDestination.unit_label || "").trim();
+
+  if (itemName && unitLabel) {
+    return `${itemName} - ${unitLabel}`;
+  }
+
+  return unitLabel || itemName || `Stop ${index + 1}`;
+};
+
+const getMissingAssignedStopLabels = (
+  destinations: unknown,
+  fallbackAssignedRiderId: unknown = null,
+) => {
+  const normalizedStops = normalizeDeliveryDestinations(destinations);
+  const normalizedFallbackAssignedRiderId = normalizedStops.length <= 1
+    ? String(fallbackAssignedRiderId ?? "").trim()
+    : "";
+
+  return normalizedStops
+    .map((destination, index) => {
+      const assignedRiderId = String(
+        destination?.assigned_rider_id ?? normalizedFallbackAssignedRiderId ?? "",
+      ).trim();
+      return assignedRiderId ? null : getDeliveryStopDisplayLabel(destination, index);
+    })
+    .filter(Boolean);
+};
+
+const getOutForDeliveryAssignmentError = (
+  recordType: "order" | "request",
+  destinations: unknown,
+  fallbackAssignedRiderId: unknown = null,
+) => {
+  const missingStopLabels = getMissingAssignedStopLabels(destinations, fallbackAssignedRiderId);
+  if (!missingStopLabels.length) {
+    return "";
+  }
+
+  return `Please assign an employee rider to every delivery stop before moving this ${recordType} to Out for Delivery. Missing riders: ${missingStopLabels.join(", ")}.`;
+};
+
+const getImageFileExtension = (file: Record<string, unknown> = {}) => {
+  const mimeType = String(file?.mimeType ?? "").trim().toLowerCase();
+
+  if (mimeType.includes("png")) return "png";
+  if (mimeType.includes("webp")) return "webp";
+  if (mimeType.includes("heic")) return "heic";
+  if (mimeType.includes("heif")) return "heif";
+  if (mimeType.includes("gif")) return "gif";
+  if (mimeType.includes("jpeg") || mimeType.includes("jpg")) return "jpg";
+
+  const fileName = String(file?.fileName ?? file?.name ?? "").trim();
+  const uri = String(file?.uri ?? "").trim();
+  const source = fileName || uri;
+  const sourceMatch = source.match(/\.([a-z0-9]+)(?:\?|$)/i);
+
+  return sourceMatch?.[1]?.toLowerCase?.() || "jpg";
+};
+
+const uploadDeliveryProofImage = async (
+  adminClient: ReturnType<typeof createClient>,
+  file: Record<string, unknown> = {},
+  {
+    entityType,
+    entityId,
+    unitKey,
+  }: {
+    entityType: string;
+    entityId: unknown;
+    unitKey: unknown;
+  },
+) => {
+  const base64 = String(file?.base64 ?? "").trim();
+  if (!base64) {
+    throw new Error("Proof photo is required.");
+  }
+
+  const safeEntityType = String(entityType || "delivery").trim().toLowerCase();
+  const safeUnitKey = String(unitKey || "stop").trim().replace(/[^a-z0-9_-]+/gi, "-");
+  const extension = getImageFileExtension(file);
+  const contentType = String(file?.mimeType || `image/${extension === "jpg" ? "jpeg" : extension}`);
+  const fileName = `delivery-proofs/${safeEntityType}-${entityId || "record"}-${safeUnitKey}-${Date.now()}.${extension}`;
+  const fileBuffer = Buffer.from(base64, "base64");
+
+  const { data: uploadData, error: uploadError } = await adminClient.storage
+    .from("receipts")
+    .upload(fileName, fileBuffer, {
+      cacheControl: "3600",
+      upsert: false,
+      contentType,
+    });
+
+  if (uploadError) {
+    throw uploadError;
+  }
+
+  const { data: publicUrlData } = adminClient.storage.from("receipts").getPublicUrl(uploadData.path);
+  return publicUrlData?.publicUrl || null;
+};
+
+const normalizeDeliveryProofNote = (value: unknown) => {
+  const trimmed = String(value ?? "").trim();
+  return trimmed || "";
+};
+
+const buildDeliveryStopNotificationPayload = ({
+  entityType,
+  record,
+  stop,
+}: {
+  entityType: "order" | "request";
+  record: Record<string, unknown> | null | undefined;
+  stop: Record<string, unknown>;
+}) => {
+  const referenceNumber = entityType === "request"
+    ? record?.request_number || record?.id
+    : record?.order_number || record?.id;
+  const stopLabel = getDeliveryStopDisplayLabel(stop);
+  const link = entityType === "request"
+    ? (
+        String(record?.type || "").trim().toLowerCase() === "customized"
+          ? `/customized-request-tracking/${record?.request_number}`
+          : `/request-tracking/${record?.request_number}`
+      )
+    : `/order-tracking/${record?.order_number}`;
+
+  return {
+    user_id: record?.user_id,
+    title: "Delivery proof uploaded",
+    message: stopLabel
+      ? `Proof of delivery for ${stopLabel} in ${entityType === "request" ? "request" : "order"} #${referenceNumber} is now available.`
+      : `Proof of delivery for ${entityType === "request" ? "request" : "order"} #${referenceNumber} is now available.`,
+    type: "delivery_update",
+    link,
+  };
 };
 
 const getEntityRefundDetails = async (
@@ -745,12 +1044,25 @@ serve(async (req) => {
 
         const { data: currentOrder, error: fetchError } = await adminClient
           .from("orders")
-          .select("status_timestamps, cancellation_reason")
+          .select("status_timestamps, cancellation_reason, notes, assigned_rider")
           .eq("id", id)
           .single();
 
         if (fetchError) {
           throw fetchError;
+        }
+
+        if (status.toLowerCase() === "out_for_delivery") {
+          const parsedNotes = parseMultiDeliveryNotes(currentOrder?.notes);
+          const assignmentError = getOutForDeliveryAssignmentError(
+            "order",
+            parsedNotes.destinations,
+            currentOrder?.assigned_rider,
+          );
+
+          if (assignmentError) {
+            return json(409, { error: assignmentError });
+          }
         }
 
         const nextStatusTimestamps = withStatusTimestamp(currentOrder?.status_timestamps, status);
@@ -887,6 +1199,153 @@ serve(async (req) => {
         return json(200, { success: true, order });
       }
 
+      case "complete_order_delivery_stop": {
+        if (callerRole !== "employee") {
+          return json(403, { error: "Only the assigned employee rider can complete this delivery stop." });
+        }
+
+        const orderId = body?.orderId;
+        const normalizedUnitKey = String(body?.unitKey ?? "").trim();
+        const proofFile = body?.proofFile && typeof body.proofFile === "object"
+          ? body.proofFile as Record<string, unknown>
+          : null;
+        const proofNote = normalizeDeliveryProofNote(body?.proofNote);
+
+        if (!orderId || !normalizedUnitKey) {
+          return json(400, { error: "Order id and delivery stop key are required." });
+        }
+
+        if (!proofFile?.base64) {
+          return json(400, { error: "Proof photo is required before completing this delivery stop." });
+        }
+
+        const { data: currentOrder, error: fetchError } = await adminClient
+          .from("orders")
+          .select("id, order_number, user_id, status, status_timestamps, payment_method, amount_received, total, assigned_rider, notes")
+          .eq("id", orderId)
+          .single();
+
+        if (fetchError) {
+          throw fetchError;
+        }
+
+        if (String(currentOrder?.status ?? "").trim().toLowerCase() !== "out_for_delivery") {
+          return json(409, { error: "Delivery proof can only be submitted once the order is out for delivery." });
+        }
+
+        const parsedNotes = parseMultiDeliveryNotes(currentOrder?.notes);
+        const normalizedStops = normalizeDeliveryDestinations(parsedNotes.destinations);
+
+        if (!hasStopConfirmationFlow(normalizedStops)) {
+          return json(400, { error: "This order still uses the legacy delivery confirmation flow." });
+        }
+
+        const stopToComplete = normalizedStops.find((stop) => stop.unit_key === normalizedUnitKey);
+
+        if (!stopToComplete) {
+          return json(404, { error: "Delivery stop not found." });
+        }
+
+        if (stopToComplete.confirmation_owner !== DELIVERY_CONFIRMATION_OWNER.RIDER) {
+          return json(400, { error: "This delivery stop is waiting for customer confirmation." });
+        }
+
+        if (stopToComplete.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED) {
+          return json(409, { error: "This delivery stop is already confirmed." });
+        }
+
+        const assignedRiderId = String(
+          stopToComplete.assigned_rider_id
+          ?? (normalizedStops.length <= 1 ? currentOrder?.assigned_rider : "")
+          ?? "",
+        ).trim();
+
+        if (!assignedRiderId) {
+          return json(409, { error: "This delivery stop does not have an assigned rider yet." });
+        }
+
+        if (assignedRiderId !== String(caller.id)) {
+          return json(403, { error: "Only the assigned rider can upload proof for this delivery stop." });
+        }
+
+        const confirmedAt = new Date().toISOString();
+        const proofImageUrl = await uploadDeliveryProofImage(adminClient, proofFile, {
+          entityType: "order",
+          entityId: orderId,
+          unitKey: normalizedUnitKey,
+        });
+        const updatedDestinations = confirmDeliveryStop(normalizedStops, normalizedUnitKey, {
+          actorType: "rider",
+          actorUserId: caller.id,
+          proofImageUrl,
+          proofNote,
+          confirmedAt,
+        });
+        const allConfirmed = areAllDeliveryStopsConfirmed(updatedDestinations);
+        const updatePayload: Record<string, unknown> = {
+          notes: serializeMultiDeliveryNotes({
+            destinations: updatedDestinations,
+            note: parsedNotes.note,
+          }),
+        };
+
+        if (allConfirmed) {
+          updatePayload.status = "completed";
+          updatePayload.status_timestamps = withStatusTimestamp(currentOrder?.status_timestamps, "completed");
+
+          if (String(currentOrder?.payment_method ?? "").trim().toLowerCase() === "cod") {
+            updatePayload.payment_status = "paid";
+            updatePayload.amount_received = Math.max(
+              parseAmount(currentOrder?.amount_received),
+              parseAmount(currentOrder?.total),
+            );
+          }
+        }
+
+        const { data: order, error: updateError } = await adminClient
+          .from("orders")
+          .update(updatePayload)
+          .eq("id", orderId)
+          .select("*")
+          .single();
+
+        if (updateError) {
+          throw updateError;
+        }
+
+        const persistedStops = normalizeDeliveryDestinations(parseMultiDeliveryNotes(order?.notes).destinations);
+        const persistedStop = persistedStops.find((stop) => stop.unit_key === normalizedUnitKey);
+
+        if (!persistedStop || persistedStop.confirmation_status !== DELIVERY_CONFIRMATION_STATUS.CONFIRMED) {
+          throw new Error("The delivery stop confirmation was not saved.");
+        }
+
+        if (allConfirmed && String(order?.status ?? "").trim().toLowerCase() !== "completed") {
+          throw new Error("The order was not marked as completed after the final stop confirmation.");
+        }
+
+        if (currentOrder?.user_id) {
+          await insertNotificationSafely(adminClient, buildDeliveryStopNotificationPayload({
+            entityType: "order",
+            record: currentOrder,
+            stop: {
+              ...stopToComplete,
+              confirmed_by_user_id: caller.id,
+              proof_image_url: proofImageUrl,
+              proof_note: proofNote,
+            },
+          }));
+        }
+
+        return json(200, {
+          success: true,
+          order: {
+            ...order,
+            multi_delivery_destinations: updatedDestinations,
+          },
+        });
+      }
+
       case "provide_request_quote": {
         const id = body?.id;
         if (!id) {
@@ -971,12 +1430,25 @@ serve(async (req) => {
 
         const { data: currentRequest, error: fetchError } = await adminClient
           .from("requests")
-          .select("status_timestamps, data, user_id, request_number, cancellation_reason")
+          .select("status_timestamps, data, user_id, request_number, cancellation_reason, assigned_rider")
           .eq("id", id)
           .single();
 
         if (fetchError) {
           throw fetchError;
+        }
+
+        if (status.toLowerCase() === "out_for_delivery") {
+          const currentData = parseMaybeJson(currentRequest?.data);
+          const assignmentError = getOutForDeliveryAssignmentError(
+            "request",
+            currentData?.multi_delivery_destinations,
+            currentRequest?.assigned_rider,
+          );
+
+          if (assignmentError) {
+            return json(409, { error: assignmentError });
+          }
         }
 
         const updatePayload: Record<string, unknown> = {
@@ -1194,6 +1666,169 @@ serve(async (req) => {
         await notifyAssignedRequestStopRiders(adminClient, request, updatedDestinations);
 
         return json(200, { success: true, request });
+      }
+
+      case "complete_request_delivery_stop": {
+        if (callerRole !== "employee") {
+          return json(403, { error: "Only the assigned employee rider can complete this delivery stop." });
+        }
+
+        const requestId = body?.requestId;
+        const normalizedUnitKey = String(body?.unitKey ?? "").trim();
+        const proofFile = body?.proofFile && typeof body.proofFile === "object"
+          ? body.proofFile as Record<string, unknown>
+          : null;
+        const proofNote = normalizeDeliveryProofNote(body?.proofNote);
+
+        if (!requestId || !normalizedUnitKey) {
+          return json(400, { error: "Request id and delivery stop key are required." });
+        }
+
+        if (!proofFile?.base64) {
+          return json(400, { error: "Proof photo is required before completing this delivery stop." });
+        }
+
+        const { data: currentRequest, error: fetchError } = await adminClient
+          .from("requests")
+          .select("id, request_number, type, user_id, status, status_timestamps, payment_method, payment_status, amount_received, final_price, assigned_rider, data")
+          .eq("id", requestId)
+          .single();
+
+        if (fetchError) {
+          throw fetchError;
+        }
+
+        if (String(currentRequest?.status ?? "").trim().toLowerCase() !== "out_for_delivery") {
+          return json(409, { error: "Delivery proof can only be submitted once the request is out for delivery." });
+        }
+
+        const currentData = parseMaybeJson(currentRequest?.data) as Record<string, unknown>;
+        const normalizedStops = normalizeDeliveryDestinations(currentData?.multi_delivery_destinations);
+
+        if (!hasStopConfirmationFlow(normalizedStops)) {
+          return json(400, { error: "This request still uses the legacy delivery confirmation flow." });
+        }
+
+        const stopToComplete = normalizedStops.find((stop) => stop.unit_key === normalizedUnitKey);
+
+        if (!stopToComplete) {
+          return json(404, { error: "Delivery stop not found." });
+        }
+
+        if (stopToComplete.confirmation_owner !== DELIVERY_CONFIRMATION_OWNER.RIDER) {
+          return json(400, { error: "This delivery stop is waiting for customer confirmation." });
+        }
+
+        if (stopToComplete.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED) {
+          return json(409, { error: "This delivery stop is already confirmed." });
+        }
+
+        const assignedRiderId = String(
+          stopToComplete.assigned_rider_id
+          ?? (normalizedStops.length <= 1 ? currentRequest?.assigned_rider : "")
+          ?? "",
+        ).trim();
+
+        if (!assignedRiderId) {
+          return json(409, { error: "This delivery stop does not have an assigned rider yet." });
+        }
+
+        if (assignedRiderId !== String(caller.id)) {
+          return json(403, { error: "Only the assigned rider can upload proof for this delivery stop." });
+        }
+
+        const confirmedAt = new Date().toISOString();
+        const proofImageUrl = await uploadDeliveryProofImage(adminClient, proofFile, {
+          entityType: String(currentRequest?.type || "request").trim().toLowerCase() || "request",
+          entityId: requestId,
+          unitKey: normalizedUnitKey,
+        });
+        const updatedDestinations = confirmDeliveryStop(normalizedStops, normalizedUnitKey, {
+          actorType: "rider",
+          actorUserId: caller.id,
+          proofImageUrl,
+          proofNote,
+          confirmedAt,
+        });
+        const allConfirmed = areAllDeliveryStopsConfirmed(updatedDestinations);
+        const nextData: Record<string, unknown> = {
+          ...(currentData && typeof currentData === "object" ? currentData : {}),
+          multi_delivery_destinations: updatedDestinations,
+        };
+        const updatePayload: Record<string, unknown> = {
+          data: nextData,
+        };
+
+        if (allConfirmed) {
+          updatePayload.status = "completed";
+          updatePayload.status_timestamps = withStatusTimestamp(currentRequest?.status_timestamps, "completed");
+
+          if (
+            String(currentRequest?.payment_method ?? currentData?.payment_method ?? "")
+              .trim()
+              .toLowerCase() === "cod"
+          ) {
+            updatePayload.payment_status = "paid";
+            updatePayload.amount_received = Math.max(
+              parseAmount(currentRequest?.amount_received),
+              parseAmount(currentRequest?.final_price ?? currentData?.final_price),
+            );
+
+            if (String(currentRequest?.type ?? "").trim().toLowerCase() === "customized") {
+              updatePayload.data = {
+                ...nextData,
+                payment_status: "paid",
+              };
+            }
+          }
+        }
+
+        const { data: request, error: updateError } = await adminClient
+          .from("requests")
+          .update(updatePayload)
+          .eq("id", requestId)
+          .select("*")
+          .single();
+
+        if (updateError) {
+          throw updateError;
+        }
+
+        const persistedRequestData = parseMaybeJson(request?.data) as Record<string, unknown>;
+        const persistedStops = normalizeDeliveryDestinations(persistedRequestData?.multi_delivery_destinations);
+        const persistedStop = persistedStops.find((stop) => stop.unit_key === normalizedUnitKey);
+
+        if (!persistedStop || persistedStop.confirmation_status !== DELIVERY_CONFIRMATION_STATUS.CONFIRMED) {
+          throw new Error("The delivery stop confirmation was not saved.");
+        }
+
+        if (allConfirmed && String(request?.status ?? "").trim().toLowerCase() !== "completed") {
+          throw new Error("The request was not marked as completed after the final stop confirmation.");
+        }
+
+        if (currentRequest?.user_id) {
+          await insertNotificationSafely(adminClient, buildDeliveryStopNotificationPayload({
+            entityType: "request",
+            record: currentRequest,
+            stop: {
+              ...stopToComplete,
+              confirmed_by_user_id: caller.id,
+              proof_image_url: proofImageUrl,
+              proof_note: proofNote,
+            },
+          }));
+        }
+
+        return json(200, {
+          success: true,
+          request: {
+            ...request,
+            data: {
+              ...persistedRequestData,
+              multi_delivery_destinations: updatedDestinations,
+            },
+          },
+        });
       }
 
       case "approve_refund_request": {

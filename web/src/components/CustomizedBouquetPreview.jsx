@@ -15,6 +15,8 @@ const previewContainerStyle = (size, zoomable = false) => ({
   cursor: zoomable ? 'zoom-in' : 'default',
 });
 
+const normalizeText = (value) => String(value || '').trim().toLowerCase();
+
 const toPercent = (ratio) => `${Math.max(0, Math.min(1, Number(ratio) || 0)) * 100}%`;
 
 const normalizePreviewComposition = (value) => {
@@ -171,6 +173,11 @@ const CustomizedBouquetPreview = ({ item, size = 96, zoomable = false }) => {
   const wrapperSrc = item?.wrapper?.layerImg || item?.wrapper?.img || null;
   const ribbonSrc = item?.ribbon?.layerImg || item?.ribbon?.img || null;
   const snapshotSrc = item?.image || item?.image_url || null;
+  const wrapperName = item?.wrapper?.groupName
+    || item?.wrapper?.wrapper_group_name
+    || item?.wrapper?.name
+    || '';
+  const isClassicWrapper = normalizeText(wrapperName).includes('classic wrap');
   const savedPreviewComposition = useMemo(
     () => normalizePreviewComposition(item?.previewComposition || item?.preview_composition),
     [item?.previewComposition, item?.preview_composition]
@@ -216,13 +223,18 @@ const CustomizedBouquetPreview = ({ item, size = 96, zoomable = false }) => {
             top: toPercent(stem.topRatio),
             width: toPercent(stem.widthRatio),
             height: toPercent(stem.heightRatio),
-            transform: `scale(${Number(stem.scale || 1)})`,
-            transformOrigin: 'center center',
             zIndex: stem.zIndex || 2,
             pointerEvents: 'none',
           }}
         >
-          <div style={{ transform: `rotate(${Number(stem.rotation || 0)}deg)`, width: '100%', height: '100%' }}>
+          <div
+            style={{
+              transform: `rotate(${Number(stem.rotation || 0)}deg) scale(${Number(stem.scale || 1)})`,
+              transformOrigin: 'center center',
+              width: '100%',
+              height: '100%',
+            }}
+          >
             <img
               src={stem.src}
               alt="Flower preview"
@@ -329,12 +341,16 @@ const CustomizedBouquetPreview = ({ item, size = 96, zoomable = false }) => {
   );
 
   const renderPreview = (renderSize) => {
-    if (snapshotSrc) {
+    if (isClassicWrapper && snapshotSrc) {
       return renderSnapshotPreview(renderSize);
     }
 
     if (hasSavedComposition) {
       return renderSavedCompositionPreview(renderSize);
+    }
+
+    if (snapshotSrc) {
+      return renderSnapshotPreview(renderSize);
     }
 
     return renderLayeredPreview(renderSize);
@@ -387,10 +403,12 @@ const CustomizedBouquetPreview = ({ item, size = 96, zoomable = false }) => {
             >
               x
             </button>
-            {snapshotSrc
+            {isClassicWrapper && snapshotSrc
               ? renderSnapshotPreview('min(82vw, 360px)')
               : hasSavedComposition
               ? renderSavedCompositionPreview('min(82vw, 360px)')
+              : snapshotSrc
+              ? renderSnapshotPreview('min(82vw, 360px)')
               : renderLayeredPreview('min(82vw, 360px)')}
           </div>
         </div>

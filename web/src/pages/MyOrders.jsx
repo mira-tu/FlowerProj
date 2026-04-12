@@ -4,20 +4,28 @@ import { supabase } from '../config/supabase';
 import InfoModal from '../components/InfoModal';
 import CustomOrderQuotePaymentModal from '../components/CustomOrderQuotePaymentModal';
 import CustomizedBouquetPreview from '../components/CustomizedBouquetPreview';
+import ItemCancellationModal from '../components/ItemCancellationModal';
+import RefundRequestModal from '../components/RefundRequestModal';
+import RefundRequestPanel from '../components/RefundRequestPanel';
 import { insertStaffNotifications, insertUserNotification } from '../utils/notificationApi';
 import {
     applyRequestItemCancellation,
-    getCancellationItemDisplayLabel,
     normalizeCancellationItem,
     summarizeCancellationItems,
 } from '../utils/orderCancellation';
 import {
+    buildRefundLookupKey,
     createRefundRequest,
     getRefundRequestForEntity,
-    isActiveRefundRequest,
-    requiresRefundReviewBeforeCancellation,
+    getRefundRequestsForCustomer,
 } from '../utils/refundWorkflows';
 import { parseMultiDeliveryNotes } from '../utils/deliveryDestinations';
+import {
+    buildRefundReasonFromCancelledEntity,
+    canRequestRefundAfterCancellation,
+    getCancellationRefundContext,
+    hasActiveRefundRequest,
+} from '../utils/customerRefunds';
 import '../styles/Shop.css';
 
 const orderTabs = [
@@ -95,6 +103,11 @@ const getRequestIdFromOrder = (order) => (
     || null
 );
 
+const getOrderEntityInfo = (order) => ({
+    entityType: order?.type ? 'request' : 'order',
+    entityId: order?.type ? getRequestIdFromOrder(order) : order?.id,
+});
+
 const MyOrders = () => {
     const navigate = useNavigate();
     const [activeOrderTab, setActiveOrderTab] = useState('all');
@@ -119,6 +132,9 @@ const MyOrders = () => {
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null });
     const [currentUserId, setCurrentUserId] = useState(null);
     const [quotePaymentOrder, setQuotePaymentOrder] = useState(null);
+    const [refundTargetOrder, setRefundTargetOrder] = useState(null);
+    const [refundReason, setRefundReason] = useState('');
+    const [submittingRefundRequest, setSubmittingRefundRequest] = useState(false);
 
     useEffect(() => {
         const checkUser = async () => {
@@ -160,6 +176,19 @@ const MyOrders = () => {
                 console.error('Error fetching requests:', requestsError);
                 throw requestsError;
             }
+
+            const refundRequests = await getRefundRequestsForCustomer(currentUserId);
+            const refundLookup = refundRequests.reduce((lookup, refundRequest) => {
+                const entityType = refundRequest?.entity_type === 'request' ? 'request' : 'order';
+                const entityId = entityType === 'request' ? refundRequest?.request_id : refundRequest?.order_id;
+                const lookupKey = buildRefundLookupKey(entityType, entityId);
+
+                if (lookupKey && !lookup[lookupKey]) {
+                    lookup[lookupKey] = refundRequest;
+                }
+
+                return lookup;
+            }, {});
 
             console.log('--- Supabase Orders API Response (apiOrders) ---', apiOrders);
             console.log('--- Supabase Requests API Response (apiRequests) ---', apiRequests);
@@ -228,6 +257,7 @@ const MyOrders = () => {
                     email: requestData?.email,
                     phone: requestData?.phone,
                     photo: order.request_photo_url || order.request_image_url,
+                    refundRequest: refundLookup[buildRefundLookupKey('order', order.id)] || null,
                 };
             });
             console.log('--- Transformed Orders (Status & Items) ---', transformedOrders.map(o => ({ id: o.id, status: o.status, items: o.items })));
@@ -288,7 +318,8 @@ const MyOrders = () => {
                     subject: requestData?.subject,
                     message: requestData?.message,
                     email: requestData?.email,
-                    phone: requestData?.phone
+                    phone: requestData?.phone,
+                    refundRequest: refundLookup[buildRefundLookupKey('request', request.id)] || null,
                 };
             });
             console.log('--- Transformed Requests (Status) ---', transformedRequests.map(r => ({ id: r.id, status: r.status })));
@@ -315,6 +346,7 @@ const MyOrders = () => {
             console.log('--- Final All Orders before setOrders (Status) ---', allOrders.map(o => ({ id: o.id, status: o.status })));
             setOrders(allOrders);
             loadOrderMessages(allOrders);
+            return allOrders;
         } catch (error) {
             console.error('Error loading orders:', error);
             setOrders([]);
@@ -325,6 +357,8 @@ const MyOrders = () => {
             } else {
                 console.error('Failed to load orders. Please refresh the page.');
             }
+
+            return [];
         }
     };
 
@@ -525,6 +559,11 @@ const MyOrders = () => {
         setCancelReasonError('');
     };
 
+    const closeRefundModal = () => {
+        setRefundTargetOrder(null);
+        setRefundReason('');
+    };
+
     const handleCancelClick = (order) => {
         const cancellableItems = (order?.items || []).filter((item) => item.remainingQuantity > 0);
 
@@ -538,64 +577,91 @@ const MyOrders = () => {
 
     const getCancellableItems = (order) => (order?.items || []).filter((item) => item.remainingQuantity > 0);
 
-    const getPaidCancellationRefundAmount = (order) => {
-        const requestData = parseJsonObject(order?.data);
-        const amountReceived = Number(order?.amount_received || requestData?.amount_received || 0);
-        if (amountReceived > 0) {
-            return amountReceived;
-        }
-
-        return Number(
-            order?.total
-            || order?.final_price
-            || requestData?.final_price
-            || requestData?.estimated_total
-            || 0
-        );
+    const openRefundModalForOrder = (order) => {
+        setRefundTargetOrder(order);
+        setRefundReason('');
     };
 
-    const shouldRouteCancellationToRefund = (order) => {
-        const requestData = parseJsonObject(order?.data);
-        return requiresRefundReviewBeforeCancellation({
-            paymentStatus: order?.payment_status || requestData?.payment_status,
-            amountPaid: order?.amount_received || requestData?.amount_received || 0,
-            fallbackAmount: getPaidCancellationRefundAmount(order),
-            receiptUrl: order?.receipt_url || requestData?.receipt_url || '',
-            additionalReceipts: order?.additional_receipts || requestData?.additional_receipts || [],
+    const handlePostCancellationState = async (updatedOrder) => {
+        const { entityType, entityId } = getOrderEntityInfo(updatedOrder || orderToCancel);
+        const latestRefund = entityId
+            ? await getRefundRequestForEntity({ entityType, entityId })
+            : null;
+        const refreshedOrders = await loadOrders(currentUserId);
+        const refreshedOrder = refreshedOrders.find((entry) => String(entry.id) === String(updatedOrder?.id || orderToCancel?.id))
+            || updatedOrder
+            || orderToCancel;
+        const refundContext = getCancellationRefundContext(refreshedOrder || {});
+
+        if (hasActiveRefundRequest(latestRefund)) {
+            setInfoModal({
+                show: true,
+                title: 'Order Updated',
+                message: 'The selected quantity was cancelled successfully. Your refund request is already in progress.',
+            });
+            return;
+        }
+
+        if (refundContext.hasRecordedPayment && refundContext.refundAmount > 0) {
+            openRefundModalForOrder(refreshedOrder);
+            return;
+        }
+
+        setInfoModal({
+            show: true,
+            title: 'Order Updated',
+            message: 'The selected quantity was cancelled successfully.',
         });
     };
 
-    const createCancellationRefundReview = async ({ order, selectedItem, quantityToCancel, reason }) => {
-        const entityType = order?.type ? 'request' : 'order';
-        const entityId = entityType === 'request' ? getRequestIdFromOrder(order) : order?.id;
-        if (!entityId || !currentUserId) {
-            throw new Error('We could not prepare your cancellation review right now. Please sign in again and try once more.');
+    const handleRequestRefund = async () => {
+        if (!refundTargetOrder || !currentUserId) {
+            setInfoModal({
+                show: true,
+                title: 'Login Required',
+                message: 'Please sign in again to request a refund.',
+            });
+            return;
         }
 
-        const existingRefund = await getRefundRequestForEntity({ entityType, entityId });
-        if (isActiveRefundRequest(existingRefund)) {
-            return { refundRequest: existingRefund, reused: true };
+        const trimmedReason = refundReason.trim();
+        if (!trimmedReason) {
+            setInfoModal({
+                show: true,
+                title: 'Refund Reason Needed',
+                message: 'Please tell us why you are requesting a refund.',
+            });
+            return;
         }
 
-        const itemLabel = getCancellationItemDisplayLabel(selectedItem);
-        const detailedReason = [
-            `Cancellation request for ${itemLabel}`,
-            `Quantity: ${quantityToCancel}`,
-            `Customer reason: ${reason}`,
-        ].join('\n');
+        setSubmittingRefundRequest(true);
+        try {
+            const { entityType, entityId } = getOrderEntityInfo(refundTargetOrder);
+            const refundContext = getCancellationRefundContext(refundTargetOrder);
+            await createRefundRequest({
+                entityType,
+                entityId,
+                reason: buildRefundReasonFromCancelledEntity(refundTargetOrder, trimmedReason),
+                refundAmount: refundContext.refundAmount,
+            });
 
-        const result = await createRefundRequest({
-            entityType,
-            entityId,
-            customerId: currentUserId,
-            reason: detailedReason,
-            refundAmount: getPaidCancellationRefundAmount(order),
-        });
-
-        return {
-            refundRequest: result?.refundRequest || null,
-            reused: false,
-        };
+            closeRefundModal();
+            await loadOrders(currentUserId);
+            setInfoModal({
+                show: true,
+                title: 'Refund Request Sent',
+                message: 'Your refund request was submitted. An admin will review it before any GCash details are collected.',
+            });
+        } catch (error) {
+            console.error('Error creating refund request:', error);
+            setInfoModal({
+                show: true,
+                title: 'Refund Request Failed',
+                message: error.message || 'We could not submit your refund request right now.',
+            });
+        } finally {
+            setSubmittingRefundRequest(false);
+        }
     };
 
     const updateRegularOrderCancellation = async (order, itemKey, quantityToCancel, reason) => {
@@ -838,28 +904,6 @@ const MyOrders = () => {
         );
 
         try {
-            if (shouldRouteCancellationToRefund(orderToCancel)) {
-                const refundResult = await createCancellationRefundReview({
-                    order: orderToCancel,
-                    selectedItem,
-                    quantityToCancel,
-                    reason: trimmedCancelReason,
-                });
-
-                closeCancelModal();
-                setInfoModal({
-                    show: true,
-                    title: refundResult.reused ? 'Refund Review Already Pending' : 'Cancellation Request Submitted',
-                    message: refundResult.reused
-                        ? 'This paid order already has a refund review in progress. Please wait for the admin decision before cancelling again.'
-                        : 'Because payment was already submitted or received, we sent your cancellation through refund review first. We will finalize the cancellation after that review is resolved.',
-                    linkTo: '/my-orders',
-                    linkText: 'View My Orders',
-                });
-                await loadOrders(currentUserId);
-                return;
-            }
-
             if (orderToCancel.type) {
                 await updateRequestCancellation(orderToCancel, cancelTargetItemKey, quantityToCancel, trimmedCancelReason);
             } else {
@@ -893,9 +937,8 @@ const MyOrders = () => {
                 console.warn('Cancellation completed but notification could not be created:', notificationError);
             }
 
-            // Reload orders from Supabase
-            await loadOrders(session?.user?.id);
             closeCancelModal();
+            await handlePostCancellationState(orderToCancel);
         } catch (error) {
             console.error('Error cancelling order:', error);
             setInfoModal({ show: true, title: 'Error', message: error.message || 'Failed to cancel order. Please try again.' });
@@ -1629,164 +1672,43 @@ const MyOrders = () => {
                 )}
             </div>
 
-            {/* Cancellation Confirmation Modal */}
-            {showCancelModal && (
-                <div
-                    className="modal-overlay"
-                    onClick={closeCancelModal}
-                    style={{
-                        position: 'fixed',
-                        top: 0,
-                        left: 0,
-                        width: '100%',
-                        height: '100%',
-                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                        display: 'flex',
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        zIndex: 1000
-                    }}
-                >
-                    <div
-                        className="modal-content-custom"
-                        onClick={e => e.stopPropagation()}
-                        style={{
-                            backgroundColor: 'white',
-                            padding: '2rem',
-                            borderRadius: '1rem',
-                            textAlign: 'center',
-                            maxWidth: '400px',
-                            width: '90%',
-                            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
-                        }}
-                    >
-                        <div style={{ fontSize: '3rem', color: '#dc3545', marginBottom: '1rem' }}>
-                            <i className="fas fa-exclamation-triangle"></i>
-                        </div>
-                        <h3 style={{ marginBottom: '1rem', color: '#333' }}>Cancel item from this {orderToCancel?.type ? 'request' : 'order'}?</h3>
-                        <p style={{ marginBottom: '1.5rem', color: '#4b5563' }}>
-                            Choose the item and quantity you want to cancel. We will keep the rest of your order active.
-                        </p>
-                        <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
-                            <label htmlFor="cancelItemMyOrders" style={{ display: 'block', fontWeight: '600', color: '#333', marginBottom: '0.5rem' }}>
-                                Item to cancel
-                            </label>
-                            <select
-                                id="cancelItemMyOrders"
-                                value={selectedCancelItem?.cancellationKey || ''}
-                                onChange={(e) => {
-                                    const nextItem = cancellableItems.find((item) => item.cancellationKey === e.target.value);
-                                    setCancelTargetItemKey(e.target.value);
-                                    setCancelQuantity(1);
-                                    if (!nextItem && cancelReasonError) setCancelReasonError('');
-                                }}
-                                style={{
-                                    width: '100%',
-                                    borderRadius: '0.75rem',
-                                    border: '1px solid #d1d5db',
-                                    padding: '0.75rem 0.9rem',
-                                    color: '#111827',
-                                    backgroundColor: 'white',
-                                }}
-                            >
-                                {cancellableItems.map((item) => (
-                                    <option key={item.cancellationKey} value={item.cancellationKey}>
-                                        {getCancellationItemDisplayLabel(item)}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                        {selectedCancelItem && (
-                            <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
-                                <label htmlFor="cancelQuantityMyOrders" style={{ display: 'block', fontWeight: '600', color: '#333', marginBottom: '0.5rem' }}>
-                                    Quantity to cancel
-                                </label>
-                                <select
-                                    id="cancelQuantityMyOrders"
-                                    value={String(cancelQuantity)}
-                                    onChange={(e) => setCancelQuantity(Number.parseInt(e.target.value, 10) || 1)}
-                                    style={{
-                                        width: '100%',
-                                        borderRadius: '0.75rem',
-                                        border: '1px solid #d1d5db',
-                                        padding: '0.75rem 0.9rem',
-                                        color: '#111827',
-                                        backgroundColor: 'white',
-                                    }}
-                                >
-                                    {Array.from({ length: selectedCancelItem.remainingQuantity }, (_, index) => index + 1).map((quantity) => (
-                                        <option key={quantity} value={quantity}>
-                                            {quantity}
-                                        </option>
-                                    ))}
-                                </select>
-                                <div style={{ marginTop: '0.5rem', color: '#6b7280', fontSize: '0.9rem' }}>
-                                    Remaining after this cancellation: {Math.max(0, selectedCancelItem.remainingQuantity - cancelQuantity)} of {selectedCancelItem.originalQuantity}
-                                </div>
-                            </div>
-                        )}
-                        <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
-                            <label htmlFor="cancelReasonMyOrders" style={{ display: 'block', fontWeight: '600', color: '#333', marginBottom: '0.5rem' }}>
-                                Reason for cancellation
-                            </label>
-                            <textarea
-                                id="cancelReasonMyOrders"
-                                value={cancelReason}
-                                onChange={(e) => {
-                                    setCancelReason(e.target.value);
-                                    if (cancelReasonError) setCancelReasonError('');
-                                }}
-                                placeholder="Tell us why you want to cancel."
-                                rows={4}
-                                style={{
-                                    width: '100%',
-                                    borderRadius: '0.75rem',
-                                    border: `1px solid ${cancelReasonError ? '#dc3545' : '#d1d5db'}`,
-                                    padding: '0.75rem 0.9rem',
-                                    resize: 'vertical',
-                                    outline: 'none',
-                                    color: '#111827'
-                                }}
-                            />
-                            {cancelReasonError && (
-                                <div style={{ marginTop: '0.5rem', color: '#dc3545', fontSize: '0.9rem' }}>
-                                    {cancelReasonError}
-                                </div>
-                            )}
-                        </div>
-                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
-                            <button
-                                onClick={closeCancelModal}
-                                style={{
-                                    backgroundColor: 'transparent',
-                                    color: '#4b5563',
-                                    border: '1px solid #d1d5db',
-                                    padding: '0.5rem 1.5rem',
-                                    borderRadius: '9999px',
-                                    cursor: 'pointer',
-                                    fontWeight: '600'
-                                }}
-                            >
-                                Keep {orderToCancel?.type ? 'Request' : 'Order'}
-                            </button>
-                            <button
-                                onClick={handleConfirmCancel}
-                                style={{
-                                    backgroundColor: '#dc3545',
-                                    color: 'white',
-                                    border: 'none',
-                                    padding: '0.5rem 1.5rem',
-                                    borderRadius: '9999px',
-                                    cursor: 'pointer',
-                                    fontWeight: '600'
-                                }}
-                            >
-                                Cancel Selected Quantity
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <ItemCancellationModal
+                show={showCancelModal}
+                orderLabel={orderToCancel?.type ? 'request' : 'order'}
+                items={cancellableItems}
+                selectedItemKey={cancelTargetItemKey}
+                onSelectItem={(nextItemKey) => {
+                    setCancelTargetItemKey(nextItemKey);
+                    setCancelQuantity(1);
+                    if (cancelReasonError) {
+                        setCancelReasonError('');
+                    }
+                }}
+                selectedItem={selectedCancelItem}
+                cancelQuantity={cancelQuantity}
+                onCancelQuantityChange={setCancelQuantity}
+                cancelReason={cancelReason}
+                onCancelReasonChange={(nextReason) => {
+                    setCancelReason(nextReason);
+                    if (cancelReasonError) {
+                        setCancelReasonError('');
+                    }
+                }}
+                reasonError={cancelReasonError}
+                onClose={closeCancelModal}
+                onConfirm={handleConfirmCancel}
+            />
+
+            <RefundRequestModal
+                show={Boolean(refundTargetOrder)}
+                orderLabel={refundTargetOrder?.type ? 'request' : 'order'}
+                refundAmount={refundTargetOrder ? getCancellationRefundContext(refundTargetOrder).refundAmount : 0}
+                refundReason={refundReason}
+                onRefundReasonChange={setRefundReason}
+                onClose={closeRefundModal}
+                onSubmit={handleRequestRefund}
+                submitting={submittingRefundRequest}
+            />
 
             {/* Waiting for Approval Modal */}
             {showWaitingModal && (

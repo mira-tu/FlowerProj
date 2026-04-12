@@ -1,7 +1,3 @@
-import palmHaloRibbonSource from '../assets/ribbons/palm-halo-ribbon-source.jpg';
-
-const normalizeText = (value) => String(value || '').trim().toLowerCase();
-
 const isNumericId = (value) => Number.isFinite(Number.parseInt(value, 10));
 
 const createStockLookup = (stockItems = []) => {
@@ -40,20 +36,6 @@ const hydrateSelectionItem = (item, stockLookup) => {
   return mergePreviewFields(stockMatch || {}, item);
 };
 
-const buildPalmHaloFallbackRibbon = (existingRibbon = null) => ({
-  id: existingRibbon?.id || 'palm-halo-ribbon-default',
-  name: existingRibbon?.name || 'Palm Halo Ribbon',
-  price: Number(existingRibbon?.price || 0),
-  img: existingRibbon?.img || existingRibbon?.layerImg || palmHaloRibbonSource,
-  layerImg: existingRibbon?.layerImg || existingRibbon?.img || palmHaloRibbonSource,
-  quantity: existingRibbon?.quantity ?? 999,
-  is_available: existingRibbon?.is_available ?? true,
-  stockLabel: existingRibbon?.stockLabel || 'Included with Palm Halo Wrap',
-  colorName: existingRibbon?.colorName || null,
-  previewStyle: existingRibbon?.previewStyle || null,
-  ribbon_scope: existingRibbon?.ribbon_scope || 'palm_halo_wrap',
-});
-
 export const hydrateCustomizedBouquetItem = (item, stockItems = []) => {
   if (!item || typeof item !== 'object') {
     return item;
@@ -65,15 +47,7 @@ export const hydrateCustomizedBouquetItem = (item, stockItems = []) => {
     .filter(Boolean);
 
   const hydratedWrapper = hydrateSelectionItem(item.wrapper, stockLookup);
-  let hydratedRibbon = hydrateSelectionItem(item.ribbon, stockLookup);
-
-  const isPalmHaloWrap = normalizeText(
-    hydratedWrapper?.name || hydratedWrapper?.groupName || hydratedWrapper?.wrapper_group_name
-  ) === 'palm halo wrap';
-
-  if (isPalmHaloWrap && (!hydratedRibbon || (!hydratedRibbon?.img && !hydratedRibbon?.layerImg))) {
-    hydratedRibbon = buildPalmHaloFallbackRibbon(hydratedRibbon || item.ribbon);
-  }
+  const hydratedRibbon = hydrateSelectionItem(item.ribbon, stockLookup);
 
   return {
     ...item,

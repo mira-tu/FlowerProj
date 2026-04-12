@@ -623,6 +623,35 @@ const NotificationsTab = ({ currentUser, setActiveTab, setFocusedEntityTarget, r
     }
   };
 
+  const handleOpenDeliveryProof = async (notification) => {
+    try {
+      if (!notification?.id) {
+        return;
+      }
+
+      if (!notification.is_read) {
+        await markAsRead(notification.id);
+      }
+
+      const target = resolveNotificationTarget(notification.link);
+      if (!target.tab || !target.entityType || !target.entityId) {
+        return;
+      }
+
+      setFocusedEntityTarget?.({
+        entityType: target.entityType,
+        entityId: target.entityId,
+        source: 'rider_assignment',
+        openDeliveryProof: true,
+        notificationId: notification.id,
+      });
+      setActiveTab?.(target.tab);
+    } catch (error) {
+      console.error('Error opening delivery proof shortcut:', error);
+      Alert.alert('Error', 'Failed to open the delivery proof screen.');
+    }
+  };
+
   const handleDelete = async (notificationId) => {
     try {
       const { error } = await supabase
@@ -654,7 +683,8 @@ const NotificationsTab = ({ currentUser, setActiveTab, setFocusedEntityTarget, r
     }
   };
 
-  const renderExpandedContent = (notificationId) => {
+  const renderExpandedContent = (notification) => {
+    const notificationId = notification?.id;
     if (loadingPreviewNotificationId === notificationId) {
       return (
         <View style={styles.notificationExpandedPanel}>
@@ -678,7 +708,12 @@ const NotificationsTab = ({ currentUser, setActiveTab, setFocusedEntityTarget, r
       );
     }
 
-    return <RiderAssignmentPreview preview={previewByNotificationId[notificationId]} />;
+    return (
+      <RiderAssignmentPreview
+        preview={previewByNotificationId[notificationId]}
+        onOpenDeliveryProof={() => handleOpenDeliveryProof(notification)}
+      />
+    );
   };
 
   if (loading && !notifications.length) {
@@ -747,7 +782,7 @@ const NotificationsTab = ({ currentUser, setActiveTab, setFocusedEntityTarget, r
                 <Text style={styles.notificationMessage}>{item.message}</Text>
                 <Text style={styles.notificationDate}>{formatTimestamp(item.created_at)}</Text>
 
-                {isExpanded ? renderExpandedContent(item.id) : null}
+                {isExpanded ? renderExpandedContent(item) : null}
               </TouchableOpacity>
 
               <TouchableOpacity

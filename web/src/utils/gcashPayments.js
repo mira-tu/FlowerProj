@@ -72,6 +72,24 @@ export const getOrderAdditionalReceiptsFromNotes = (notes) => (
     getOrderPaymentMetadataFromNotes(notes).additional_receipts || []
 );
 
+const firstNonEmptyString = (...values) => (
+    values
+        .map((value) => String(value || '').trim())
+        .find(Boolean)
+        || ''
+);
+
+const firstNonEmptyReceipts = (...values) => {
+    for (const value of values) {
+        const normalizedEntries = normalizeAdditionalReceiptEntries(value);
+        if (normalizedEntries.length) {
+            return normalizedEntries;
+        }
+    }
+
+    return [];
+};
+
 export const mergeOrderPaymentMetadataIntoNotes = (notes, patch = {}) => {
     const parsedNotes = parseMultiDeliveryNotes(notes);
     const nextPaymentMetadata = normalizeOrderPaymentMetadata({
@@ -93,6 +111,44 @@ export const mergeOrderPaymentMetadataIntoNotes = (notes, patch = {}) => {
         destinations: parsedNotes.destinations,
         metadata: nextMetadata,
     });
+};
+
+export const resolveOrderTrackingPaymentMetadata = (order = {}) => {
+    const notePaymentMetadata = getOrderPaymentMetadataFromNotes(order?.notes);
+
+    return {
+        receiptUrl: firstNonEmptyString(order?.receipt_url),
+        gcashReferenceNumber: normalizeGcashReferenceNumber(
+            firstNonEmptyString(order?.gcash_reference_number, notePaymentMetadata?.gcash_reference_number),
+        ),
+        additionalReceipts: firstNonEmptyReceipts(
+            order?.additional_receipts,
+            notePaymentMetadata?.additional_receipts,
+        ),
+    };
+};
+
+export const resolveRequestTrackingPaymentMetadata = (request = {}) => {
+    const requestData = request?.requestData && typeof request.requestData === 'object'
+        ? request.requestData
+        : (request?.data && typeof request.data === 'object' ? request.data : {});
+
+    return {
+        receiptUrl: firstNonEmptyString(
+            request?.receipt_url,
+            requestData?.receipt_url,
+        ),
+        gcashReferenceNumber: normalizeGcashReferenceNumber(
+            firstNonEmptyString(
+                request?.gcash_reference_number,
+                requestData?.gcash_reference_number,
+            ),
+        ),
+        additionalReceipts: firstNonEmptyReceipts(
+            request?.additional_receipts,
+            requestData?.additional_receipts,
+        ),
+    };
 };
 
 export const isMissingTableColumnError = (error, tableName, columnName) => {

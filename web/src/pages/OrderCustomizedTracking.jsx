@@ -5,6 +5,8 @@ import TrackingPaymentDetails from '../components/TrackingPaymentDetails';
 import DeliveryDestinationsSummary from '../components/DeliveryDestinationsSummary';
 import TrackingDeliveryStops from '../components/TrackingDeliveryStops';
 import InfoModal from '../components/InfoModal';
+import RefundRequestModal from '../components/RefundRequestModal';
+import RefundRequestPanel from '../components/RefundRequestPanel';
 import CustomizedBouquetPreview from '../components/CustomizedBouquetPreview';
 import { insertStaffNotifications } from '../utils/notificationApi';
 import { buildTimelineTimestampMap, formatTimelineTimestamp } from '../utils/timelineTimestamps';
@@ -14,19 +16,22 @@ import {
     hasStopConfirmationFlow,
 } from '../utils/deliveryDestinations';
 import {
-    canRequestRefund,
     createRefundRequest,
     getRefundRequestForEntity,
-    getRefundStatusLabel,
-    maskGcashNumber,
     submitRefundGcashDetails,
 } from '../utils/refundWorkflows';
 import {
     createAdditionalReceiptEntry,
     normalizeGcashReferenceNumber,
+    resolveRequestTrackingPaymentMetadata,
     writeWithOptionalColumns,
 } from '../utils/gcashPayments';
 import { summarizeCancellationItems } from '../utils/orderCancellation';
+import {
+    buildRefundReasonFromCancelledEntity,
+    canRequestRefundAfterCancellation,
+    getCancellationRefundContext,
+} from '../utils/customerRefunds';
 import '../styles/Shop.css';
 
 // Timeline steps for Delivery Requests
@@ -95,6 +100,7 @@ const OrderCustomizedTracking = ({ user }) => {
     const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '' });
     const [refundRequest, setRefundRequest] = useState(null);
     const [refundReason, setRefundReason] = useState('');
+    const [showRefundModal, setShowRefundModal] = useState(false);
     const [submittingRefundRequest, setSubmittingRefundRequest] = useState(false);
     const [gcashName, setGcashName] = useState('');
     const [gcashNumber, setGcashNumber] = useState('');
@@ -186,6 +192,10 @@ const OrderCustomizedTracking = ({ user }) => {
             const trackingStatus = foundRequest.status === 'accepted' && foundRequest.payment_status === 'paid'
                 ? 'processing'
                 : foundRequest.status;
+            const paymentMetadata = resolveRequestTrackingPaymentMetadata({
+                ...foundRequest,
+                requestData: foundRequest.data,
+            });
 
             const transformedRequest = {
                 ...foundRequest,
@@ -210,7 +220,9 @@ const OrderCustomizedTracking = ({ user }) => {
                     return summary.allCancelled ? 0 : summary.remainingSubtotal + shippingFee;
                 })(),
                 trackingStatus,
-                gcash_reference_number: foundRequest.gcash_reference_number || foundRequest.data?.gcash_reference_number || null,
+                receipt_url: paymentMetadata.receiptUrl,
+                gcash_reference_number: paymentMetadata.gcashReferenceNumber || null,
+                additional_receipts: paymentMetadata.additionalReceipts,
             };
             setRequest(transformedRequest);
 
@@ -402,12 +414,16 @@ const OrderCustomizedTracking = ({ user }) => {
                 .single();
 
             if (updatedRequest) {
+                const updatedPaymentMetadata = resolveRequestTrackingPaymentMetadata({
+                    ...updatedRequest,
+                    requestData: updatedRequest.data,
+                });
                 setRequest(prev => ({
                     ...prev,
-                    receipt_url: updatedRequest.receipt_url,
-                    gcash_reference_number: updatedRequest.gcash_reference_number || updatedRequest.data?.gcash_reference_number || prev?.gcash_reference_number || null,
+                    receipt_url: updatedPaymentMetadata.receiptUrl,
+                    gcash_reference_number: updatedPaymentMetadata.gcashReferenceNumber || prev?.gcash_reference_number || null,
                     payment_status: updatedRequest.payment_status,
-                    additional_receipts: updatedRequest.additional_receipts || []
+                    additional_receipts: updatedPaymentMetadata.additionalReceipts,
                 }));
             }
         } catch (error) {
@@ -579,18 +595,17 @@ const OrderCustomizedTracking = ({ user }) => {
 
         setSubmittingRefundRequest(true);
         try {
+            const refundContext = getCancellationRefundContext(request);
             const result = await createRefundRequest({
                 entityType: 'request',
                 entityId: request.id,
-                customerId: user.id,
-                reason: trimmedReason,
-                refundAmount: Number(request.amount_received || 0) > 0
-                    ? Number(request.amount_received || 0)
-                    : Number(request.finalPrice || 0),
+                reason: buildRefundReasonFromCancelledEntity(request, trimmedReason),
+                refundAmount: refundContext.refundAmount,
             });
 
             setRefundRequest(result.refundRequest);
             setRefundReason('');
+            setShowRefundModal(false);
             setInfoModal({
                 show: true,
                 title: 'Refund Request Sent',
@@ -724,13 +739,12 @@ const OrderCustomizedTracking = ({ user }) => {
     const isFinalStep = currentStep >= trackingSteps.length && currentStep !== -1;
     const isDeclinedOrCancelled = currentStep === -1;
     const usesStopConfirmationFlow = hasStopConfirmationFlow(request?.multiDeliveryDestinations || []);
-    const canShowRefundRequest = Boolean(request) && canRequestRefund({
-        paymentStatus: request?.payment_status,
-        amountPaid: request?.amount_received,
-        fallbackAmount: request?.finalPrice,
+    const paymentMetadata = resolveRequestTrackingPaymentMetadata(request || {});
+    const refundContext = getCancellationRefundContext(request || {});
+    const canShowRefundRequest = Boolean(request) && canRequestRefundAfterCancellation({
+        entity: request,
         refundRequest,
-    }) && ['completed', 'cancelled'].includes(String(request?.status || '').toLowerCase());
-    const showRefundGcashForm = String(refundRequest?.status || '').toLowerCase() === 'approved';
+    });
     const customOrderMessageThreadId = getCustomOrderMessageThreadId(request?.id);
 
     if (loading) {
@@ -849,9 +863,9 @@ const OrderCustomizedTracking = ({ user }) => {
                             paymentStatus={request.payment_status}
                             totalAmount={request.finalPrice}
                             amountPaid={request.amount_received}
-                            receiptUrl={request.receipt_url}
-                            gcashReferenceNumber={request.gcash_reference_number}
-                            additionalReceipts={request.additional_receipts}
+                            receiptUrl={paymentMetadata.receiptUrl}
+                            gcashReferenceNumber={paymentMetadata.gcashReferenceNumber}
+                            additionalReceipts={paymentMetadata.additionalReceipts}
                             onUploadReceipt={handleUploadReceipt}
                             uploadingReceipt={uploadingReceipt}
                             additionalFile={additionalFile}
@@ -869,6 +883,7 @@ const OrderCustomizedTracking = ({ user }) => {
                                     fallbackRider={request.rider}
                                     confirmingUnitKey={confirmingStopKey}
                                     onConfirmStop={handleConfirmDeliveryStop}
+                                    currentDeliveryStatus={request.status}
                                 />
                             ) : (
                                 <DeliveryDestinationsSummary
@@ -880,129 +895,18 @@ const OrderCustomizedTracking = ({ user }) => {
                         )}
 
                         {(refundRequest || canShowRefundRequest) && (
-                            <div className="tracking-items p-4 rounded-4 shadow-sm bg-white mb-4">
-                                <div className="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
-                                    <div>
-                                        <h5 className="fw-bold mb-1">
-                                            <i className="fas fa-rotate-left me-2" style={{ color: 'var(--shop-pink)' }}></i>
-                                            Refund Request
-                                        </h5>
-                                        <p className="text-muted mb-0">
-                                            Admin approval is required first. Once approved, you can submit your GCash details here for the refund.
-                                        </p>
-                                    </div>
-                                    {refundRequest && (
-                                        <span className="badge rounded-pill px-3 py-2" style={{ backgroundColor: '#FCE7F3', color: '#BE185D' }}>
-                                            {getRefundStatusLabel(refundRequest.status)}
-                                        </span>
-                                    )}
-                                </div>
-
-                                {refundRequest ? (
-                                    <>
-                                        <div className="row g-3 mb-3">
-                                            <div className="col-md-6">
-                                                <div className="small text-muted">Requested Amount</div>
-                                                <div className="fw-semibold">PHP {Number(refundRequest.refund_amount || 0).toLocaleString()}</div>
-                                            </div>
-                                            <div className="col-md-6">
-                                                <div className="small text-muted">Reason</div>
-                                                <div className="fw-semibold">{refundRequest.customer_reason}</div>
-                                            </div>
-                                            {refundRequest.admin_note && (
-                                                <div className="col-12">
-                                                    <div className="small text-muted">Admin Note</div>
-                                                    <div className="fw-semibold">{refundRequest.admin_note}</div>
-                                                </div>
-                                            )}
-                                            {refundRequest.rejection_reason && (
-                                                <div className="col-12">
-                                                    <div className="small text-muted">Decision</div>
-                                                    <div className="text-danger fw-semibold">{refundRequest.rejection_reason}</div>
-                                                </div>
-                                            )}
-                                            {(refundRequest.gcash_name || refundRequest.gcash_number) && (
-                                                <>
-                                                    <div className="col-md-6">
-                                                        <div className="small text-muted">GCash Account Name</div>
-                                                        <div className="fw-semibold">{refundRequest.gcash_name || 'Not submitted'}</div>
-                                                    </div>
-                                                    <div className="col-md-6">
-                                                        <div className="small text-muted">GCash Number</div>
-                                                        <div className="fw-semibold">{maskGcashNumber(refundRequest.gcash_number)}</div>
-                                                    </div>
-                                                </>
-                                            )}
-                                            {refundRequest.refund_reference && (
-                                                <div className="col-12">
-                                                    <div className="small text-muted">Refund Reference</div>
-                                                    <div className="fw-semibold">{refundRequest.refund_reference}</div>
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {showRefundGcashForm && (
-                                            <div className="border rounded-4 p-3" style={{ backgroundColor: '#FFF7FB', borderColor: '#FBCFE8' }}>
-                                                <h6 className="fw-bold mb-2">Submit Your GCash Details</h6>
-                                                <p className="text-muted small mb-3">
-                                                    Your refund was approved. Submit the account details where you want the refund sent.
-                                                </p>
-                                                <div className="mb-3">
-                                                    <label className="form-label">GCash Account Name</label>
-                                                    <input
-                                                        type="text"
-                                                        className="form-control"
-                                                        value={gcashName}
-                                                        onChange={(event) => setGcashName(event.target.value)}
-                                                        placeholder="Enter your full GCash account name"
-                                                    />
-                                                </div>
-                                                <div className="mb-3">
-                                                    <label className="form-label">GCash Number</label>
-                                                    <input
-                                                        type="tel"
-                                                        className="form-control"
-                                                        value={gcashNumber}
-                                                        onChange={(event) => setGcashNumber(event.target.value)}
-                                                        placeholder="09XXXXXXXXX"
-                                                    />
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    className="btn"
-                                                    style={{ background: 'var(--shop-pink)', color: '#fff' }}
-                                                    onClick={handleSubmitRefundDetails}
-                                                    disabled={submittingRefundDetails}
-                                                >
-                                                    {submittingRefundDetails ? 'Submitting...' : 'Submit GCash Details'}
-                                                </button>
-                                            </div>
-                                        )}
-                                    </>
-                                ) : (
-                                    <div>
-                                        <div className="mb-3">
-                                            <label className="form-label">Why are you requesting a refund?</label>
-                                            <textarea
-                                                className="form-control"
-                                                rows="4"
-                                                value={refundReason}
-                                                onChange={(event) => setRefundReason(event.target.value)}
-                                                placeholder="Tell us what happened so the admin can review your request."
-                                            />
-                                        </div>
-                                        <button
-                                            type="button"
-                                            className="btn"
-                                            style={{ background: 'var(--shop-pink)', color: '#fff' }}
-                                            onClick={handleRequestRefund}
-                                            disabled={submittingRefundRequest}
-                                        >
-                                            {submittingRefundRequest ? 'Submitting...' : 'Request Refund'}
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
+                            <RefundRequestPanel
+                                refundRequest={refundRequest}
+                                canRequestRefund={canShowRefundRequest}
+                                eligibleRefundAmount={refundContext.refundAmount}
+                                onOpenRequestModal={() => setShowRefundModal(true)}
+                                gcashName={gcashName}
+                                onGcashNameChange={setGcashName}
+                                gcashNumber={gcashNumber}
+                                onGcashNumberChange={setGcashNumber}
+                                onSubmitRefundDetails={handleSubmitRefundDetails}
+                                submittingRefundDetails={submittingRefundDetails}
+                            />
                         )}
 
                         <div className="tracking-timeline">
@@ -1231,6 +1135,16 @@ const OrderCustomizedTracking = ({ user }) => {
                 onClose={() => setInfoModal({ ...infoModal, show: false })}
                 title={infoModal.title}
                 message={infoModal.message}
+            />
+            <RefundRequestModal
+                show={showRefundModal}
+                orderLabel="request"
+                refundAmount={refundContext.refundAmount}
+                refundReason={refundReason}
+                onRefundReasonChange={setRefundReason}
+                onClose={() => setShowRefundModal(false)}
+                onSubmit={handleRequestRefund}
+                submitting={submittingRefundRequest}
             />
         </div>
     );

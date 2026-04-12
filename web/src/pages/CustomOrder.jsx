@@ -651,10 +651,8 @@ const CustomOrder = ({ user }) => {
     });
 
     const [otherArrangementImagePreview, setOtherArrangementImagePreview] = useState(null);
-    const [otherFlowersImagePreview, setOtherFlowersImagePreview] = useState(null);
     const [inspirationImageErrorsByArrangement, setInspirationImageErrorsByArrangement] = useState({});
     const [otherArrangementImageError, setOtherArrangementImageError] = useState('');
-    const [otherFlowersImageError, setOtherFlowersImageError] = useState('');
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const [arrangementPreviewOption, setArrangementPreviewOption] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1232,29 +1230,9 @@ const CustomOrder = ({ user }) => {
         compressToBase64(file, setOtherArrangementImagePreview);
     };
 
-    const handleOtherFlowersImageChange = (e) => {
-        const file = e.target.files?.[0];
-        setOtherFlowersImageError('');
-        if (!file) return;
-        if (!['image/jpeg', 'image/png', 'image/jpg'].includes(file.type)) {
-            setOtherFlowersImageError('Please upload a JPG or PNG file.');
-            return;
-        }
-        if (file.size > 5 * 1024 * 1024) {
-            setOtherFlowersImageError('File size exceeds 5MB limit.');
-            return;
-        }
-        compressToBase64(file, setOtherFlowersImagePreview);
-    };
-
     const removeOtherArrangementImage = () => {
         setOtherArrangementImagePreview(null);
         setOtherArrangementImageError('');
-    };
-
-    const removeOtherFlowersImage = () => {
-        setOtherFlowersImagePreview(null);
-        setOtherFlowersImageError('');
     };
 
     const triggerValidation = (e) => {
@@ -1399,11 +1377,10 @@ const CustomOrder = ({ user }) => {
                 flowers: arrangementFlowerLabels.join(', ') + (arrangementOtherFlowersText ? ` (${arrangementOtherFlowersText})` : ''),
                 otherFlowersText: arrangementOtherFlowersText || null,
                 other_flowers_text: arrangementOtherFlowersText || null,
-                otherFlowersImageBase64: otherFlowersImagePreview || null,
                 colorPreference: selectedColor || null,
                 specialInstructions: formData.specialInstructions,
                 inspirationImageBase64,
-                image_url: inspirationImageBase64 || null,
+                image_url: null,
                 requestVariant: 'custom_order_v2',
                 custom_order_version: 2,
                 flow: 'custom_order_v2',
@@ -1844,23 +1821,6 @@ const CustomOrder = ({ user }) => {
                                                     );
                                                 })}
                                             </div>
-                                            <div className="arrangement-other-panel mt-3">
-                                                <div className="mt-1">
-                                                    <label className="form-label fw-semibold mb-2">Flower Reference Photo (Optional)</label>
-                                                    <input type="file" className="form-control bg-light border-0 py-2" accept=".jpg,.jpeg,.png" onChange={handleOtherFlowersImageChange} />
-                                                    <div className="form-text small">JPG or PNG, max 5MB.</div>
-                                                    {otherFlowersImagePreview && (
-                                                        <div className="mt-2">
-                                                            <img src={otherFlowersImagePreview} alt="Flower reference preview" className="rounded-3 border" style={{ maxHeight: '140px', maxWidth: '100%', objectFit: 'cover' }} />
-                                                            <div className="mt-2">
-                                                                <button type="button" className="btn btn-sm btn-outline-danger" onClick={removeOtherFlowersImage}>Remove Photo</button>
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                    {otherFlowersImageError && <p className="text-danger small mt-2 mb-0"><i className="fas fa-exclamation-circle me-1"></i>{otherFlowersImageError}</p>}
-                                                </div>
-                                            </div>
-
                                         </div>
 
                                         <div className="col-12 mt-3 position-relative">
@@ -2094,12 +2054,6 @@ const CustomOrder = ({ user }) => {
                                     </div>
                                 );
                             })}
-                            {otherFlowersImagePreview && (
-                                <div className="mt-2 text-center">
-                                    <span className="text-muted d-block mb-1">Flower Reference:</span>
-                                    <img src={otherFlowersImagePreview} alt="Flower reference" className="rounded-3 border" style={{ maxHeight: '120px', maxWidth: '100%', objectFit: 'cover' }} />
-                                </div>
-                            )}
                             {arrangementDetails.map((detail) => {
                                 const selectedColor = formData.colorPreferenceByArrangement?.[detail.value] || '';
                                 const otherColor = formData.otherColorPreferenceByArrangement?.[detail.value] || '';

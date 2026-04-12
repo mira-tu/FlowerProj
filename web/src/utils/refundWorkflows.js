@@ -199,6 +199,32 @@ export const getRefundRequestForEntity = async ({ entityType, entityId }) => {
     return Array.isArray(data) && data.length ? data[0] : null;
 };
 
+export const buildRefundLookupKey = (entityType, entityId) => (
+    entityType && entityId ? `${entityType}:${entityId}` : ''
+);
+
+export const getRefundRequestsForCustomer = async (customerId) => {
+    if (!customerId) {
+        return [];
+    }
+
+    const { data, error } = await supabase
+        .from('refund_requests')
+        .select('*')
+        .eq('customer_id', customerId)
+        .order('created_at', { ascending: false });
+
+    if (error) {
+        if (error.code === '42P01') {
+            return [];
+        }
+
+        throw error;
+    }
+
+    return Array.isArray(data) ? data : [];
+};
+
 const createRefundRequestDirect = async ({
     entityType,
     entityId,
@@ -241,32 +267,16 @@ const createRefundRequestDirect = async ({
 export const createRefundRequest = async ({
     entityType,
     entityId,
-    customerId,
     reason,
     refundAmount,
-}) => {
-    try {
-        return await invokeRefundWorkflow('create_refund_request', {
-            entityType,
-            entityId,
-            reason,
-            refundAmount,
-        });
-    } catch (error) {
-        if (!shouldFallbackToDirectWorkflow(error)) {
-            throw error;
-        }
-
-        console.warn('Falling back to direct refund request creation:', error.message);
-        return createRefundRequestDirect({
-            entityType,
-            entityId,
-            customerId,
-            reason,
-            refundAmount,
-        });
-    }
-};
+}) => (
+    invokeRefundWorkflow('create_refund_request', {
+        entityType,
+        entityId,
+        reason,
+        refundAmount,
+    })
+);
 
 const submitRefundGcashDetailsDirect = async ({
     refundId,
@@ -306,23 +316,10 @@ export const submitRefundGcashDetails = async ({
     refundId,
     gcashName,
     gcashNumber,
-}) => {
-    try {
-        return await invokeRefundWorkflow('submit_refund_gcash_details', {
-            refundId,
-            gcashName,
-            gcashNumber,
-        });
-    } catch (error) {
-        if (!shouldFallbackToDirectWorkflow(error)) {
-            throw error;
-        }
-
-        console.warn('Falling back to direct refund GCash submission:', error.message);
-        return submitRefundGcashDetailsDirect({
-            refundId,
-            gcashName,
-            gcashNumber,
-        });
-    }
-};
+}) => (
+    invokeRefundWorkflow('submit_refund_gcash_details', {
+        refundId,
+        gcashName,
+        gcashNumber,
+    })
+);

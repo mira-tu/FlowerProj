@@ -147,6 +147,59 @@ const shouldFallbackToDirectWorkflow = (error) => {
     ].some((token) => name.includes(token) || message.includes(token));
 };
 
+const isTransientFetchError = (error) => {
+    const message = String(error?.message || '').toLowerCase();
+    const details = String(error?.details || '').toLowerCase();
+    const hint = String(error?.hint || '').toLowerCase();
+    const name = String(error?.name || error?.cause?.name || '').toLowerCase();
+    const haystack = `${message} ${details} ${hint} ${name}`;
+
+    return [
+        'network request failed',
+        'failed to fetch',
+        'network error',
+        'load failed',
+        'connection closed',
+        'err_connection_closed',
+        'fetch',
+    ].some((token) => haystack.includes(token));
+};
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const isDataUrl = (value) => (
+    typeof value === 'string' && value.trim().toLowerCase().startsWith('data:')
+);
+const isHttpUrl = (value) => (
+    typeof value === 'string' && /^https?:\/\//i.test(value.trim())
+);
+const getStockStorageObjectPath = (value) => {
+    if (!isHttpUrl(value) || isDataUrl(value)) {
+        return '';
+    }
+
+    try {
+        const parsedUrl = new URL(value);
+        const marker = '/storage/v1/object/public/stock-images/';
+        const markerIndex = parsedUrl.pathname.indexOf(marker);
+        if (markerIndex >= 0) {
+            return decodeURIComponent(parsedUrl.pathname.slice(markerIndex + marker.length));
+        }
+    } catch (error) {
+        // Fall through to the simple filename fallback below.
+    }
+
+    const parts = String(value || '').split('/').filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : '';
+};
+const removeStockStorageObjectIfNeeded = async (value) => {
+    const objectPath = getStockStorageObjectPath(value);
+    if (!objectPath) {
+        return;
+    }
+
+    await supabase.storage.from('stock-images').remove([objectPath]);
+};
+
 const parseJsonObject = (value) => {
     if (!value) return {};
     if (typeof value === 'string') {
@@ -157,6 +210,49 @@ const parseJsonObject = (value) => {
         }
     }
     return typeof value === 'object' ? value : {};
+};
+
+const normalizeStockRibbonScope = (value) => {
+    const normalized = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+
+    if (!normalized || normalized === 'classic' || normalized === 'classic_wrap' || normalized === 'classic_bouquet') {
+        return 'classic_bouquet';
+    }
+
+    if (normalized === 'palm_halo' || normalized === 'palm_halo_wrap' || normalized === 'palmhalo') {
+        return 'palm_halo_wrap';
+    }
+
+    return normalized;
+};
+
+const buildStockCustomizationConfig = (formData = {}) => {
+    const baseConfig = parseJsonObject(formData?.customization_config);
+    const category = String(formData?.category || '').trim().toLowerCase();
+
+    if (!['ribbon', 'ribbons'].includes(category)) {
+        return Object.keys(baseConfig).length ? baseConfig : (formData?.customization_config || null);
+    }
+
+    const normalizedScope = normalizeStockRibbonScope(formData?.ribbon_scope);
+    const isPalmHaloRibbon = normalizedScope === 'palm_halo_wrap';
+
+    return {
+        ...baseConfig,
+        ribbon_scope: normalizedScope,
+        ribbonScope: normalizedScope,
+        scopeLabel: isPalmHaloRibbon ? 'Palm Halo Wrap' : 'Classic Bouquet',
+        wrapperMode: isPalmHaloRibbon ? 'Palm Halo Wrap' : 'Classic Bouquet',
+    };
+};
+
+const buildLegacyStockMetadata = (formData = {}) => {
+    const category = String(formData?.category || '').trim().toLowerCase();
+    if (!['ribbon', 'ribbons'].includes(category)) {
+        return formData?.customizer_metadata || formData?.wrapper_behavior || null;
+    }
+
+    return buildStockCustomizationConfig(formData);
 };
 
 const formatMonthKey = (date) => {
@@ -262,6 +358,33 @@ const getUniqueAssignedRiderIds = (destinations = []) => Array.from(
             .filter(Boolean)
     )
 );
+
+const getMissingAssignedStopLabels = (destinations = [], fallbackAssignedRiderId = null) => {
+    const normalizedStops = normalizeDeliveryDestinations(destinations);
+    const normalizedFallbackAssignedRiderId = normalizedStops.length <= 1
+        ? String(fallbackAssignedRiderId || '').trim()
+        : '';
+
+    return normalizedStops
+        .map((destination, index) => {
+            const assignedRiderId = String(destination?.assigned_rider_id || normalizedFallbackAssignedRiderId || '').trim();
+            return assignedRiderId ? null : getDeliveryStopDisplayLabel(destination, index);
+        })
+        .filter(Boolean);
+};
+
+const getOutForDeliveryAssignmentError = ({
+    recordType = 'order',
+    destinations = [],
+    fallbackAssignedRiderId = null,
+}) => {
+    const missingStopLabels = getMissingAssignedStopLabels(destinations, fallbackAssignedRiderId);
+    if (!missingStopLabels.length) {
+        return '';
+    }
+
+    return `Please assign an employee rider to every delivery stop before moving this ${recordType} to Out for Delivery. Missing riders: ${missingStopLabels.join(', ')}.`;
+};
 
 const insertNotificationRecord = async (notification) => {
     const { error } = await supabase
@@ -477,7 +600,7 @@ const updateOrderStatusDirect = async (id, status, options = {}) => {
     let fetchError = null;
 
     try {
-        current = await getOrderById(id, 'id, status_timestamps, cancellation_reason');
+        current = await getOrderById(id, 'id, status_timestamps, cancellation_reason, notes, assigned_rider');
     } catch (error) {
         fetchError = error;
     }
@@ -496,6 +619,20 @@ const updateOrderStatusDirect = async (id, status, options = {}) => {
     const cancellationReason = typeof options?.cancellationReason === 'string'
         ? options.cancellationReason.trim()
         : '';
+
+    if (String(status || '').trim().toLowerCase() === 'out_for_delivery') {
+        const parsedNotes = parseMultiDeliveryNotes(current?.notes);
+        const assignmentError = getOutForDeliveryAssignmentError({
+            recordType: 'order',
+            destinations: parsedNotes.destinations,
+            fallbackAssignedRiderId: current?.assigned_rider,
+        });
+
+        if (assignmentError) {
+            throw new Error(assignmentError);
+        }
+    }
+
     const nextStatusTimestamps = withStatusTimestamp(current?.status_timestamps, status);
 
     if (status === 'cancelled' && cancellationReason) {
@@ -696,6 +833,10 @@ const completeOrderDeliveryStopDirect = async (orderId, unitKey, options = {}) =
         throw new Error('This order still uses the legacy delivery confirmation flow.');
     }
 
+    if (String(currentOrder?.status || '').trim().toLowerCase() !== 'out_for_delivery') {
+        throw new Error('Proof can only be uploaded once this order is marked out for delivery.');
+    }
+
     const normalizedUnitKey = String(unitKey || '').trim();
     const stopToComplete = normalizedStops.find((stop) => stop.unit_key === normalizedUnitKey);
 
@@ -719,6 +860,17 @@ const completeOrderDeliveryStopDirect = async (orderId, unitKey, options = {}) =
 
     if (!options?.proofFile?.base64) {
         throw new Error('Proof photo is required before completing this delivery stop.');
+    }
+
+    const fallbackAssignedRiderId = normalizedStops.length <= 1
+        ? String(currentOrder?.assigned_rider || '').trim()
+        : '';
+    const assignedRiderId = String(
+        stopToComplete?.assigned_rider_id || fallbackAssignedRiderId || ''
+    ).trim();
+
+    if (!assignedRiderId) {
+        throw new Error('This delivery stop does not have an assigned rider yet.');
     }
 
     const actorType = String(options?.actorType || 'staff').trim().toLowerCase() === 'rider'
@@ -2323,7 +2475,7 @@ const getRequestScheduleDate = (request) => {
 const updateRequestStatusDirect = async (id, status, options = {}) => {
     const { data: current, error: fetchError } = await supabase
         .from('requests')
-        .select('status_timestamps, data, user_id, request_number, cancellation_reason')
+        .select('status_timestamps, data, user_id, request_number, cancellation_reason, assigned_rider')
         .eq('id', id)
         .single();
 
@@ -2338,6 +2490,19 @@ const updateRequestStatusDirect = async (id, status, options = {}) => {
     const cancellationReason = typeof options?.cancellationReason === 'string'
         ? options.cancellationReason.trim()
         : '';
+
+    if (String(status || '').trim().toLowerCase() === 'out_for_delivery') {
+        const currentData = parseJsonObject(current?.data);
+        const assignmentError = getOutForDeliveryAssignmentError({
+            recordType: 'request',
+            destinations: currentData?.multi_delivery_destinations || [],
+            fallbackAssignedRiderId: current?.assigned_rider,
+        });
+
+        if (assignmentError) {
+            throw new Error(assignmentError);
+        }
+    }
 
     if (status === 'cancelled' || status === 'declined') {
         updatePayload.cancellation_reason = cancellationReason || current?.cancellation_reason || null;
@@ -2582,6 +2747,10 @@ const completeRequestDeliveryStopDirect = async (requestId, unitKey, options = {
         throw new Error('This request still uses the legacy delivery confirmation flow.');
     }
 
+    if (String(currentRequest?.status || '').trim().toLowerCase() !== 'out_for_delivery') {
+        throw new Error('Proof can only be uploaded once this request is marked out for delivery.');
+    }
+
     const normalizedUnitKey = String(unitKey || '').trim();
     const stopToComplete = normalizedStops.find((stop) => stop.unit_key === normalizedUnitKey);
 
@@ -2608,6 +2777,17 @@ const completeRequestDeliveryStopDirect = async (requestId, unitKey, options = {
 
     if (!options?.proofFile?.base64) {
         throw new Error('Proof photo is required before completing this delivery stop.');
+    }
+
+    const fallbackAssignedRiderId = normalizedStops.length <= 1
+        ? String(currentRequest?.assigned_rider || '').trim()
+        : '';
+    const assignedRiderId = String(
+        stopToComplete?.assigned_rider_id || fallbackAssignedRiderId || ''
+    ).trim();
+
+    if (!assignedRiderId) {
+        throw new Error('This delivery stop does not have an assigned rider yet.');
     }
 
     const actorType = String(options?.actorType || 'staff').trim().toLowerCase() === 'rider'
@@ -3812,9 +3992,16 @@ export const adminAPI = {
         }
     },
 
-    completeOrderDeliveryStop: async (orderId, unitKey, options = {}) => ({
-        data: await completeOrderDeliveryStopDirect(orderId, unitKey, options),
-    }),
+    completeOrderDeliveryStop: async (orderId, unitKey, options = {}) => {
+        const data = await invokeAdminWorkflow('complete_order_delivery_stop', {
+            orderId,
+            unitKey,
+            proofFile: options?.proofFile || null,
+            proofNote: options?.proofNote || '',
+        });
+
+        return { data };
+    },
 
     approveRefundRequest: async (refundId, options = {}) => {
         try {
@@ -5053,21 +5240,43 @@ export const adminAPI = {
         }
     },
 
-    completeRequestDeliveryStop: async (requestId, unitKey, options = {}) => ({
-        data: await completeRequestDeliveryStopDirect(requestId, unitKey, options),
-    }),
+    completeRequestDeliveryStop: async (requestId, unitKey, options = {}) => {
+        const data = await invokeAdminWorkflow('complete_request_delivery_stop', {
+            requestId,
+            unitKey,
+            proofFile: options?.proofFile || null,
+            proofNote: options?.proofNote || '',
+        });
+
+        return { data };
+    },
 
     getAllStock: async () => {
-        const { data: stock, error } = await supabase
-            .from('stock_products')
-            .select('*')
-            .order('created_at', { ascending: false });
+        let lastError = null;
 
-        if (error) {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            const { data: stock, error } = await supabase
+                .from('stock_products')
+                .select('*')
+                .order('created_at', { ascending: false });
+
+            if (!error) {
+                return { data: stock };
+            }
+
+            lastError = error;
+
+            if (attempt < 2 && isTransientFetchError(error)) {
+                console.warn(`Transient stock_products fetch error; retrying (${attempt + 1}/2)...`, error);
+                await wait(350 * (attempt + 1));
+                continue;
+            }
+
             console.error('Supabase query error for stock_products:', error);
             throw error;
         }
-        return { data: stock };
+
+        throw lastError || new Error('Failed to load stock products.');
     },
 
     createStock: async (formData) => {
@@ -5151,7 +5360,9 @@ export const adminAPI = {
             wrapper_group_name: formData.wrapper_group_name || null,
             wrapper_color: formData.wrapper_color || null,
             ribbon_scope: formData.ribbon_scope || null,
-            customization_config: formData.customization_config || null,
+            customization_config: buildStockCustomizationConfig(formData),
+            customizer_metadata: buildLegacyStockMetadata(formData),
+            wrapper_behavior: buildLegacyStockMetadata(formData),
         };
 
         const { data: newStock, error } = await saveWithLegacyFallback(stockToInsert);
@@ -5228,8 +5439,7 @@ export const adminAPI = {
 
                 // Delete old image if it exists and a new one was uploaded
                 if (oldImageUrl && oldImageUrl !== imageUrl) {
-                    const oldFileName = oldImageUrl.split('/').pop();
-                    await supabase.storage.from('stock-images').remove([oldFileName]);
+                    await removeStockStorageObjectIfNeeded(oldImageUrl);
                 }
 
             } catch (error) {
@@ -5239,11 +5449,10 @@ export const adminAPI = {
         } else if (imageFile === null) {
             // If image was explicitly removed by setting to null
             if (oldImageUrl) {
-                const oldFileName = oldImageUrl.split('/').pop();
-                await supabase.storage.from('stock-images').remove([oldFileName]);
+                await removeStockStorageObjectIfNeeded(oldImageUrl);
             }
             imageUrl = null;
-        } else if (imageFile && imageFile.uri && imageFile.uri.startsWith('http')) {
+        } else if (imageFile && imageFile.uri && (imageFile.uri.startsWith('http') || imageFile.uri.startsWith('data:'))) {
             // No new image, keep existing one
             imageUrl = imageFile.uri;
         }
@@ -5264,7 +5473,9 @@ export const adminAPI = {
             wrapper_group_name: formData.wrapper_group_name || null,
             wrapper_color: formData.wrapper_color || null,
             ribbon_scope: formData.ribbon_scope || null,
-            customization_config: formData.customization_config || null,
+            customization_config: buildStockCustomizationConfig(formData),
+            customizer_metadata: buildLegacyStockMetadata(formData),
+            wrapper_behavior: buildLegacyStockMetadata(formData),
             updated_at: new Date().toISOString(),
         };
 
@@ -5292,12 +5503,9 @@ export const adminAPI = {
         }
 
         if (stockItem.image_url) {
-            const fileName = stockItem.image_url.split('/').pop();
-            const { error: deleteImageError } = await supabase.storage
-                .from('stock-images')
-                .remove([fileName]);
-
-            if (deleteImageError) {
+            try {
+                await removeStockStorageObjectIfNeeded(stockItem.image_url);
+            } catch (deleteImageError) {
                 console.error('Error deleting stock image:', deleteImageError);
                 // Continue with deleting the record even if image deletion fails
             }

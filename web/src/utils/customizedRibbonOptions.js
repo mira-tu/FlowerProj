@@ -25,11 +25,11 @@ const WRAPPER_PREVIEW_STYLES = Object.freeze({
   'Palm Halo Wrap': {
     width: 'auto',
     height: '100%',
-    maxWidth: '116%',
-    maxHeight: '116%',
+    maxWidth: '100%',
+    maxHeight: '100%',
     top: 'auto',
-    bottom: '-4%',
-    transform: 'translateX(-50%) scale(1.24)',
+    bottom: '0%',
+    transform: 'translateX(-50%) scale(1.08)',
   },
 });
 const DEFAULT_WRAPPER_RIBBON_PREVIEW_CONFIG = Object.freeze({
@@ -40,13 +40,13 @@ const WRAPPER_RIBBON_PREVIEW_CONFIGS = Object.freeze({
   'Palm Halo Wrap': {
     mode: 'relative',
     leftFactor: 0.5,
-    topFactor: 0.47,
-    widthFactor: 0.46,
+    topFactor: 0.5,
+    widthFactor: 0.8,
     transform: 'translate(-50%, -50%)',
     fallbackStyle: {
-      top: '58%',
+      top: '50%',
       left: '50%',
-      width: '30%',
+      width: '54%',
       transform: 'translate(-50%, -50%)',
     },
   },
@@ -106,9 +106,9 @@ const WRAPPER_FLOWER_ZONE_CONFIGS = Object.freeze({
 const WRAPPER_CROP_PADDING = 16;
 
 const DEFAULT_PALM_HALO_RIBBON_PREVIEW_STYLE = Object.freeze({
-  top: '58%',
+  top: '50%',
   left: '50%',
-  width: '30%',
+  width: '54%',
   transform: 'translate(-50%, -50%)',
 });
 const PALM_HALO_VARIANTS = Object.freeze([

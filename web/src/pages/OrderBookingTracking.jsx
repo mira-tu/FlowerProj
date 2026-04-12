@@ -5,8 +5,11 @@ import TrackingPaymentDetails from '../components/TrackingPaymentDetails';
 import DeliveryDestinationsSummary from '../components/DeliveryDestinationsSummary';
 import TrackingDeliveryStops from '../components/TrackingDeliveryStops';
 import InfoModal from '../components/InfoModal';
+import ItemCancellationModal from '../components/ItemCancellationModal';
 import CustomOrderQuoteBreakdown from '../components/CustomOrderQuoteBreakdown';
 import CustomOrderQuotePaymentModal from '../components/CustomOrderQuotePaymentModal';
+import RefundRequestModal from '../components/RefundRequestModal';
+import RefundRequestPanel from '../components/RefundRequestPanel';
 import { buildTimelineTimestampMap, formatTimelineTimestamp } from '../utils/timelineTimestamps';
 import { formatCustomOrderV4Currency, getSelectedEstimateFromItem, isCustomOrderV4Item } from '../utils/customOrderV4';
 import { summarizeCustomOrderQuoteBreakdown } from '../utils/customOrderQuoteBreakdown';
@@ -22,20 +25,22 @@ import {
     hasStopConfirmationFlow,
 } from '../utils/deliveryDestinations';
 import {
-    canRequestRefund,
     createRefundRequest,
     getRefundRequestForEntity,
-    getRefundStatusLabel,
-    isActiveRefundRequest,
-    maskGcashNumber,
-    requiresRefundReviewBeforeCancellation,
     submitRefundGcashDetails,
 } from '../utils/refundWorkflows';
 import {
     createAdditionalReceiptEntry,
     normalizeGcashReferenceNumber,
+    resolveRequestTrackingPaymentMetadata,
     writeWithOptionalColumns,
 } from '../utils/gcashPayments';
+import {
+    buildRefundReasonFromCancelledEntity,
+    canRequestRefundAfterCancellation,
+    getCancellationRefundContext,
+    hasActiveRefundRequest,
+} from '../utils/customerRefunds';
 import '../styles/Shop.css';
 
 // Timeline steps for Delivery Requests
@@ -299,6 +304,7 @@ const OrderBookingTracking = () => {
     const [cancelReasonError, setCancelReasonError] = useState('');
     const [refundRequest, setRefundRequest] = useState(null);
     const [refundReason, setRefundReason] = useState('');
+    const [showRefundModal, setShowRefundModal] = useState(false);
     const [submittingRefundRequest, setSubmittingRefundRequest] = useState(false);
     const [gcashName, setGcashName] = useState('');
     const [gcashNumber, setGcashNumber] = useState('');
@@ -310,7 +316,7 @@ const OrderBookingTracking = () => {
     const loadRequest = async (showLoader = true) => {
         if (!requestNumber) {
             setLoading(false);
-            return;
+            return null;
         }
 
         if (showLoader) {
@@ -327,7 +333,7 @@ const OrderBookingTracking = () => {
             console.error('Error fetching request:', dbError);
             setRequest(null);
             setLoading(false);
-            return;
+            return null;
         }
 
         let normalizedRequestData = foundRequest.data;
@@ -398,6 +404,10 @@ const OrderBookingTracking = () => {
                             : Number(foundRequest.final_price || 0)
                     )
             );
+        const paymentMetadata = resolveRequestTrackingPaymentMetadata({
+            ...foundRequest,
+            requestData: normalizedRequestData,
+        });
 
         const transformedRequest = {
             ...foundRequest,
@@ -415,7 +425,9 @@ const OrderBookingTracking = () => {
             finalPrice: nextFinalPrice,
             shipping_fee: nextShippingFee,
             status: bookingSummary.allCancelled ? 'cancelled' : foundRequest.status,
-            gcash_reference_number: foundRequest.gcash_reference_number || normalizedRequestData?.gcash_reference_number || null,
+            receipt_url: paymentMetadata.receiptUrl,
+            gcash_reference_number: paymentMetadata.gcashReferenceNumber || null,
+            additional_receipts: paymentMetadata.additionalReceipts,
         };
         setRequest(transformedRequest);
 
@@ -463,6 +475,7 @@ const OrderBookingTracking = () => {
         }
 
         setLoading(false);
+        return transformedRequest;
     };
 
     useEffect(() => {
@@ -648,79 +661,44 @@ const OrderBookingTracking = () => {
             .filter((item) => item.remainingQuantity > 0);
     };
 
-    const getPaidCancellationRefundAmount = (currentRequest) => {
-        const requestData = parseJsonObject(currentRequest?.requestData || currentRequest?.data);
-        const amountReceived = Number(currentRequest?.amount_received || requestData?.amount_received || 0);
-        if (amountReceived > 0) {
-            return amountReceived;
-        }
-
-        return Number(
-            currentRequest?.final_price
-            || currentRequest?.totalAmount
-            || requestData?.final_price
-            || requestData?.estimated_total
-            || 0
-        );
-    };
-
-    const shouldRouteCancellationToRefund = (currentRequest) => {
-        const requestData = parseJsonObject(currentRequest?.requestData || currentRequest?.data);
-        return requiresRefundReviewBeforeCancellation({
-            paymentStatus: currentRequest?.payment_status || requestData?.payment_status,
-            amountPaid: currentRequest?.amount_received || requestData?.amount_received || 0,
-            fallbackAmount: getPaidCancellationRefundAmount(currentRequest),
-            receiptUrl: currentRequest?.receipt_url || requestData?.receipt_url || '',
-            additionalReceipts: currentRequest?.additional_receipts || requestData?.additional_receipts || [],
-        });
-    };
-
-    const createCancellationRefundReview = async ({ selectedItem, quantityToCancel, reason }) => {
-        if (!request?.id) {
-            throw new Error('This request could not be found.');
-        }
-
-        const { data: sessionData } = await supabase.auth.getSession();
-        const customerId = sessionData?.session?.user?.id || null;
-        if (!customerId) {
-            throw new Error('Please sign in again before requesting this cancellation.');
-        }
-
-        const existingRefund = await getRefundRequestForEntity({
-            entityType: 'request',
-            entityId: request.id,
-        });
-        if (isActiveRefundRequest(existingRefund)) {
-            return { refundRequest: existingRefund, reused: true };
-        }
-
-        const itemLabel = getCancellationItemDisplayLabel(selectedItem);
-        const detailedReason = [
-            `Cancellation request for ${itemLabel}`,
-            `Quantity: ${quantityToCancel}`,
-            `Customer reason: ${reason}`,
-        ].join('\n');
-
-        const result = await createRefundRequest({
-            entityType: 'request',
-            entityId: request.id,
-            customerId,
-            reason: detailedReason,
-            refundAmount: getPaidCancellationRefundAmount(request),
-        });
-
-        return {
-            refundRequest: result?.refundRequest || null,
-            reused: false,
-        };
-    };
-
     const closeCancelModal = () => {
         setShowCancelModal(false);
         setCancelTargetItemKey('');
         setCancelQuantity(1);
         setCancelReason('');
         setCancelReasonError('');
+    };
+
+    const handlePostCancellationState = async (updatedRequest) => {
+        const latestRefund = await getRefundRequestForEntity({
+            entityType: 'request',
+            entityId: request.id,
+        });
+        setRefundRequest(latestRefund);
+        setGcashName(latestRefund?.gcash_name || '');
+        setGcashNumber(latestRefund?.gcash_number || '');
+
+        const refundContext = getCancellationRefundContext(updatedRequest || request || {});
+        if (hasActiveRefundRequest(latestRefund)) {
+            setInfoModal({
+                show: true,
+                title: 'Request Updated',
+                message: 'The selected quantity was cancelled successfully. Your refund request is already in progress.',
+            });
+            return;
+        }
+
+        if (refundContext.hasRecordedPayment && refundContext.refundAmount > 0) {
+            setRefundReason('');
+            setShowRefundModal(true);
+            return;
+        }
+
+        setInfoModal({
+            show: true,
+            title: 'Request Updated',
+            message: 'The selected quantity was cancelled successfully.',
+        });
     };
 
     const handleCancelClick = () => {
@@ -876,33 +854,10 @@ const OrderBookingTracking = () => {
         );
 
         try {
-            if (shouldRouteCancellationToRefund(request)) {
-                const refundResult = await createCancellationRefundReview({
-                    selectedItem,
-                    quantityToCancel,
-                    reason: trimmedCancelReason,
-                });
-
-                await loadRequest(false);
-                closeCancelModal();
-                setInfoModal({
-                    show: true,
-                    title: refundResult.reused ? 'Refund Review Already Pending' : 'Cancellation Request Submitted',
-                    message: refundResult.reused
-                        ? 'This paid request already has a refund review in progress. Please wait for the admin decision before cancelling again.'
-                        : 'Because payment was already submitted or received, we sent your cancellation through refund review first. We will finalize the cancellation after that review is resolved.',
-                });
-                return;
-            }
-
             await updateRequestCancellation(cancelTargetItemKey, quantityToCancel, trimmedCancelReason);
-            await loadRequest(false);
             closeCancelModal();
-            setInfoModal({
-                show: true,
-                title: 'Request Updated',
-                message: 'The selected quantity was cancelled successfully.',
-            });
+            const updatedRequest = await loadRequest(false);
+            await handlePostCancellationState(updatedRequest);
         } catch (error) {
             console.error('Error cancelling request item:', error);
             setInfoModal({
@@ -1118,18 +1073,17 @@ const OrderBookingTracking = () => {
 
         setSubmittingRefundRequest(true);
         try {
+            const refundContext = getCancellationRefundContext(request);
             const result = await createRefundRequest({
                 entityType: 'request',
                 entityId: request.id,
-                customerId: session.user.id,
-                reason: trimmedReason,
-                refundAmount: Number(request.amount_received || 0) > 0
-                    ? Number(request.amount_received || 0)
-                    : Number(request.finalPrice || 0),
+                reason: buildRefundReasonFromCancelledEntity(request, trimmedReason),
+                refundAmount: refundContext.refundAmount,
             });
 
             setRefundRequest(result.refundRequest);
             setRefundReason('');
+            setShowRefundModal(false);
             setInfoModal({
                 show: true,
                 title: 'Refund Request Sent',
@@ -1216,13 +1170,12 @@ const OrderBookingTracking = () => {
         ? request.requestData.multi_delivery_destinations
         : [];
     const usesStopConfirmationFlow = hasStopConfirmationFlow(bookingDestinations);
-    const canShowRefundRequest = Boolean(request) && canRequestRefund({
-        paymentStatus: request?.payment_status,
-        amountPaid: request?.amount_received,
-        fallbackAmount: request?.finalPrice,
+    const paymentMetadata = resolveRequestTrackingPaymentMetadata(request || {});
+    const refundContext = getCancellationRefundContext(request || {});
+    const canShowRefundRequest = Boolean(request) && canRequestRefundAfterCancellation({
+        entity: request,
         refundRequest,
-    }) && ['completed', 'cancelled'].includes(String(request?.status || '').toLowerCase());
-    const showRefundGcashForm = String(refundRequest?.status || '').toLowerCase() === 'approved';
+    });
     const shouldShowFinalPrice = Boolean(request)
         && String(request?.status || '').toLowerCase() !== 'pending'
         && Number(request?.finalPrice || 0) > 0;
@@ -1352,9 +1305,9 @@ const OrderBookingTracking = () => {
                                 paymentStatus={request.payment_status}
                                 totalAmount={request.finalPrice}
                                 amountPaid={request.amount_received}
-                                receiptUrl={request.receipt_url}
-                                gcashReferenceNumber={request.gcash_reference_number}
-                                additionalReceipts={request.additional_receipts}
+                                receiptUrl={paymentMetadata.receiptUrl}
+                                gcashReferenceNumber={paymentMetadata.gcashReferenceNumber}
+                                additionalReceipts={paymentMetadata.additionalReceipts}
                                 onUploadReceipt={handleUploadReceipt}
                                 uploadingReceipt={uploadingReceipt}
                                 additionalFile={additionalFile}
@@ -1366,129 +1319,18 @@ const OrderBookingTracking = () => {
                         )}
 
                         {(refundRequest || canShowRefundRequest) && (
-                            <div className="tracking-items p-4 rounded-4 shadow-sm bg-white mb-4">
-                                <div className="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
-                                    <div>
-                                        <h5 className="fw-bold mb-1">
-                                            <i className="fas fa-rotate-left me-2" style={{ color: 'var(--shop-pink)' }}></i>
-                                            Refund Request
-                                        </h5>
-                                        <p className="text-muted mb-0">
-                                            Admin approval is required first. Once approved, you can submit your GCash details here for the refund.
-                                        </p>
-                                    </div>
-                                    {refundRequest && (
-                                        <span className="badge rounded-pill px-3 py-2" style={{ backgroundColor: '#FCE7F3', color: '#BE185D' }}>
-                                            {getRefundStatusLabel(refundRequest.status)}
-                                        </span>
-                                    )}
-                                </div>
-
-                                {refundRequest ? (
-                                    <>
-                                        <div className="row g-3 mb-3">
-                                            <div className="col-md-6">
-                                                <div className="small text-muted">Requested Amount</div>
-                                                <div className="fw-semibold">PHP {Number(refundRequest.refund_amount || 0).toLocaleString()}</div>
-                                            </div>
-                                            <div className="col-md-6">
-                                                <div className="small text-muted">Reason</div>
-                                                <div className="fw-semibold">{refundRequest.customer_reason}</div>
-                                            </div>
-                                            {refundRequest.admin_note && (
-                                                <div className="col-12">
-                                                    <div className="small text-muted">Admin Note</div>
-                                                    <div className="fw-semibold">{refundRequest.admin_note}</div>
-                                                </div>
-                                            )}
-                                            {refundRequest.rejection_reason && (
-                                                <div className="col-12">
-                                                    <div className="small text-muted">Decision</div>
-                                                    <div className="text-danger fw-semibold">{refundRequest.rejection_reason}</div>
-                                                </div>
-                                            )}
-                                            {(refundRequest.gcash_name || refundRequest.gcash_number) && (
-                                                <>
-                                                    <div className="col-md-6">
-                                                        <div className="small text-muted">GCash Account Name</div>
-                                                        <div className="fw-semibold">{refundRequest.gcash_name || 'Not submitted'}</div>
-                                                    </div>
-                                                    <div className="col-md-6">
-                                                        <div className="small text-muted">GCash Number</div>
-                                                        <div className="fw-semibold">{maskGcashNumber(refundRequest.gcash_number)}</div>
-                                                    </div>
-                                                </>
-                                            )}
-                                            {refundRequest.refund_reference && (
-                                                <div className="col-12">
-                                                    <div className="small text-muted">Refund Reference</div>
-                                                    <div className="fw-semibold">{refundRequest.refund_reference}</div>
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {showRefundGcashForm && (
-                                            <div className="border rounded-4 p-3" style={{ backgroundColor: '#FFF7FB', borderColor: '#FBCFE8' }}>
-                                                <h6 className="fw-bold mb-2">Submit Your GCash Details</h6>
-                                                <p className="text-muted small mb-3">
-                                                    Your refund was approved. Submit the account details where you want the refund sent.
-                                                </p>
-                                                <div className="mb-3">
-                                                    <label className="form-label">GCash Account Name</label>
-                                                    <input
-                                                        type="text"
-                                                        className="form-control"
-                                                        value={gcashName}
-                                                        onChange={(event) => setGcashName(event.target.value)}
-                                                        placeholder="Enter your full GCash account name"
-                                                    />
-                                                </div>
-                                                <div className="mb-3">
-                                                    <label className="form-label">GCash Number</label>
-                                                    <input
-                                                        type="tel"
-                                                        className="form-control"
-                                                        value={gcashNumber}
-                                                        onChange={(event) => setGcashNumber(event.target.value)}
-                                                        placeholder="09XXXXXXXXX"
-                                                    />
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    className="btn"
-                                                    style={{ background: 'var(--shop-pink)', color: '#fff' }}
-                                                    onClick={handleSubmitRefundDetails}
-                                                    disabled={submittingRefundDetails}
-                                                >
-                                                    {submittingRefundDetails ? 'Submitting...' : 'Submit GCash Details'}
-                                                </button>
-                                            </div>
-                                        )}
-                                    </>
-                                ) : (
-                                    <div>
-                                        <div className="mb-3">
-                                            <label className="form-label">Why are you requesting a refund?</label>
-                                            <textarea
-                                                className="form-control"
-                                                rows="4"
-                                                value={refundReason}
-                                                onChange={(event) => setRefundReason(event.target.value)}
-                                                placeholder="Tell us what happened so the admin can review your request."
-                                            />
-                                        </div>
-                                        <button
-                                            type="button"
-                                            className="btn"
-                                            style={{ background: 'var(--shop-pink)', color: '#fff' }}
-                                            onClick={handleRequestRefund}
-                                            disabled={submittingRefundRequest}
-                                        >
-                                            {submittingRefundRequest ? 'Submitting...' : 'Request Refund'}
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
+                            <RefundRequestPanel
+                                refundRequest={refundRequest}
+                                canRequestRefund={canShowRefundRequest}
+                                eligibleRefundAmount={refundContext.refundAmount}
+                                onOpenRequestModal={() => setShowRefundModal(true)}
+                                gcashName={gcashName}
+                                onGcashNameChange={setGcashName}
+                                gcashNumber={gcashNumber}
+                                onGcashNumberChange={setGcashNumber}
+                                onSubmitRefundDetails={handleSubmitRefundDetails}
+                                submittingRefundDetails={submittingRefundDetails}
+                            />
                         )}
 
                         <div className="tracking-timeline">
@@ -1628,6 +1470,7 @@ const OrderBookingTracking = () => {
                                                 fallbackRider={request.rider}
                                                 confirmingUnitKey={confirmingStopKey}
                                                 onConfirmStop={handleConfirmDeliveryStop}
+                                                currentDeliveryStatus={request.status}
                                             />
                                         </div>
                                     ) : bookingDestinations.length > 0 && (
@@ -1787,7 +1630,7 @@ const OrderBookingTracking = () => {
                                 )}
                             </div>
 
-                            {request.status === 'quoted' && request.requestData?.quote_breakdown && (() => {
+                            {request.requestData?.quote_breakdown && (() => {
                                 const breakdown = request.requestData.quote_breakdown;
                                 const { lineItems } = summarizeCustomOrderQuoteBreakdown(breakdown, request.shipping_fee);
 
@@ -1919,163 +1762,43 @@ const OrderBookingTracking = () => {
                 </div>
             </div>
 
-            {showCancelModal && (
-                <div
-                    className="modal-overlay"
-                    onClick={closeCancelModal}
-                    style={{
-                        position: 'fixed',
-                        top: 0,
-                        left: 0,
-                        width: '100%',
-                        height: '100%',
-                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                        display: 'flex',
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        zIndex: 1000,
-                    }}
-                >
-                    <div
-                        className="modal-content-custom"
-                        onClick={(event) => event.stopPropagation()}
-                        style={{
-                            backgroundColor: 'white',
-                            padding: '2rem',
-                            borderRadius: '1rem',
-                            textAlign: 'center',
-                            maxWidth: '400px',
-                            width: '90%',
-                            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-                        }}
-                    >
-                        <div style={{ fontSize: '3rem', color: '#dc3545', marginBottom: '1rem' }}>
-                            <i className="fas fa-exclamation-triangle"></i>
-                        </div>
-                        <h3 style={{ marginBottom: '1rem', color: '#333' }}>Cancel item from this request?</h3>
-                        <p style={{ marginBottom: '1.5rem', color: '#4b5563' }}>
-                            Choose the item and quantity you want to cancel. We will keep the rest of your request active.
-                        </p>
-                        <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
-                            <label htmlFor="cancelItemTracking" style={{ display: 'block', fontWeight: '600', color: '#333', marginBottom: '0.5rem' }}>
-                                Item to cancel
-                            </label>
-                            <select
-                                id="cancelItemTracking"
-                                value={selectedCancelItem?.cancellationKey || ''}
-                                onChange={(event) => {
-                                    const nextItem = cancellableItems.find((item) => item.cancellationKey === event.target.value);
-                                    setCancelTargetItemKey(event.target.value);
-                                    setCancelQuantity(1);
-                                    if (!nextItem && cancelReasonError) setCancelReasonError('');
-                                }}
-                                style={{
-                                    width: '100%',
-                                    borderRadius: '0.75rem',
-                                    border: '1px solid #d1d5db',
-                                    padding: '0.75rem 0.9rem',
-                                    color: '#111827',
-                                    backgroundColor: 'white',
-                                }}
-                            >
-                                {cancellableItems.map((item) => (
-                                    <option key={item.cancellationKey} value={item.cancellationKey}>
-                                        {getCancellationItemDisplayLabel(item)}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                        {selectedCancelItem && (
-                            <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
-                                <label htmlFor="cancelQuantityTracking" style={{ display: 'block', fontWeight: '600', color: '#333', marginBottom: '0.5rem' }}>
-                                    Quantity to cancel
-                                </label>
-                                <select
-                                    id="cancelQuantityTracking"
-                                    value={String(cancelQuantity)}
-                                    onChange={(event) => setCancelQuantity(Number.parseInt(event.target.value, 10) || 1)}
-                                    style={{
-                                        width: '100%',
-                                        borderRadius: '0.75rem',
-                                        border: '1px solid #d1d5db',
-                                        padding: '0.75rem 0.9rem',
-                                        color: '#111827',
-                                        backgroundColor: 'white',
-                                    }}
-                                >
-                                    {Array.from({ length: selectedCancelItem.remainingQuantity }, (_, index) => index + 1).map((quantity) => (
-                                        <option key={quantity} value={quantity}>
-                                            {quantity}
-                                        </option>
-                                    ))}
-                                </select>
-                                <div style={{ marginTop: '0.5rem', color: '#6b7280', fontSize: '0.9rem' }}>
-                                    Remaining after this cancellation: {Math.max(0, selectedCancelItem.remainingQuantity - cancelQuantity)} of {selectedCancelItem.originalQuantity}
-                                </div>
-                            </div>
-                        )}
-                        <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
-                            <label htmlFor="cancelReasonTracking" style={{ display: 'block', fontWeight: '600', color: '#333', marginBottom: '0.5rem' }}>
-                                Reason for cancellation
-                            </label>
-                            <textarea
-                                id="cancelReasonTracking"
-                                value={cancelReason}
-                                onChange={(event) => {
-                                    setCancelReason(event.target.value);
-                                    if (cancelReasonError) setCancelReasonError('');
-                                }}
-                                placeholder="Tell us why you want to cancel."
-                                rows={4}
-                                style={{
-                                    width: '100%',
-                                    borderRadius: '0.75rem',
-                                    border: `1px solid ${cancelReasonError ? '#dc3545' : '#d1d5db'}`,
-                                    padding: '0.75rem 0.9rem',
-                                    resize: 'vertical',
-                                    outline: 'none',
-                                    color: '#111827',
-                                }}
-                            />
-                            {cancelReasonError && (
-                                <div style={{ marginTop: '0.5rem', color: '#dc3545', fontSize: '0.9rem' }}>
-                                    {cancelReasonError}
-                                </div>
-                            )}
-                        </div>
-                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
-                            <button
-                                onClick={closeCancelModal}
-                                style={{
-                                    backgroundColor: 'transparent',
-                                    color: '#4b5563',
-                                    border: '1px solid #d1d5db',
-                                    padding: '0.5rem 1.5rem',
-                                    borderRadius: '9999px',
-                                    cursor: 'pointer',
-                                    fontWeight: '600',
-                                }}
-                            >
-                                Keep Request
-                            </button>
-                            <button
-                                onClick={handleConfirmCancel}
-                                style={{
-                                    backgroundColor: '#dc3545',
-                                    color: 'white',
-                                    border: 'none',
-                                    padding: '0.5rem 1.5rem',
-                                    borderRadius: '9999px',
-                                    cursor: 'pointer',
-                                    fontWeight: '600',
-                                }}
-                            >
-                                Cancel Selected Quantity
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <ItemCancellationModal
+                show={showCancelModal}
+                orderLabel="request"
+                items={cancellableItems}
+                selectedItemKey={cancelTargetItemKey}
+                onSelectItem={(nextItemKey) => {
+                    setCancelTargetItemKey(nextItemKey);
+                    setCancelQuantity(1);
+                    if (cancelReasonError) {
+                        setCancelReasonError('');
+                    }
+                }}
+                selectedItem={selectedCancelItem}
+                cancelQuantity={cancelQuantity}
+                onCancelQuantityChange={setCancelQuantity}
+                cancelReason={cancelReason}
+                onCancelReasonChange={(value) => {
+                    setCancelReason(value);
+                    if (cancelReasonError) {
+                        setCancelReasonError('');
+                    }
+                }}
+                reasonError={cancelReasonError}
+                onClose={closeCancelModal}
+                onConfirm={handleConfirmCancel}
+            />
+
+            <RefundRequestModal
+                show={showRefundModal}
+                orderLabel="request"
+                refundAmount={refundContext.refundAmount}
+                refundReason={refundReason}
+                onRefundReasonChange={setRefundReason}
+                onClose={() => setShowRefundModal(false)}
+                onSubmit={handleRequestRefund}
+                submitting={submittingRefundRequest}
+            />
 
             <CustomOrderQuotePaymentModal
                 visible={Boolean(quotePaymentRequest)}

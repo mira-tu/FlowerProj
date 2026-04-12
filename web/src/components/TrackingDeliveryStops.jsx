@@ -1,10 +1,18 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { supabase } from '../config/supabase';
 import {
     DELIVERY_CONFIRMATION_OWNER,
     DELIVERY_CONFIRMATION_STATUS,
     getDeliveryStopDisplayLabel,
     normalizeDeliveryDestinations,
 } from '../utils/deliveryDestinations';
+
+const CUSTOMER_CONFIRMATION_VISIBLE_STATUSES = new Set([
+    'out_for_delivery',
+    'delivered',
+    'completed',
+    'claimed',
+]);
 
 const formatStopTimestamp = (value) => {
     if (!value) {
@@ -49,17 +57,77 @@ const getStopStatusConfig = (stop) => {
     };
 };
 
+const formatRiderLabel = (rider) => {
+    if (!rider?.name) {
+        return '';
+    }
+
+    return rider.phone ? `${rider.name} (${rider.phone})` : rider.name;
+};
+
 const TrackingDeliveryStops = ({
     destinations,
     title = 'Delivery Stops',
     confirmingUnitKey = null,
     onConfirmStop = null,
     fallbackRider = null,
+    currentDeliveryStatus = '',
 }) => {
+    const normalizedDeliveryStatus = String(currentDeliveryStatus || '').trim().toLowerCase();
+    const canShowCustomerConfirmation = CUSTOMER_CONFIRMATION_VISIBLE_STATUSES.has(normalizedDeliveryStatus);
+    const [riderLookup, setRiderLookup] = useState({});
     const stops = useMemo(
         () => normalizeDeliveryDestinations(destinations).filter((stop) => stop.confirmation_owner),
         [destinations]
     );
+    const riderIds = useMemo(
+        () => Array.from(
+            new Set(
+                stops
+                    .flatMap((stop) => [stop.assigned_rider_id, stop.confirmed_by_user_id])
+                    .map((value) => String(value || '').trim())
+                    .filter(Boolean)
+            )
+        ),
+        [stops]
+    );
+    const riderIdsKey = riderIds.join('|');
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadRiders = async () => {
+            if (!riderIds.length) {
+                setRiderLookup({});
+                return;
+            }
+
+            const { data, error } = await supabase
+                .from('users')
+                .select('id, name, phone')
+                .in('id', riderIds);
+
+            if (!isMounted) {
+                return;
+            }
+
+            if (error) {
+                console.error('Error loading tracking rider details:', error);
+                setRiderLookup({});
+                return;
+            }
+
+            setRiderLookup(
+                Object.fromEntries((data || []).map((rider) => [String(rider.id), rider]))
+            );
+        };
+
+        loadRiders();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [riderIdsKey, riderIds.length]);
 
     if (!stops.length) {
         return null;
@@ -75,7 +143,28 @@ const TrackingDeliveryStops = ({
             <div className="d-grid gap-3">
                 {stops.map((stop, index) => {
                     const statusConfig = getStopStatusConfig(stop);
+                    const assignedRiderId = String(stop.assigned_rider_id || '').trim();
+                    const confirmedRiderId = String(stop.confirmed_by_user_id || '').trim();
+                    const fallbackAssignedRider = !assignedRiderId && stops.length <= 1 ? fallbackRider : null;
+                    const fallbackConfirmedRider = !confirmedRiderId && stops.length <= 1 ? fallbackRider : null;
+                    const assignedRider = assignedRiderId
+                        ? (riderLookup[assignedRiderId] || (
+                            fallbackRider && String(fallbackRider.id || '').trim() === assignedRiderId
+                                ? fallbackRider
+                                : null
+                        ))
+                        : fallbackAssignedRider;
+                    const confirmedRider = confirmedRiderId
+                        ? (riderLookup[confirmedRiderId] || (
+                            fallbackRider && String(fallbackRider.id || '').trim() === confirmedRiderId
+                                ? fallbackRider
+                                : null
+                        ))
+                        : (fallbackConfirmedRider || assignedRider);
+                    const assignedRiderLabel = formatRiderLabel(assignedRider);
+                    const confirmedRiderLabel = formatRiderLabel(confirmedRider);
                     const canConfirm = typeof onConfirmStop === 'function'
+                        && canShowCustomerConfirmation
                         && stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER
                         && stop.confirmation_status !== DELIVERY_CONFIRMATION_STATUS.CONFIRMED;
                     const isConfirming = confirmingUnitKey === stop.unit_key;
@@ -91,7 +180,7 @@ const TrackingDeliveryStops = ({
                                     <div className="fw-bold">{getDeliveryStopDisplayLabel(stop, index)}</div>
                                     <div className="small text-muted mt-1">
                                         {stop.recipient_name || stop.address_label || `Stop ${index + 1}`}
-                                        {stop.recipient_phone ? ` • ${stop.recipient_phone}` : ''}
+                                        {stop.recipient_phone ? ` - ${stop.recipient_phone}` : ''}
                                     </div>
                                     {stop.addressText ? (
                                         <div className="small text-muted mt-1">{stop.addressText}</div>
@@ -119,10 +208,10 @@ const TrackingDeliveryStops = ({
                                 </div>
                             </div>
 
-                            {fallbackRider?.name ? (
+                            {(assignedRiderLabel || stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.RIDER) ? (
                                 <div className="small mt-3" style={{ color: '#2563eb', fontWeight: 600 }}>
                                     <i className="fas fa-bicycle me-2"></i>
-                                    {fallbackRider.name}{fallbackRider.phone ? ` (${fallbackRider.phone})` : ''}
+                                    {assignedRiderLabel || 'Rider not assigned yet'}
                                 </div>
                             ) : null}
 
@@ -140,6 +229,11 @@ const TrackingDeliveryStops = ({
                                             objectFit: 'cover',
                                         }}
                                     />
+                                    {confirmedRiderLabel && stop.confirmed_by_actor !== 'customer' ? (
+                                        <div className="small mt-2" style={{ color: '#166534', fontWeight: 600 }}>
+                                            Delivered by {confirmedRiderLabel}
+                                        </div>
+                                    ) : null}
                                     {stop.proof_note ? (
                                         <div className="small text-muted mt-2">{stop.proof_note}</div>
                                     ) : null}

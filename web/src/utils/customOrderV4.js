@@ -1123,7 +1123,7 @@ export const buildCustomOrderV4CartItem = ({
   const occasion = formData.occasion === 'Other' ? formData.otherOccasion : formData.occasion;
   const originalPreview = originalDesign?.preview || buildFallbackPreview(design, originalDesign, 'Original preview', '');
   const selectedPreview = selectedEstimate?.preview || chosenAlternative?.preview || originalPreview;
-  const primaryImageUrl = formData.inspirationImageBase64 || selectedPreview?.url || selectedEstimate.referenceImages?.[0]?.url || design.referenceImages?.[0]?.url || '';
+  const primaryImageUrl = selectedPreview?.url || selectedEstimate.referenceImages?.[0]?.url || design.referenceImages?.[0]?.url || '';
   const selectedFlowers = selectedEstimate.components.map((component) => component.label);
   const flowerQuantities = selectedEstimate.components.reduce((accumulator, component) => {
     accumulator[component.label] = component.quantity;

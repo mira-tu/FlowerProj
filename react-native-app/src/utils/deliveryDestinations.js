@@ -143,6 +143,44 @@ export const isDeliveryStopConfirmed = (destination = {}) => (
     normalizeDeliveryDestination(destination).confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED
 );
 
+export const getDeliveryStopAssignedRiderId = (destination = {}, fallbackAssignedRiderId = null) => {
+    const normalizedDestination = normalizeDeliveryDestination(destination);
+    const assignedRiderId = String(
+        normalizedDestination?.assigned_rider_id
+        ?? normalizedDestination?.assignedRiderId
+        ?? fallbackAssignedRiderId
+        ?? ''
+    ).trim();
+
+    return assignedRiderId || null;
+};
+
+export const canCurrentUserCompleteRiderStop = (
+    destination = {},
+    currentUserId = null,
+    currentRecordStatus = '',
+    fallbackAssignedRiderId = null
+) => {
+    const normalizedDestination = normalizeDeliveryDestination(destination);
+    const normalizedRecordStatus = String(currentRecordStatus || '').trim().toLowerCase();
+    const assignedRiderId = getDeliveryStopAssignedRiderId(normalizedDestination, fallbackAssignedRiderId);
+    const normalizedCurrentUserId = String(currentUserId || '').trim();
+
+    if (normalizedDestination.confirmation_owner !== DELIVERY_CONFIRMATION_OWNER.RIDER) {
+        return false;
+    }
+
+    if (normalizedDestination.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED) {
+        return false;
+    }
+
+    if (normalizedRecordStatus !== 'out_for_delivery') {
+        return false;
+    }
+
+    return Boolean(assignedRiderId && normalizedCurrentUserId && assignedRiderId === normalizedCurrentUserId);
+};
+
 export const areAllDeliveryStopsConfirmed = (destinations = []) => {
     const normalizedStops = normalizeDeliveryDestinations(destinations).filter((destination) => destination.confirmation_owner);
     return normalizedStops.length > 0 && normalizedStops.every((destination) => isDeliveryStopConfirmed(destination));

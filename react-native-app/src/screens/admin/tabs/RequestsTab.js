@@ -1,5 +1,4 @@
 import React, { useRef, useState } from 'react';
-import * as ImagePicker from 'expo-image-picker';
 import {
   Alert,
   FlatList,
@@ -23,11 +22,14 @@ import { adminAPI, BASE_URL } from '../../../config/api';
 import { supabase } from '../../../config/supabase';
 import styles from '../../AdminDashboard.styles';
 import { formatTimestamp, getPaymentStatusDisplay, getStatusColor, getStatusLabel } from '../adminHelpers';
+import DeliveryProofModal from '../components/DeliveryProofModal';
 import PaymentDetailsSection from '../components/PaymentDetailsSection';
 import { generateAndShareReceipt } from '../../../utils/receiptGenerator';
 import {
+  canCurrentUserCompleteRiderStop,
   DELIVERY_CONFIRMATION_OWNER,
   DELIVERY_CONFIRMATION_STATUS,
+  getDeliveryStopAssignedRiderId,
   getDeliveryStopDisplayLabel,
   groupDeliveryDestinations,
   hasStopConfirmationFlow,
@@ -2603,6 +2605,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   const pendingRefreshTimeoutRef = useRef(null);
   const queuedRequestsRefreshRef = useRef(false);
   const initialRequestsLoadRef = useRef(false);
+  const autoOpenedDeliveryProofTargetRef = useRef(null);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [selectedRequestLoading, setSelectedRequestLoading] = useState(false);
   const [selectedCustomizedItem, setSelectedCustomizedItem] = useState(null);
@@ -2678,6 +2681,65 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     }
   }, []);
 
+  const mergeRequestIntoState = React.useCallback((incomingRequest) => {
+    if (!incomingRequest || !incomingRequest.id) {
+      return null;
+    }
+
+    let mergedRequest = null;
+    setRequests((currentRequests) => currentRequests.map((request) => {
+      if (String(request.id) !== String(incomingRequest.id)) {
+        return request;
+      }
+
+      mergedRequest = {
+        ...request,
+        ...incomingRequest,
+      };
+      return mergedRequest;
+    }));
+
+    const mergeIfMatch = (setter, currentValue) => {
+      if (currentValue && String(currentValue.id) === String(incomingRequest.id)) {
+        const nextValue = { ...currentValue, ...incomingRequest };
+        setter(nextValue);
+        return nextValue;
+      }
+      return currentValue;
+    };
+
+    const mergedSelectedRequest = mergeIfMatch(setSelectedRequest, selectedRequest);
+    mergeIfMatch(setRequestToUpdate, requestToUpdate);
+    mergeIfMatch(setRequestToAssignRider, requestToAssignRider);
+    mergeIfMatch(setRequestToRecordPayment, requestToRecordPayment);
+    mergeIfMatch(setRequestToCompleteStops, requestToCompleteStops);
+    mergeIfMatch(setRequestToQuote, requestToQuote);
+
+    if (selectedCustomizedItem?.request && String(selectedCustomizedItem.request.id) === String(incomingRequest.id)) {
+      setSelectedCustomizedItem({
+        ...selectedCustomizedItem,
+        request: {
+          ...selectedCustomizedItem.request,
+          ...incomingRequest,
+        },
+      });
+    }
+
+    if (!mergedRequest) {
+      mergedRequest = mergedSelectedRequest || incomingRequest;
+    }
+
+    return mergedRequest;
+  }, [
+    requestToAssignRider,
+    requestToCompleteStops,
+    requestToQuote,
+    requestToRecordPayment,
+    requestToUpdate,
+    selectedCustomizedItem,
+    selectedRequest,
+  ]);
+
   const loadRiders = React.useCallback(async ({ force = false } = {}) => {
     if (ridersLoadInProgressRef.current || (riders.length && !force)) {
       return riders;
@@ -2746,9 +2808,21 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     return normalizeDeliveryDestinations(requestData?.multi_delivery_destinations || []);
   }, []);
 
+  const getStopFallbackAssignedRiderId = React.useCallback((request) => {
+    const normalizedStops = getNormalizedStopDestinations(request);
+    if (normalizedStops.length > 1) {
+      return null;
+    }
+
+    const fallbackAssignedRiderId = String(request?.assigned_rider || '').trim();
+    return fallbackAssignedRiderId || null;
+  }, [getNormalizedStopDestinations]);
+
   const getInitialStopRiderAssignments = React.useCallback((request) => {
     const groupedDestinations = getGroupedDestinations(request);
-    const fallbackRiderId = request?.assigned_rider ? String(request.assigned_rider) : '';
+    const fallbackRiderId = groupedDestinations.length <= 1 && request?.assigned_rider
+      ? String(request.assigned_rider)
+      : '';
 
     return Object.fromEntries(
       groupedDestinations.map((group) => [
@@ -2760,7 +2834,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
 
   const getAssignedRiderNamesForGroup = React.useCallback((group, request) => {
     const explicitRiderIds = Array.isArray(group?.assignedRiderIds) ? group.assignedRiderIds : [];
-    const fallbackRiderId = explicitRiderIds.length
+    const fallbackRiderId = explicitRiderIds.length || getGroupedDestinations(request).length > 1
       ? null
       : (request?.assigned_rider ? String(request.assigned_rider) : null);
     const riderIds = explicitRiderIds.length ? explicitRiderIds : (fallbackRiderId ? [fallbackRiderId] : []);
@@ -2768,22 +2842,39 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     return riderIds
       .map((riderId) => riderLookup[String(riderId)]?.name)
       .filter(Boolean);
-  }, [riderLookup]);
+  }, [getGroupedDestinations, riderLookup]);
 
   const hasRequiredRiderAssignments = React.useCallback((request) => {
     const groupedDestinations = getGroupedDestinations(request);
+    const fallbackAssignedRiderId = groupedDestinations.length <= 1
+      ? String(request?.assigned_rider || '').trim()
+      : '';
 
     if (!groupedDestinations.length) {
-      return Boolean(request?.rider || request?.assigned_rider);
+      return Boolean(request?.rider || fallbackAssignedRiderId);
     }
 
     return groupedDestinations.every((group) => {
       const explicitRiderIds = Array.isArray(group?.assignedRiderIds)
         ? group.assignedRiderIds.filter(Boolean)
         : [];
-      return explicitRiderIds.length > 0 || Boolean(request?.assigned_rider);
+      return explicitRiderIds.length > 0 || Boolean(fallbackAssignedRiderId);
     });
   }, [getGroupedDestinations]);
+
+  const getMissingStopAssignmentLabels = React.useCallback((request) => {
+    const normalizedStops = getNormalizedStopDestinations(request);
+    const fallbackAssignedRiderId = normalizedStops.length <= 1
+      ? String(request?.assigned_rider || '').trim()
+      : '';
+
+    return normalizedStops
+      .map((stop, index) => {
+        const assignedRiderId = getDeliveryStopAssignedRiderId(stop, fallbackAssignedRiderId || null);
+        return assignedRiderId ? null : getDeliveryStopDisplayLabel(stop, index);
+      })
+      .filter(Boolean);
+  }, [getNormalizedStopDestinations]);
 
   const requestsWithRiderDetails = React.useMemo(() => {
     if (!requests.length || !riders.length) return requests;
@@ -2817,7 +2908,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   const deliveryStopModalStops = React.useMemo(
     () => (
       requestToCompleteStops
-        ? getNormalizedStopDestinations(requestToCompleteStops).filter((stop) => stop.confirmation_owner)
+        ? getNormalizedStopDestinations(requestToCompleteStops)
         : []
     ),
     [getNormalizedStopDestinations, requestToCompleteStops]
@@ -2826,6 +2917,19 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     () => deliveryStopModalStops.find((stop) => stop.unit_key === selectedDeliveryStopKey) || null,
     [deliveryStopModalStops, selectedDeliveryStopKey]
   );
+
+  React.useEffect(() => {
+    if (!deliveryStopModalVisible || !deliveryStopModalStops.length) {
+      return;
+    }
+
+    const hasSelectedStop = deliveryStopModalStops.some((stop) => stop.unit_key === selectedDeliveryStopKey);
+    if (!hasSelectedStop) {
+      setSelectedDeliveryStopKey(deliveryStopModalStops[0]?.unit_key || null);
+      setSelectedDeliveryProof(null);
+      setDeliveryProofNote('');
+    }
+  }, [deliveryStopModalStops, deliveryStopModalVisible, selectedDeliveryStopKey]);
 
   const selectedStopGroup = React.useMemo(
     () => assignableStopGroups.find((group) => group.groupKey === selectedStopGroupKey) || null,
@@ -2869,6 +2973,20 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   }, [focusedEntityTarget, riderScopedRequests]);
 
   const displayedRequests = focusedRequest ? [focusedRequest] : filteredRequests;
+  const focusedRequestBannerTitle = focusedEntityTarget?.source === 'rider_assignment'
+    ? 'Showing the rider assignment request only'
+    : 'Showing the refund target request only';
+  const focusedRequestBannerDescription = focusedEntityTarget?.source === 'rider_assignment'
+    ? (
+      focusedRequest
+        ? `Request #${focusedRequest.request_number} is ready below. Open the delivery proof modal when the assigned rider is ready to submit proof.`
+        : 'That rider assignment request was not found in the current list.'
+    )
+    : (
+      focusedRequest
+        ? `Request #${focusedRequest.request_number} is ready for review below.`
+        : 'That request was not found in the current list.'
+    );
 
   const requestStatusFilters = ['All', 'Pending', 'Quoted / Acc', 'Processing', 'Delivery/Pickup', 'Completed', 'Cancelled'];
 
@@ -3282,7 +3400,6 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     }
   }, []);
 
-
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
     await loadRequests({ showLoader: false });
@@ -3399,32 +3516,41 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     setIsCompletingDeliveryStop(false);
   }, []);
 
-  const pickDeliveryProofImage = React.useCallback(async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      quality: 0.8,
-      base64: true,
-    });
-
-    if (!result.canceled && result.assets?.[0]) {
-      setSelectedDeliveryProof(result.assets[0]);
-    }
-  }, []);
-
-  const openDeliveryStopModal = React.useCallback((request) => {
-    const stops = getNormalizedStopDestinations(request).filter((stop) => stop.confirmation_owner);
-    const firstActionableStop = stops.find((stop) => (
+  const getPreferredDeliveryStopKey = React.useCallback((request, stops = []) => {
+    const fallbackAssignedRiderId = stops.length <= 1
+      ? (String(request?.assigned_rider || '').trim() || null)
+      : null;
+    const normalizedStops = Array.isArray(stops) ? stops : [];
+    const assignedStop = normalizedStops.find((stop) => (
+      canCurrentUserCompleteRiderStop(stop, currentUser?.id, request?.status, fallbackAssignedRiderId)
+    ));
+    const firstPendingRiderStop = normalizedStops.find((stop) => (
       stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.RIDER
       && stop.confirmation_status !== DELIVERY_CONFIRMATION_STATUS.CONFIRMED
     ));
 
+    return assignedStop?.unit_key || firstPendingRiderStop?.unit_key || normalizedStops[0]?.unit_key || null;
+  }, [currentUser?.id]);
+
+  const openDeliveryStopModal = React.useCallback((request, options = {}) => {
+    const stops = getNormalizedStopDestinations(request);
+    if (!stops.length) {
+      Alert.alert('No Delivery Stops', 'No delivery stops are ready for proof yet.');
+      return;
+    }
+
+    const requestedStopKey = String(options?.preferredStopKey || '').trim();
+    const fallbackStopKey = getPreferredDeliveryStopKey(request, stops);
+    const preferredStopKey = stops.some((stop) => stop.unit_key === requestedStopKey)
+      ? requestedStopKey
+      : (stops.some((stop) => stop.unit_key === fallbackStopKey) ? fallbackStopKey : stops[0]?.unit_key || null);
+
     setRequestToCompleteStops(request);
-    setSelectedDeliveryStopKey(firstActionableStop?.unit_key || stops[0]?.unit_key || null);
+    setSelectedDeliveryStopKey(preferredStopKey);
     setSelectedDeliveryProof(null);
     setDeliveryProofNote('');
     setDeliveryStopModalVisible(true);
-  }, [getNormalizedStopDestinations]);
+  }, [getNormalizedStopDestinations, getPreferredDeliveryStopKey]);
 
   const handleConfirmDeliveryStop = React.useCallback(async () => {
     if (!requestToCompleteStops || !selectedDeliveryStopKey || isCompletingDeliveryStop) {
@@ -3449,6 +3575,28 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
       return;
     }
 
+    if (String(requestToCompleteStops?.status || '').trim().toLowerCase() !== 'out_for_delivery') {
+      Alert.alert('Not Ready Yet', 'Proof can only be uploaded once this request is marked out for delivery.');
+      return;
+    }
+
+    const assignedRiderId = getDeliveryStopAssignedRiderId(selectedStop, getStopFallbackAssignedRiderId(requestToCompleteStops));
+    if (!assignedRiderId) {
+      Alert.alert('Assign Rider First', 'Please assign an employee rider to this delivery stop first.');
+      return;
+    }
+
+    if (!canCurrentUserCompleteRiderStop(selectedStop, currentUser?.id, requestToCompleteStops?.status, getStopFallbackAssignedRiderId(requestToCompleteStops))) {
+      const assignedRiderName = riderLookup[String(assignedRiderId)]?.name;
+      Alert.alert(
+        'Assigned Rider Required',
+        assignedRiderName
+          ? `Only ${assignedRiderName} can upload proof for this delivery stop.`
+          : 'Only the assigned rider can upload proof for this delivery stop.'
+      );
+      return;
+    }
+
     if (!selectedDeliveryProof?.base64) {
       Alert.alert('Proof Required', 'Please upload a delivery proof photo before completing this stop.');
       return;
@@ -3457,26 +3605,26 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     setIsCompletingDeliveryStop(true);
 
     try {
-      const actorType = currentUser?.role === 'employee' ? 'rider' : 'staff';
       const response = await adminAPI.completeRequestDeliveryStop(requestToCompleteStops.id, selectedDeliveryStopKey, {
-        actorId: currentUser?.id || null,
-        actorType,
         proofFile: selectedDeliveryProof,
         proofNote: deliveryProofNote,
       });
       const updatedRequest = response?.data?.request || null;
 
-      Toast.show({
-        type: 'success',
-        text1: updatedRequest?.status === 'completed' ? 'Request Completed' : 'Delivery Stop Completed',
-        text2: updatedRequest?.status === 'completed'
-          ? 'All delivery stops are now confirmed.'
-          : `${getDeliveryStopDisplayLabel(selectedStop)} now includes proof of delivery.`,
-      });
+        Toast.show({
+          type: 'success',
+          text1: updatedRequest?.status === 'completed' ? 'Request Completed' : 'Delivery Stop Completed',
+          text2: updatedRequest?.status === 'completed'
+            ? 'All delivery stops are now confirmed.'
+            : `${getDeliveryStopDisplayLabel(selectedStop)} now includes proof of delivery.`,
+        });
 
+      if (updatedRequest) {
+        mergeRequestIntoState(updatedRequest);
+      }
       closeDetailsModal();
       closeDeliveryStopModal();
-      await loadRequests({ showLoader: false });
+      queueRequestsRefresh();
     } catch (error) {
       const errorMessage = error?.message || 'Failed to complete this delivery stop.';
       Toast.show({ type: 'error', text1: 'Completion Failed', text2: errorMessage });
@@ -3488,14 +3636,37 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     closeDeliveryStopModal,
     closeDetailsModal,
     currentUser?.id,
-    currentUser?.role,
     deliveryProofNote,
+    getStopFallbackAssignedRiderId,
     getNormalizedStopDestinations,
     isCompletingDeliveryStop,
+    riderLookup,
     requestToCompleteStops,
     selectedDeliveryProof,
     selectedDeliveryStopKey,
   ]);
+
+  React.useEffect(() => {
+    const targetKey = (
+      focusedEntityTarget?.entityType === 'request'
+      && focusedEntityTarget?.openDeliveryProof
+      && focusedEntityTarget?.entityId
+    )
+      ? `${focusedEntityTarget.entityType}:${focusedEntityTarget.entityId}:${focusedEntityTarget.notificationId || 'delivery-proof'}`
+      : null;
+
+    if (!targetKey) {
+      autoOpenedDeliveryProofTargetRef.current = null;
+      return;
+    }
+
+    if (!focusedRequest || deliveryStopModalVisible || autoOpenedDeliveryProofTargetRef.current === targetKey) {
+      return;
+    }
+
+    autoOpenedDeliveryProofTargetRef.current = targetKey;
+    openDeliveryStopModal(focusedRequest);
+  }, [deliveryStopModalVisible, focusedEntityTarget, focusedRequest, openDeliveryStopModal]);
 
   const openRequestStatusModal = React.useCallback((request) => {
     if (actionLockRef.current || requestStatusModalVisible || deliveryStopModalVisible) {
@@ -3531,7 +3702,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
 
     await runRequestAction(getRequestActionKey('accept', request.id), async () => {
       try {
-        await adminAPI.updateRequestStatus(request.id, nextStatus, {
+        const response = await adminAPI.updateRequestStatus(request.id, nextStatus, {
           notification: {
             title: 'Request accepted',
             message: acceptedMessage,
@@ -3539,6 +3710,8 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
             type: 'request_update',
           },
         });
+        const updatedRequest = response?.data?.request || { ...request, status: nextStatus };
+        mergeRequestIntoState(updatedRequest);
 
         Toast.show({
           type: 'success',
@@ -3546,7 +3719,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
         });
 
         closeDetailsModal();
-        await loadRequests({ showLoader: false });
+        queueRequestsRefresh();
       } catch (error) {
         console.error('Error accepting request:', error);
         Toast.show({ type: 'error', text1: 'Failed to accept request' });
@@ -3578,11 +3751,14 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
 
     try {
       if (selectedRequestStatus === 'out_for_delivery') {
+        const missingStopLabels = getMissingStopAssignmentLabels(requestToUpdate);
         const hasRider = hasRequiredRiderAssignments(requestToUpdate);
         if (!hasRider) {
           Alert.alert(
             "Rider Required",
-            "Please assign a rider before moving this request to Out for Delivery."
+            missingStopLabels.length
+              ? `Please assign an employee rider to every delivery stop before moving this request to Out for Delivery. Missing riders: ${missingStopLabels.join(', ')}.`
+              : "Please assign a rider before moving this request to Out for Delivery."
           );
           shouldCloseAfterStatusChange = false;
           releaseStatusAction();
@@ -3604,10 +3780,19 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
         return;
       }
 
-      await adminAPI.updateRequestStatus(requestId, selectedRequestStatus);
+      const statusResponse = await adminAPI.updateRequestStatus(requestId, selectedRequestStatus);
+      let mergedRequest = statusResponse?.data?.request || {
+        ...requestToUpdate,
+        status: selectedRequestStatus,
+      };
 
       if (selectedRequestStatus === 'completed' && requestToUpdate.payment_method?.toLowerCase() === 'cod' && requestToUpdate.payment_status === 'to_pay') {
-        await adminAPI.updateRequestPaymentStatus(requestToUpdate, 'paid');
+        const paymentResponse = await adminAPI.updateRequestPaymentStatus(requestToUpdate, 'paid');
+        mergedRequest = {
+          ...mergedRequest,
+          ...(paymentResponse?.data?.request || {}),
+          payment_status: 'paid',
+        };
         Toast.show({ type: 'success', text1: 'Request Completed and Payment Marked as Paid' });
       } else {
         Toast.show({
@@ -3616,7 +3801,9 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
           text2: `Request #${requestToUpdate.request_number} is now ${selectedRequestStatus.replace(/_/g, ' ')}.`
         });
       }
+      mergeRequestIntoState(mergedRequest);
       closeDetailsModal();
+      closeRequestStatusModal();
     } catch (error) {
       console.error('Update request status error:', error);
       Toast.show({
@@ -3626,9 +3813,8 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
       });
     } finally {
       if (shouldCloseAfterStatusChange) {
-        closeRequestStatusModal();
         try {
-          await loadRequests({ showLoader: false });
+          queueRequestsRefresh();
         } finally {
           releaseStatusAction();
         }
@@ -3917,9 +4103,15 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
           text1: 'Quote Provided',
           text2: `A quote of PHP ${(parsedItemPrice + parsedShippingFee).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} has been sent for request #${requestToQuote.request_number}.`
         });
+        mergeRequestIntoState(updatedRequest || {
+          ...requestToQuote,
+          status: 'quoted',
+          final_price: parsedItemPrice + parsedShippingFee,
+          shipping_fee: parsedShippingFee,
+        });
         closeQuoteModal();
         closeDetailsModal();
-        await loadRequests({ showLoader: false });
+        queueRequestsRefresh();
       } catch (error) {
         console.error('Error providing quote:', error);
         Alert.alert('Error', 'Failed to provide quote.');
@@ -3956,19 +4148,16 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
 
         await adminAPI.updateRequestPaymentStatus(requestToRecordPayment, newStatus);
 
+        mergeRequestIntoState({
+          ...requestToRecordPayment,
+          amount_received: newTotalReceived,
+          payment_status: newStatus,
+          status: shouldAdvanceToProcessing ? 'processing' : requestToRecordPayment.status,
+        });
+
         Toast.show({ type: 'success', text1: isEditPaymentMode ? 'Amount Updated' : 'Payment Recorded' });
         closePaymentModal();
-
-        if (selectedRequest && selectedRequest.id === requestToRecordPayment.id) {
-          setSelectedRequest({
-            ...selectedRequest,
-            amount_received: newTotalReceived,
-            payment_status: newStatus,
-            status: shouldAdvanceToProcessing ? 'processing' : selectedRequest.status,
-          });
-        }
-
-        await loadRequests({ showLoader: false });
+        queueRequestsRefresh();
       } catch (error) {
         console.error(error);
         Toast.show({ type: 'error', text1: 'Failed to record payment' });
@@ -4113,7 +4302,9 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
             riderId: stopRiderAssignments[group.groupKey] || null,
           }));
 
-          await adminAPI.assignRequestStopRiders(requestToAssignRider.id, stopAssignments);
+          const response = await adminAPI.assignRequestStopRiders(requestToAssignRider.id, stopAssignments);
+          const updatedRequest = response?.data?.request || requestToAssignRider;
+          mergeRequestIntoState(updatedRequest);
           Toast.show({ type: 'success', text1: 'Delivery stop riders updated' });
         } else {
           if (!selectedRider) {
@@ -4121,12 +4312,18 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
             return;
           }
 
-          await adminAPI.assignRiderToRequest(requestToAssignRider.id, selectedRider.id);
+          const response = await adminAPI.assignRiderToRequest(requestToAssignRider.id, selectedRider.id);
+          const updatedRequest = response?.data?.request || {
+            ...requestToAssignRider,
+            assigned_rider: selectedRider.id,
+            rider: selectedRider,
+          };
+          mergeRequestIntoState(updatedRequest);
           Toast.show({ type: 'success', text1: 'Rider Assigned' });
         }
 
         closeAssignRiderModal();
-        await loadRequests({ showLoader: false });
+        queueRequestsRefresh();
       } catch (err) {
         console.error('Error assigning rider to request:', err);
         const errorMessage = err?.message || 'Failed to assign rider.';
@@ -4849,13 +5046,11 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Ionicons name="locate-outline" size={18} color="#DB2777" />
             <Text style={{ flex: 1, fontSize: 14, fontWeight: '700', color: '#9D174D' }}>
-              Showing the refund target request only
+              {focusedRequestBannerTitle}
             </Text>
           </View>
           <Text style={{ fontSize: 13, color: '#6B7280' }}>
-            {focusedRequest
-              ? `Request #${focusedRequest.request_number} is ready for review below.`
-              : 'That request was not found in the current list.'}
+            {focusedRequestBannerDescription}
           </Text>
           <TouchableOpacity
             onPress={clearFocusedEntityTarget}
@@ -5050,6 +5245,30 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
       </Modal>
 
       {/* Request Change Status Modal (Timeline UI) */}
+      <DeliveryProofModal
+        visible={deliveryStopModalVisible}
+        onClose={closeDeliveryStopModal}
+        recordLabel={requestToCompleteStops ? `Request #${requestToCompleteStops.request_number}` : ''}
+        stops={deliveryStopModalStops}
+        selectedStopKey={selectedDeliveryStopKey}
+        onSelectStop={(unitKey) => {
+          setSelectedDeliveryStopKey(unitKey);
+          setSelectedDeliveryProof(null);
+          setDeliveryProofNote('');
+        }}
+        selectedProof={selectedDeliveryProof}
+        onChangeProof={setSelectedDeliveryProof}
+        proofNote={deliveryProofNote}
+        onChangeProofNote={setDeliveryProofNote}
+        onSubmit={handleConfirmDeliveryStop}
+        isSubmitting={isCompletingDeliveryStop}
+        currentUserId={currentUser?.id || null}
+        currentRecordStatus={requestToCompleteStops?.status || ''}
+        fallbackAssignedRiderId={getStopFallbackAssignedRiderId(requestToCompleteStops)}
+        riderLookup={riderLookup}
+      />
+
+      {false && (
       <Modal
         visible={deliveryStopModalVisible}
         transparent
@@ -5244,6 +5463,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
           </View>
         </View>
       </Modal>
+      )}
 
       < Modal visible={requestStatusModalVisible} transparent animationType="fade" onRequestClose={closeRequestStatusModal}>
         <View style={styles.statusModalBackdrop}>

@@ -4,6 +4,19 @@ const isDataImageUrl = (value) => (
   typeof value === 'string' && value.startsWith('data:image')
 );
 
+const getSafeImageUrl = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmedValue = value.trim();
+  if (!trimmedValue || isDataImageUrl(trimmedValue)) {
+    return null;
+  }
+
+  return trimmedValue;
+};
+
 const buildUploadFileName = ({ userId, itemIndex, label, fileExt }) => (
   `request-images/${userId || 'guest'}-${Date.now()}-${itemIndex}-${label}.${fileExt || 'png'}`
 );
@@ -47,6 +60,7 @@ const sanitizeArrangementSelection = async (selection, userId, itemIndex, select
     itemIndex,
     label: `arrangement-${selectionIndex}-inspiration`,
   });
+  const existingInspirationImageUrl = getSafeImageUrl(selection?.inspiration_image_url);
 
   const {
     inspirationImageBase64: _inspirationImageBase64,
@@ -56,7 +70,7 @@ const sanitizeArrangementSelection = async (selection, userId, itemIndex, select
 
   return {
     ...cleanSelection,
-    inspiration_image_url: inspirationImageUrl,
+    inspiration_image_url: inspirationImageUrl || existingInspirationImageUrl,
   };
 };
 
@@ -88,6 +102,7 @@ export const uploadBookingRequestImages = async (items = [], userId) => Promise.
     );
 
     const nestedInspirationUrl = arrangementSelections.find((selection) => selection?.inspiration_image_url)?.inspiration_image_url || null;
+    const existingItemImageUrl = getSafeImageUrl(item?.image_url);
 
     const {
       inspirationImageBase64: _inspirationImageBase64,
@@ -100,7 +115,7 @@ export const uploadBookingRequestImages = async (items = [], userId) => Promise.
     return {
       ...cleanItem,
       arrangementSelections,
-      image_url: item?.image_url || inspirationImageUrl || nestedInspirationUrl || otherArrangementImageUrl || otherFlowersImageUrl || null,
+      image_url: existingItemImageUrl || inspirationImageUrl || nestedInspirationUrl || otherArrangementImageUrl || otherFlowersImageUrl || null,
       inspiration_image_url: inspirationImageUrl || nestedInspirationUrl || null,
       other_arrangement_image_url: otherArrangementImageUrl,
       other_flowers_image_url: otherFlowersImageUrl,

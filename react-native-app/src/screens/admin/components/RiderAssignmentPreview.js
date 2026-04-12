@@ -10,7 +10,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import styles from '../../AdminDashboard.styles';
 
-const RiderAssignmentPreview = ({ preview }) => {
+const RiderAssignmentPreview = ({ preview, onOpenDeliveryProof = null }) => {
   const [expandedImage, setExpandedImage] = useState(null);
 
   if (!preview) {
@@ -168,6 +168,19 @@ const RiderAssignmentPreview = ({ preview }) => {
               </View>
             ))}
           </View>
+        ) : null}
+
+        {typeof onOpenDeliveryProof === 'function' ? (
+          <TouchableOpacity
+            style={[
+              styles.modalButton,
+              styles.saveButton,
+              { marginTop: 6 },
+            ]}
+            onPress={onOpenDeliveryProof}
+          >
+            <Text style={styles.buttonText}>Open Delivery Proof</Text>
+          </TouchableOpacity>
         ) : null}
       </View>
 
