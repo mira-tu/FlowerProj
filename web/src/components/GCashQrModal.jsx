@@ -1,5 +1,5 @@
 import React from 'react';
-import qrCodeImage from '../assets/qr-code-1.jpg';
+import qrCodeImage from '../assets/gcash-qr-code.png';
 
 const GCashQrModal = ({
     visible,
@@ -40,7 +40,7 @@ const GCashQrModal = ({
                     <div
                         className="mx-auto mb-3 p-2 bg-white"
                         style={{
-                            width: '250px',
+                            width: 'min(320px, 100%)',
                             border: '2px solid #e0e0e0',
                             borderRadius: '12px',
                         }}
@@ -49,6 +49,11 @@ const GCashQrModal = ({
                             src={qrCodeImage}
                             alt="GCash QR"
                             className="img-fluid rounded-3"
+                            style={{
+                                width: '100%',
+                                height: 'auto',
+                                display: 'block',
+                            }}
                         />
                     </div>
                     <div className="alert alert-info small mb-0">

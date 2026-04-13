@@ -7,6 +7,7 @@ import CustomizedBouquetPreview from '../components/CustomizedBouquetPreview';
 import ItemCancellationModal from '../components/ItemCancellationModal';
 import RefundRequestModal from '../components/RefundRequestModal';
 import RefundRequestPanel from '../components/RefundRequestPanel';
+import gcashQrCodeImage from '../assets/gcash-qr-code.png';
 import { insertStaffNotifications, insertUserNotification } from '../utils/notificationApi';
 import {
     applyRequestItemCancellation,
@@ -1995,17 +1996,24 @@ const MyOrders = () => {
                                                                 width: '200px',
                                                                 height: '200px',
                                                                 margin: '0 auto',
-                                                                background: '#f8f9fa',
-                                                                border: '2px dashed #ddd',
+                                                                background: '#fff',
+                                                                border: '1px solid #e5e7eb',
                                                                 borderRadius: '8px',
+                                                                overflow: 'hidden',
                                                                 display: 'flex',
-                                                                flexDirection: 'column',
                                                                 alignItems: 'center',
                                                                 justifyContent: 'center',
-                                                                color: '#6c757d'
                                                             }}>
-                                                                <i className="fas fa-qrcode" style={{ fontSize: '80px', opacity: 0.3, marginBottom: '10px' }}></i>
-                                                                <small>GCash QR Code</small>
+                                                                <img
+                                                                    src={gcashQrCodeImage}
+                                                                    alt="GCash QR Code"
+                                                                    style={{
+                                                                        width: '100%',
+                                                                        height: '100%',
+                                                                        objectFit: 'contain',
+                                                                        display: 'block',
+                                                                    }}
+                                                                />
                                                             </div>
                                                             <div className="mt-3">
                                                                 <small className="text-muted">
