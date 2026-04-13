@@ -14,6 +14,7 @@ import {
     areAllDeliveryStopsConfirmed,
     confirmDeliveryStop,
     hasStopConfirmationFlow,
+    reconcileDeliveryDestinationsWithItems,
 } from '../utils/deliveryDestinations';
 import {
     createRefundRequest,
@@ -196,6 +197,7 @@ const OrderCustomizedTracking = ({ user }) => {
                 ...foundRequest,
                 requestData: foundRequest.data,
             });
+            const refundSnapshot = foundRequest.data?.refund_snapshot || null;
 
             const transformedRequest = {
                 ...foundRequest,
@@ -204,11 +206,23 @@ const OrderCustomizedTracking = ({ user }) => {
                 deliveryMethod: foundRequest.data?.delivery_method,
                 pickupTime: foundRequest.data?.pickup_time,
                 address: finalAddress,
-                multiDeliveryDestinations: Array.isArray(foundRequest.data?.multi_delivery_destinations)
-                    ? foundRequest.data.multi_delivery_destinations
-                    : [],
+                multiDeliveryDestinations: reconcileDeliveryDestinationsWithItems(
+                    Array.isArray(foundRequest.data?.multi_delivery_destinations)
+                        ? foundRequest.data.multi_delivery_destinations
+                        : [],
+                    Array.isArray(foundRequest.data?.items) ? foundRequest.data.items : []
+                ),
                 type: foundRequest.type,
-                requestData: foundRequest.data,
+                requestData: {
+                    ...(foundRequest.data || {}),
+                    refund_snapshot: refundSnapshot,
+                    multi_delivery_destinations: reconcileDeliveryDestinationsWithItems(
+                        Array.isArray(foundRequest.data?.multi_delivery_destinations)
+                            ? foundRequest.data.multi_delivery_destinations
+                            : [],
+                        Array.isArray(foundRequest.data?.items) ? foundRequest.data.items : []
+                    ),
+                },
                 imageUrl: foundRequest.data?.items?.[0]?.image_url || foundRequest.image_url,
                 finalPrice: (() => {
                     const summary = summarizeCancellationItems(foundRequest.data?.items || []);
@@ -220,6 +234,7 @@ const OrderCustomizedTracking = ({ user }) => {
                     return summary.allCancelled ? 0 : summary.remainingSubtotal + shippingFee;
                 })(),
                 trackingStatus,
+                refund_snapshot: refundSnapshot,
                 receipt_url: paymentMetadata.receiptUrl,
                 gcash_reference_number: paymentMetadata.gcashReferenceNumber || null,
                 additional_receipts: paymentMetadata.additionalReceipts,
@@ -503,11 +518,18 @@ const OrderCustomizedTracking = ({ user }) => {
 
         try {
             const confirmedAt = new Date().toISOString();
-            const updatedDestinations = confirmDeliveryStop(request.multiDeliveryDestinations, stop.unit_key, {
+            const updatedDestinations = confirmDeliveryStop(
+                reconcileDeliveryDestinationsWithItems(
+                    request.multiDeliveryDestinations,
+                    request?.requestData?.items || []
+                ),
+                stop.unit_key,
+                {
                 actorType: 'customer',
                 actorUserId: user?.id || request.user_id || null,
                 confirmedAt,
-            });
+                }
+            );
             const allConfirmed = areAllDeliveryStopsConfirmed(updatedDestinations);
             const nextStatusTimestamps = {
                 ...(request.status_timestamps || {}),

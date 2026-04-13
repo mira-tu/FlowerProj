@@ -27,10 +27,15 @@ import {
     createRefundRequest,
     getRefundRequestForEntity,
 } from '../utils/refundWorkflows';
-import { parseMultiDeliveryNotes } from '../utils/deliveryDestinations';
+import {
+    cancelDeliveryStopsForItem,
+    parseMultiDeliveryNotes,
+    serializeMultiDeliveryNotes,
+} from '../utils/deliveryDestinations';
 import { summarizeCustomOrderQuoteBreakdown } from '../utils/customOrderQuoteBreakdown';
 import {
     buildRefundReasonFromCancelledEntity,
+    createRefundSnapshot,
     getCancellationRefundContext,
     hasActiveRefundRequest,
 } from '../utils/customerRefunds';
@@ -345,6 +350,7 @@ const Profile = ({ user, logout }) => {
             const transformedOrders = (apiOrders || []).map((order) => {
                 const requestData = parseJsonObject(order.request_data);
                 const parsedOrderNotes = parseMultiDeliveryNotes(order.notes);
+                const refundSnapshot = parsedOrderNotes.metadata?.refund_snapshot || requestData?.refund_snapshot || null;
                 const orderItemSummary = summarizeCancellationItems(order.order_items || []);
                 const requestItemSummary = summarizeCancellationItems(requestData?.items || []);
                 const preferredSummary = orderItemSummary.hasItems ? orderItemSummary : requestItemSummary;
@@ -371,11 +377,14 @@ const Profile = ({ user, logout }) => {
                     payment_status: order.payment_status,
                     payment_method: order.payment_method,
                     delivery_method: order.delivery_method,
+                    amount_received: Number(order.amount_received || requestData?.amount_received || 0),
                     total: computedTotal,
                     subtotal: computedSubtotal,
                     shipping_fee: shippingFee,
                     delivery_fee: shippingFee,
                     notes: parsedOrderNotes.note,
+                    notesMetadata: parsedOrderNotes.metadata || null,
+                    refund_snapshot: refundSnapshot,
                     items: displayItems,
                     activeItems: preferredSummary.activeItems,
                     hasPartialCancellation: preferredSummary.hasCancellations,
@@ -410,6 +419,7 @@ const Profile = ({ user, logout }) => {
             // Transform API requests to match the expected format
             const transformedRequests = (apiRequests || []).map(request => {
                 const requestData = parseJsonObject(request.data);
+                const refundSnapshot = requestData?.refund_snapshot || null;
                 const address = addressesData.find(addr => addr.id === requestData?.address_id) || null;
                 const requestItemSummary = summarizeCancellationItems(requestData?.items || []);
                 const displayItems = requestItemSummary.items.map((item) => ({
@@ -452,10 +462,12 @@ const Profile = ({ user, logout }) => {
                         : (request.status === 'accepted' ? 'processing' : request.status),
                     type: request.type, // booking, customized, special_order
                     payment_status: request.payment_status ?? requestData?.payment_status ?? null,
+                    amount_received: Number(request.amount_received ?? requestData?.amount_received ?? 0),
                     total: computedTotal,
                     subtotal: computedSubtotal,
                     notes: request.notes || requestData.notes,
                     data: requestData,
+                    refund_snapshot: refundSnapshot,
                     quoteBreakdown,
                     cancellationReason: request.cancellation_reason || requestData?.cancellation_reason || requestData?.decline_feedback || requestData?.declineFeedback || null,
                     declineFeedback: requestData?.decline_feedback || requestData?.declineFeedback || null,
@@ -885,7 +897,7 @@ const Profile = ({ user, logout }) => {
     const updateRegularOrderCancellation = async (order, itemKey, quantityToCancel, reason) => {
         const { data: currentOrder, error: orderFetchError } = await supabase
             .from('orders')
-            .select('id, status, status_timestamps, cancellation_reason, subtotal, shipping_fee, total')
+            .select('id, status, status_timestamps, cancellation_reason, subtotal, shipping_fee, total, notes')
             .eq('id', order.id)
             .single();
 
@@ -961,10 +973,35 @@ const Profile = ({ user, logout }) => {
         const nextSubtotal = summary.remainingSubtotal;
         const nextShippingFee = summary.allCancelled ? 0 : Number(currentOrder.shipping_fee || 0);
         const nextStatus = summary.allCancelled ? 'cancelled' : currentOrder.status;
+        const cancelledAt = new Date().toISOString();
+        const parsedOrderNotes = parseMultiDeliveryNotes(currentOrder?.notes);
+        const refundSnapshot = createRefundSnapshot({
+            ...currentOrder,
+            notesMetadata: parsedOrderNotes.metadata,
+        });
+        const nextDestinations = cancelDeliveryStopsForItem(parsedOrderNotes.destinations, {
+            existingItems: currentItems || [],
+            targetItemIndex: selectedItem.itemIndex,
+            targetProductId: selectedItem.product_id || selectedItem.productId || null,
+            targetItemName: selectedItem.name || selectedItem.item_name || '',
+            quantityToCancel,
+            cancelledAt,
+            cancelledReason: reason,
+        });
 
         const { error: updateOrderError } = await supabase
             .from('orders')
             .update({
+                notes: serializeMultiDeliveryNotes({
+                    destinations: nextDestinations,
+                    note: parsedOrderNotes.note,
+                    metadata: {
+                        ...(parsedOrderNotes.metadata && typeof parsedOrderNotes.metadata === 'object'
+                            ? parsedOrderNotes.metadata
+                            : {}),
+                        refund_snapshot: refundSnapshot,
+                    },
+                }),
                 subtotal: nextSubtotal,
                 shipping_fee: nextShippingFee,
                 total: summary.allCancelled ? 0 : roundCurrency(nextSubtotal + nextShippingFee),
@@ -1024,9 +1061,27 @@ const Profile = ({ user, logout }) => {
         const nextCancellationReason = summary.allCancelled
             ? reason
             : (requestData?.cancellation_reason || currentRequest?.cancellation_reason || null);
+        const cancelledAt = new Date().toISOString();
+        const refundSnapshot = createRefundSnapshot({
+            ...currentRequest,
+            data: requestData,
+        });
+        const nextDestinations = cancelDeliveryStopsForItem(
+            requestData?.multi_delivery_destinations || [],
+            {
+                existingItems: requestItems,
+                targetItemIndex: selectedItem.itemIndex,
+                targetProductId: selectedItem.product_id || selectedItem.productId || null,
+                targetItemName: selectedItem.name || selectedItem.item_name || '',
+                quantityToCancel,
+                cancelledAt,
+                cancelledReason: reason,
+            }
+        );
         const nextData = {
             ...(requestData && typeof requestData === 'object' ? requestData : {}),
             items: updatedItems,
+            multi_delivery_destinations: nextDestinations,
             item_count: nextItemCount,
             itemCount: nextItemCount,
             subtotal: nextSubtotal,
@@ -1036,12 +1091,13 @@ const Profile = ({ user, logout }) => {
             estimatedTotal: nextTotal,
             final_price: nextTotal,
             finalPrice: nextTotal,
+            refund_snapshot: refundSnapshot,
             cancellation_reason: nextCancellationReason,
             last_cancellation: {
                 item_key: String(itemKey),
                 quantity: quantityToCancel,
                 reason,
-                cancelled_at: new Date().toISOString(),
+                cancelled_at: cancelledAt,
             },
         };
 
@@ -1073,15 +1129,26 @@ const Profile = ({ user, logout }) => {
         if (!order.isRequest && order.id) {
             const { data: linkedOrder, error: linkedOrderFetchError } = await supabase
                 .from('orders')
-                .select('status_timestamps, cancellation_reason, shipping_fee')
+                .select('status_timestamps, cancellation_reason, shipping_fee, notes')
                 .eq('id', order.id)
                 .single();
 
             if (!linkedOrderFetchError && linkedOrder) {
+                const linkedOrderNotes = parseMultiDeliveryNotes(linkedOrder.notes);
                 await supabase
                     .from('orders')
                     .update({
                         request_data: nextData,
+                        notes: serializeMultiDeliveryNotes({
+                            destinations: nextDestinations,
+                            note: linkedOrderNotes.note,
+                            metadata: {
+                                ...(linkedOrderNotes.metadata && typeof linkedOrderNotes.metadata === 'object'
+                                    ? linkedOrderNotes.metadata
+                                    : {}),
+                                refund_snapshot: refundSnapshot,
+                            },
+                        }),
                         subtotal: nextSubtotal,
                         shipping_fee: nextShippingFee,
                         total: nextTotal,

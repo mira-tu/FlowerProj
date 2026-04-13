@@ -1098,9 +1098,39 @@ serve(async (req) => {
           return json(400, { error: "Order id and payment status are required." });
         }
 
+        const { data: currentOrder, error: fetchError } = await adminClient
+          .from("orders")
+          .select("id, total, amount_received")
+          .eq("id", id)
+          .single();
+
+        if (fetchError) {
+          throw fetchError;
+        }
+
+        const normalizedStatus = status.toLowerCase();
+        const hasExplicitAmountReceived = body?.amountReceived !== undefined
+          && body?.amountReceived !== null
+          && body?.amountReceived !== "";
+        const explicitAmountReceived = hasExplicitAmountReceived
+          ? Math.max(0, parseAmount(body?.amountReceived))
+          : null;
+        const updatePayload: Record<string, unknown> = {
+          payment_status: status,
+        };
+
+        if (hasExplicitAmountReceived) {
+          updatePayload.amount_received = explicitAmountReceived;
+        } else if (normalizedStatus === "paid") {
+          updatePayload.amount_received = Math.max(
+            parseAmount(currentOrder?.amount_received),
+            parseAmount(currentOrder?.total),
+          );
+        }
+
         const { data: order, error } = await adminClient
           .from("orders")
-          .update({ payment_status: status })
+          .update(updatePayload)
           .eq("id", id)
           .select()
           .single();

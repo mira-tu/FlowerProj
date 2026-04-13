@@ -21,8 +21,12 @@ import {
 } from '../utils/orderCancellation';
 import {
     areAllDeliveryStopsConfirmed,
+    cancelDeliveryStopsForItem,
     confirmDeliveryStop,
     hasStopConfirmationFlow,
+    parseMultiDeliveryNotes,
+    reconcileDeliveryDestinationsWithItems,
+    serializeMultiDeliveryNotes,
 } from '../utils/deliveryDestinations';
 import {
     createRefundRequest,
@@ -38,6 +42,7 @@ import {
 import {
     buildRefundReasonFromCancelledEntity,
     canRequestRefundAfterCancellation,
+    createRefundSnapshot,
     getCancellationRefundContext,
     hasActiveRefundRequest,
 } from '../utils/customerRefunds';
@@ -408,6 +413,7 @@ const OrderBookingTracking = () => {
             ...foundRequest,
             requestData: normalizedRequestData,
         });
+        const refundSnapshot = normalizedRequestData?.refund_snapshot || null;
 
         const transformedRequest = {
             ...foundRequest,
@@ -419,12 +425,18 @@ const OrderBookingTracking = () => {
             type: foundRequest.type,
             requestData: {
                 ...(normalizedRequestData && typeof normalizedRequestData === 'object' ? normalizedRequestData : {}),
+                refund_snapshot: refundSnapshot,
                 items: bookingItems,
+                multi_delivery_destinations: reconcileDeliveryDestinationsWithItems(
+                    normalizedRequestData?.multi_delivery_destinations || [],
+                    bookingItems
+                ),
             },
             imageUrl: foundRequest.image_url || primaryBookingItem?.image_url || null,
             finalPrice: nextFinalPrice,
             shipping_fee: nextShippingFee,
             status: bookingSummary.allCancelled ? 'cancelled' : foundRequest.status,
+            refund_snapshot: refundSnapshot,
             receipt_url: paymentMetadata.receiptUrl,
             gcash_reference_number: paymentMetadata.gcashReferenceNumber || null,
             additional_receipts: paymentMetadata.additionalReceipts,
@@ -756,9 +768,27 @@ const OrderBookingTracking = () => {
         const nextCancellationReason = summary.allCancelled
             ? reason
             : (requestData?.cancellation_reason || currentRequest?.cancellation_reason || null);
+        const cancelledAt = new Date().toISOString();
+        const refundSnapshot = createRefundSnapshot({
+            ...currentRequest,
+            data: requestData,
+        });
+        const nextDestinations = cancelDeliveryStopsForItem(
+            requestData?.multi_delivery_destinations || [],
+            {
+                existingItems: requestItems,
+                targetItemIndex: selectedItem.itemIndex,
+                targetProductId: selectedItem.product_id || selectedItem.productId || null,
+                targetItemName: selectedItem.name || selectedItem.item_name || '',
+                quantityToCancel,
+                cancelledAt,
+                cancelledReason: reason,
+            }
+        );
         const nextData = {
             ...(requestData && typeof requestData === 'object' ? requestData : {}),
             items: updatedItems,
+            multi_delivery_destinations: nextDestinations,
             item_count: nextItemCount,
             itemCount: nextItemCount,
             subtotal: nextSubtotal,
@@ -768,12 +798,13 @@ const OrderBookingTracking = () => {
             estimatedTotal: nextTotal,
             final_price: nextTotal,
             finalPrice: nextTotal,
+            refund_snapshot: refundSnapshot,
             cancellation_reason: nextCancellationReason,
             last_cancellation: {
                 item_key: String(itemKey),
                 quantity: quantityToCancel,
                 reason,
-                cancelled_at: new Date().toISOString(),
+                cancelled_at: cancelledAt,
             },
         };
 
@@ -804,15 +835,26 @@ const OrderBookingTracking = () => {
 
         const { data: linkedOrder, error: linkedOrderFetchError } = await supabase
             .from('orders')
-            .select('id, status_timestamps, cancellation_reason')
+            .select('id, status_timestamps, cancellation_reason, notes')
             .eq('request_id', request.id)
             .maybeSingle();
 
         if (!linkedOrderFetchError && linkedOrder) {
+            const linkedOrderNotes = parseMultiDeliveryNotes(linkedOrder.notes);
             const { error: updateLinkedOrderError } = await supabase
                 .from('orders')
                 .update({
                     request_data: nextData,
+                    notes: serializeMultiDeliveryNotes({
+                        destinations: nextDestinations,
+                        note: linkedOrderNotes.note,
+                        metadata: {
+                            ...(linkedOrderNotes.metadata && typeof linkedOrderNotes.metadata === 'object'
+                                ? linkedOrderNotes.metadata
+                                : {}),
+                            refund_snapshot: refundSnapshot,
+                        },
+                    }),
                     subtotal: nextSubtotal,
                     shipping_fee: nextShippingFee,
                     total: nextTotal,
@@ -995,8 +1037,12 @@ const OrderBookingTracking = () => {
 
         try {
             const confirmedAt = new Date().toISOString();
-            const updatedDestinations = confirmDeliveryStop(
+            const reconciledDestinations = reconcileDeliveryDestinationsWithItems(
                 request?.requestData?.multi_delivery_destinations || [],
+                request?.requestData?.items || []
+            );
+            const updatedDestinations = confirmDeliveryStop(
+                reconciledDestinations,
                 stop.unit_key,
                 {
                     actorType: 'customer',
@@ -1166,9 +1212,15 @@ const OrderBookingTracking = () => {
         () => buildBookingOverview(request?.requestData || {}),
         [request]
     );
-    const bookingDestinations = Array.isArray(request?.requestData?.multi_delivery_destinations)
-        ? request.requestData.multi_delivery_destinations
-        : [];
+    const bookingDestinations = useMemo(
+        () => reconcileDeliveryDestinationsWithItems(
+            Array.isArray(request?.requestData?.multi_delivery_destinations)
+                ? request.requestData.multi_delivery_destinations
+                : [],
+            Array.isArray(request?.requestData?.items) ? request.requestData.items : []
+        ),
+        [request]
+    );
     const usesStopConfirmationFlow = hasStopConfirmationFlow(bookingDestinations);
     const paymentMetadata = resolveRequestTrackingPaymentMetadata(request || {});
     const refundContext = getCancellationRefundContext(request || {});

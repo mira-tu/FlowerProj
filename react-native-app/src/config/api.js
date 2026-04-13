@@ -10,6 +10,7 @@ import {
     hasStopConfirmationFlow,
     normalizeDeliveryDestinations,
     parseMultiDeliveryNotes,
+    reconcileDeliveryDestinationsWithItems,
     serializeMultiDeliveryNotes,
 } from '../utils/deliveryDestinations';
 import {
@@ -69,26 +70,36 @@ const getWorkflowAccessToken = async () => {
 const getFunctionErrorMessage = async (error, fallbackMessage) => {
     if (!error) return fallbackMessage;
 
-    if (typeof error.message === 'string' && error.message.trim()) {
-        return error.message;
-    }
-
     if (error.context) {
         try {
             const payload = await error.context.json();
-            if (payload?.error) {
-                return payload.error;
+            const contextMessage = String(payload?.error || payload?.message || '').trim();
+            if (contextMessage) {
+                return contextMessage;
             }
         } catch (jsonError) {
             try {
                 const text = await error.context.text();
-                if (text) {
-                    return text;
+                const contextText = String(text || '').trim();
+                if (contextText) {
+                    return contextText;
                 }
             } catch (textError) {
                 // Fall back to the provided message below.
             }
         }
+    }
+
+    const rawMessage = String(error?.message || '').trim();
+    const normalizedMessage = rawMessage.toLowerCase();
+    const isGenericEdgeMessage = [
+        'failed to send a request to the edge function',
+        'relay error invoking the edge function',
+        'edge function returned a non-2xx status code',
+    ].some((token) => normalizedMessage.includes(token));
+
+    if (rawMessage && !isGenericEdgeMessage) {
+        return rawMessage;
     }
 
     return fallbackMessage;
@@ -146,6 +157,42 @@ const shouldFallbackToDirectWorkflow = (error) => {
         'load failed',
         'fetch',
     ].some((token) => name.includes(token) || message.includes(token));
+};
+
+const isGenericAdminWorkflowTransportError = (error) => {
+    const message = String(error?.message || '').trim().toLowerCase();
+    const causeMessage = String(error?.cause?.message || '').trim().toLowerCase();
+    const status = Number(error?.status || error?.cause?.status || error?.cause?.context?.status || 0);
+
+    if (status === 404 || status === 500 || status === 502 || status === 503 || status === 504) {
+        return true;
+    }
+
+    return [
+        message,
+        causeMessage,
+    ].some((value) => (
+        !value
+        || value.includes('failed to send a request to the edge function')
+        || value.includes('relay error invoking the edge function')
+        || value.includes('edge function returned a non-2xx status code')
+        || value.includes('failed to fetch')
+        || value.includes('network request failed')
+        || value.includes('network error')
+        || value.includes('load failed')
+        || value.includes('unsupported workflow action')
+        || value.includes('unknown workflow action')
+        || value.includes('function not found')
+    ));
+};
+
+const getDeliveryProofCompletionErrorMessage = (error) => {
+    const message = String(error?.message || '').trim();
+    if (message && !isGenericAdminWorkflowTransportError(error)) {
+        return message;
+    }
+
+    return 'The latest manage-admin-workflows function is not deployed yet. Please deploy it before riders can submit proof.';
 };
 
 const isTransientFetchError = (error) => {
@@ -211,6 +258,16 @@ const parseJsonObject = (value) => {
         }
     }
     return typeof value === 'object' ? value : {};
+};
+
+const getOrderStopSourceItems = (order = {}) => {
+    const requestData = parseJsonObject(order?.request_data);
+    const orderItems = Array.isArray(order?.order_items)
+        ? [...order.order_items].filter(Boolean).sort((left, right) => Number(left?.id || 0) - Number(right?.id || 0))
+        : [];
+    const requestItems = Array.isArray(requestData?.items) ? requestData.items.filter(Boolean) : [];
+
+    return orderItems.length ? orderItems : requestItems;
 };
 
 const normalizeStockRibbonScope = (value) => {
@@ -764,7 +821,7 @@ const updateOrderStatusDirect = async (id, status, options = {}) => {
     return { success: true, order: data };
 };
 
-const updateOrderPaymentStatusDirect = async (id, status) => {
+const updateOrderPaymentStatusDirect = async (id, status, options = {}) => {
     const { data: currentOrder, error: fetchError } = await supabase
         .from('orders')
         .select('total, amount_received')
@@ -777,9 +834,15 @@ const updateOrderPaymentStatusDirect = async (id, status) => {
 
     const normalizedStatus = String(status || '').trim().toLowerCase();
     const orderTotal = parseMoney(currentOrder?.total);
+    const hasExplicitAmountReceived = options?.amountReceived !== undefined && options?.amountReceived !== null && options?.amountReceived !== '';
+    const explicitAmountReceived = hasExplicitAmountReceived
+        ? Math.max(0, parseMoney(options?.amountReceived))
+        : null;
     const updatePayload = { payment_status: status };
 
-    if (normalizedStatus === 'paid' && orderTotal > 0) {
+    if (hasExplicitAmountReceived) {
+        updatePayload.amount_received = explicitAmountReceived;
+    } else if (normalizedStatus === 'paid' && orderTotal > 0) {
         updatePayload.amount_received = orderTotal;
     }
 
@@ -789,6 +852,10 @@ const updateOrderPaymentStatusDirect = async (id, status) => {
         (order) => {
             if (order?.payment_status !== status) {
                 return false;
+            }
+
+            if (hasExplicitAmountReceived) {
+                return Math.abs(parseMoney(order?.amount_received) - explicitAmountReceived) < 0.01;
             }
 
             if (normalizedStatus === 'paid' && orderTotal > 0) {
@@ -923,13 +990,16 @@ const assignOrderStopRidersDirect = async (orderId, stopAssignments = []) => {
 };
 
 const completeOrderDeliveryStopDirect = async (orderId, unitKey, options = {}) => {
-    const currentOrder = await getOrderById(orderId);
+    const currentOrder = await getOrderById(orderId, '*, order_items(*)');
     if (!currentOrder) {
         throw new Error('Order not found.');
     }
 
     const parsedNotes = parseMultiDeliveryNotes(currentOrder?.notes);
-    const normalizedStops = normalizeDeliveryDestinations(parsedNotes.destinations);
+    const normalizedStops = reconcileDeliveryDestinationsWithItems(
+        parsedNotes.destinations,
+        getOrderStopSourceItems(currentOrder)
+    );
 
     if (!hasStopConfirmationFlow(normalizedStops)) {
         throw new Error('This order still uses the legacy delivery confirmation flow.');
@@ -997,6 +1067,7 @@ const completeOrderDeliveryStopDirect = async (orderId, unitKey, options = {}) =
         notes: serializeMultiDeliveryNotes({
             destinations: updatedDestinations,
             note: parsedNotes.note,
+            metadata: parsedNotes.metadata,
         }),
     };
 
@@ -1017,7 +1088,10 @@ const completeOrderDeliveryStopDirect = async (orderId, unitKey, options = {}) =
         orderId,
         updatePayload,
         (order) => {
-            const nextStops = parseMultiDeliveryNotes(order?.notes).destinations;
+            const nextStops = reconcileDeliveryDestinationsWithItems(
+                parseMultiDeliveryNotes(order?.notes).destinations,
+                getOrderStopSourceItems(order)
+            );
             const matchedStop = normalizeDeliveryDestinations(nextStops).find((stop) => stop.unit_key === normalizedUnitKey);
 
             if (!matchedStop || matchedStop.confirmation_status !== 'confirmed') {
@@ -2843,7 +2917,10 @@ const completeRequestDeliveryStopDirect = async (requestId, unitKey, options = {
     }
 
     const currentData = parseJsonObject(currentRequest?.data);
-    const normalizedStops = normalizeDeliveryDestinations(currentData?.multi_delivery_destinations || []);
+    const normalizedStops = reconcileDeliveryDestinationsWithItems(
+        currentData?.multi_delivery_destinations || [],
+        Array.isArray(currentData?.items) ? currentData.items : []
+    );
 
     if (!hasStopConfirmationFlow(normalizedStops)) {
         throw new Error('This request still uses the legacy delivery confirmation flow.');
@@ -2951,7 +3028,11 @@ const completeRequestDeliveryStopDirect = async (requestId, unitKey, options = {
         throw error;
     }
 
-    const persistedStops = normalizeDeliveryDestinations(parseJsonObject(data?.data)?.multi_delivery_destinations || []);
+    const persistedData = parseJsonObject(data?.data);
+    const persistedStops = reconcileDeliveryDestinationsWithItems(
+        persistedData?.multi_delivery_destinations || [],
+        Array.isArray(persistedData?.items) ? persistedData.items : []
+    );
     const persistedStop = persistedStops.find((stop) => stop.unit_key === normalizedUnitKey);
 
     if (!persistedStop || persistedStop.confirmation_status !== 'confirmed') {
@@ -4031,14 +4112,31 @@ export const adminAPI = {
         return { data: { success: true, order: data } };
     },
 
-    updateOrderPaymentStatus: async (id, status) => {
+    updateOrderPaymentStatus: async (id, status, options = {}) => {
         try {
-            const data = await invokeAdminWorkflow('update_order_payment_status', { id, status });
+            const payload = { id, status };
+            if (options?.amountReceived !== undefined && options?.amountReceived !== null && options?.amountReceived !== '') {
+                payload.amountReceived = options.amountReceived;
+            }
+            const data = await invokeAdminWorkflow('update_order_payment_status', payload);
+            const returnedOrder = data?.order;
+            const hasExplicitAmountReceived = options?.amountReceived !== undefined && options?.amountReceived !== null && options?.amountReceived !== '';
+
+            if (hasExplicitAmountReceived) {
+                const expectedAmountReceived = Math.max(0, parseMoney(options.amountReceived));
+                const actualAmountReceived = parseMoney(returnedOrder?.amount_received);
+
+                if (Math.abs(actualAmountReceived - expectedAmountReceived) >= 0.01) {
+                    console.warn('Admin workflow payment update did not persist the recorded amount. Falling back to direct order payment update.');
+                    return { data: await updateOrderPaymentStatusDirect(id, status, options) };
+                }
+            }
+
             return { data };
         } catch (error) {
             if (!shouldFallbackToDirectWorkflow(error)) throw error;
             console.warn('Falling back to direct order payment update:', error.message);
-            return { data: await updateOrderPaymentStatusDirect(id, status) };
+            return { data: await updateOrderPaymentStatusDirect(id, status, options) };
         }
     },
 
@@ -4096,14 +4194,19 @@ export const adminAPI = {
 
     completeOrderDeliveryStop: async (orderId, unitKey, options = {}) => {
         const normalizedProofFile = await normalizeDeliveryProofFile(options?.proofFile || null);
-        const data = await invokeAdminWorkflow('complete_order_delivery_stop', {
-            orderId,
-            unitKey,
-            proofFile: normalizedProofFile,
-            proofNote: options?.proofNote || '',
-        });
 
-        return { data };
+        try {
+            const data = await invokeAdminWorkflow('complete_order_delivery_stop', {
+                orderId,
+                unitKey,
+                proofFile: normalizedProofFile,
+                proofNote: options?.proofNote || '',
+            });
+
+            return { data };
+        } catch (error) {
+            throw new Error(getDeliveryProofCompletionErrorMessage(error));
+        }
     },
 
     approveRefundRequest: async (refundId, options = {}) => {
@@ -5345,14 +5448,19 @@ export const adminAPI = {
 
     completeRequestDeliveryStop: async (requestId, unitKey, options = {}) => {
         const normalizedProofFile = await normalizeDeliveryProofFile(options?.proofFile || null);
-        const data = await invokeAdminWorkflow('complete_request_delivery_stop', {
-            requestId,
-            unitKey,
-            proofFile: normalizedProofFile,
-            proofNote: options?.proofNote || '',
-        });
 
-        return { data };
+        try {
+            const data = await invokeAdminWorkflow('complete_request_delivery_stop', {
+                requestId,
+                unitKey,
+                proofFile: normalizedProofFile,
+                proofNote: options?.proofNote || '',
+            });
+
+            return { data };
+        } catch (error) {
+            throw new Error(getDeliveryProofCompletionErrorMessage(error));
+        }
     },
 
     getAllStock: async () => {

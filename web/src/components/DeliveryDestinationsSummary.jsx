@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../config/supabase';
-import { groupDeliveryDestinations } from '../utils/deliveryDestinations';
+import { DELIVERY_STOP_STATUS, getDeliveryStopCounts, groupDeliveryDestinations } from '../utils/deliveryDestinations';
 
 const DeliveryDestinationsSummary = ({ destinations, title = 'Delivery Stops', fallbackRider = null }) => {
     const groups = useMemo(() => groupDeliveryDestinations(destinations), [destinations]);
+    const stopCounts = useMemo(() => getDeliveryStopCounts(destinations), [destinations]);
     const [riderLookup, setRiderLookup] = useState({});
 
     const riderIds = useMemo(
@@ -63,11 +64,12 @@ const DeliveryDestinationsSummary = ({ destinations, title = 'Delivery Stops', f
         <div className="checkout-section">
             <h5 className="section-title">
                 <i className="fas fa-location-dot"></i>
-                {title} ({groups.length})
+                {title} ({stopCounts.activeCount} active{stopCounts.cancelledCount ? `, ${stopCounts.cancelledCount} cancelled` : ''})
             </h5>
 
             <div className="d-grid gap-3">
                 {groups.map((group, index) => {
+                    const groupIsCancelled = group.activeItemCount === 0 && group.cancelledItemCount > 0;
                     const assignedRiderNames = (group.assignedRiderIds || [])
                         .map((riderId) => riderLookup[String(riderId)]?.name)
                         .filter(Boolean);
@@ -96,24 +98,50 @@ const DeliveryDestinationsSummary = ({ destinations, title = 'Delivery Stops', f
                                         <div className="small text-muted mt-1">{group.addressText}</div>
                                     )}
                                 </div>
-                                <span className="badge rounded-pill text-bg-light">
-                                    Stop {index + 1}
-                                </span>
+                                <div className="d-flex gap-2 flex-wrap">
+                                    <span className="badge rounded-pill text-bg-light">
+                                        Stop {index + 1}
+                                    </span>
+                                    {group.cancelledItemCount > 0 ? (
+                                        <span
+                                            className="badge rounded-pill"
+                                            style={{
+                                                background: groupIsCancelled ? '#fee2e2' : '#fff1f2',
+                                                color: groupIsCancelled ? '#b91c1c' : '#be123c',
+                                            }}
+                                        >
+                                            {groupIsCancelled
+                                                ? 'Cancelled'
+                                                : `${group.cancelledItemCount} cancelled`}
+                                        </span>
+                                    ) : null}
+                                </div>
                             </div>
 
                             <div className="mt-3">
                                 {group.items.map((item) => (
                                     <div key={item.unitKey} className="small text-dark mb-1">
                                         <i className="fas fa-gift me-2" style={{ color: 'var(--shop-pink)' }}></i>
-                                        {item.itemName} #{item.unitNumber}
+                                        <span>{item.itemName} #{item.unitNumber}</span>
+                                        {item.stopStatus === DELIVERY_STOP_STATUS.CANCELLED ? (
+                                            <span className="ms-2" style={{ color: '#dc2626', fontWeight: 700 }}>
+                                                Cancelled
+                                            </span>
+                                        ) : null}
                                     </div>
                                 ))}
                             </div>
 
-                            <div className="small mt-3" style={{ color: riderLabel ? '#2563eb' : '#f97316', fontWeight: 600 }}>
-                                <i className="fas fa-bicycle me-2"></i>
-                                {riderLabel ? riderLabel : 'Rider not assigned yet'}
-                            </div>
+                            {!groupIsCancelled ? (
+                                <div className="small mt-3" style={{ color: riderLabel ? '#2563eb' : '#f97316', fontWeight: 600 }}>
+                                    <i className="fas fa-bicycle me-2"></i>
+                                    {riderLabel ? riderLabel : 'Rider not assigned yet'}
+                                </div>
+                            ) : (
+                                <div className="small mt-3" style={{ color: '#b91c1c', fontWeight: 600 }}>
+                                    All delivery units for this stop were cancelled.
+                                </div>
+                            )}
                         </div>
                     );
                 })}

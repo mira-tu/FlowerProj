@@ -8,11 +8,25 @@ export const DELIVERY_CONFIRMATION_STATUS = {
     PENDING: 'pending',
     CONFIRMED: 'confirmed',
 };
+export const DELIVERY_STOP_STATUS = {
+    ACTIVE: 'active',
+    CANCELLED: 'cancelled',
+};
 
 const toFiniteNumber = (value, fallback = 0) => {
     const parsed = Number.parseFloat(value);
     return Number.isFinite(parsed) ? parsed : fallback;
 };
+
+const toPositiveInteger = (value, fallback = 0) => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const normalizeComparableText = (value) => String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
 
 export const getItemQuantity = (item) => {
     const parsed = Number.parseInt(item?.qty ?? item?.quantity ?? 1, 10);
@@ -73,6 +87,120 @@ const normalizeDeliveryConfirmationStatus = (value, fallback = DELIVERY_CONFIRMA
     }
 
     return fallback;
+};
+
+const normalizeDeliveryStopStatus = (value, fallback = DELIVERY_STOP_STATUS.ACTIVE) => {
+    const normalized = String(value || '').trim().toLowerCase();
+
+    if (normalized === DELIVERY_STOP_STATUS.CANCELLED) {
+        return DELIVERY_STOP_STATUS.CANCELLED;
+    }
+
+    if (normalized === DELIVERY_STOP_STATUS.ACTIVE) {
+        return DELIVERY_STOP_STATUS.ACTIVE;
+    }
+
+    return fallback;
+};
+
+const getRawItemOriginalQuantity = (item = {}) => {
+    const candidates = [
+        item?.original_quantity,
+        item?.quantity,
+        item?.qty,
+        item?.arrangementQuantity,
+        item?.arrangement_quantity,
+        item?.unit_count,
+        item?.unitCount,
+    ];
+
+    for (const candidate of candidates) {
+        const parsed = toPositiveInteger(candidate, 0);
+        if (parsed > 0) {
+            return parsed;
+        }
+    }
+
+    return 1;
+};
+
+const getRawItemCancelledQuantity = (item = {}) => {
+    const originalQuantity = getRawItemOriginalQuantity(item);
+    const parsed = toPositiveInteger(item?.cancelled_quantity ?? item?.cancelledQuantity, 0);
+    return Math.min(parsed, originalQuantity);
+};
+
+const getRawItemIndex = (item = {}, fallbackIndex = 0) => {
+    const candidates = [
+        item?.item_index,
+        item?.itemIndex,
+        item?.displayIndex != null ? Number(item.displayIndex) - 1 : null,
+    ];
+
+    for (const candidate of candidates) {
+        const parsed = Number.parseInt(candidate, 10);
+        if (Number.isFinite(parsed) && parsed >= 0) {
+            return parsed;
+        }
+    }
+
+    return fallbackIndex;
+};
+
+const getRawItemProductId = (item = {}) => {
+    const rawValue = item?.product_id ?? item?.productId ?? item?.id ?? null;
+    const normalized = String(rawValue || '').trim();
+    return normalized || null;
+};
+
+const getRawItemName = (item = {}) => (
+    String(item?.item_name || item?.name || item?.title || '').trim()
+);
+
+const buildCancellationItemSummaries = (items = []) => (
+    (Array.isArray(items) ? items : [])
+        .filter(Boolean)
+        .map((item, index) => ({
+            itemIndex: getRawItemIndex(item, index),
+            cancelledQuantity: getRawItemCancelledQuantity(item),
+            productId: getRawItemProductId(item),
+            itemName: getRawItemName(item),
+        }))
+);
+
+const sortStopsForCancellation = (stops = []) => (
+    [...stops].sort((left, right) => {
+        const unitNumberDifference = (Number(right?.unit_number || 0) - Number(left?.unit_number || 0));
+        if (unitNumberDifference !== 0) {
+            return unitNumberDifference;
+        }
+
+        return String(right?.unit_key || '').localeCompare(String(left?.unit_key || ''));
+    })
+);
+
+const getMatchingStopsForItem = (destinations = [], itemSummary = {}) => {
+    const normalizedStops = Array.isArray(destinations) ? destinations : [];
+    const normalizedItemName = normalizeComparableText(itemSummary?.itemName);
+
+    let matches = normalizedStops.filter((destination) => (
+        Number.isFinite(itemSummary?.itemIndex)
+        && destination?.item_index === itemSummary.itemIndex
+    ));
+
+    if (!matches.length && itemSummary?.productId) {
+        matches = normalizedStops.filter((destination) => (
+            String(destination?.product_id || '').trim() === itemSummary.productId
+        ));
+    }
+
+    if (!matches.length && normalizedItemName) {
+        matches = normalizedStops.filter((destination) => (
+            normalizeComparableText(destination?.item_name) === normalizedItemName
+        ));
+    }
+
+    return sortStopsForCancellation(matches);
 };
 
 export const createDeliveryAssignments = (items = [], defaultAddressId = null) => (
@@ -274,11 +402,19 @@ export const normalizeDeliveryDestination = (destination = {}, index = 0) => {
         destination?.confirmation_status ?? destination?.confirmationStatus,
         confirmationOwner ? DELIVERY_CONFIRMATION_STATUS.PENDING : null
     );
+    const stopStatus = normalizeDeliveryStopStatus(
+        destination?.stop_status ?? destination?.stopStatus,
+        DELIVERY_STOP_STATUS.ACTIVE
+    );
 
     return {
         ...destination,
         unit_key: String(destination?.unit_key || destination?.unitKey || `stop-${index + 1}`).trim(),
+        item_index: Number.isFinite(Number.parseInt(destination?.item_index ?? destination?.itemIndex, 10))
+            ? Number.parseInt(destination?.item_index ?? destination?.itemIndex, 10)
+            : null,
         item_name: destination?.item_name || destination?.itemName || 'Item',
+        product_id: destination?.product_id ?? destination?.productId ?? null,
         quantity: Number.parseInt(destination?.quantity, 10) || 1,
         unit_number: Number.parseInt(destination?.unit_number ?? destination?.unitNumber, 10) || 1,
         unit_label: String(
@@ -286,6 +422,9 @@ export const normalizeDeliveryDestination = (destination = {}, index = 0) => {
             || destination?.unitLabel
             || `Unit ${Number.parseInt(destination?.unit_number ?? destination?.unitNumber, 10) || 1}`
         ).trim(),
+        stop_status: stopStatus,
+        cancelled_at: destination?.cancelled_at || destination?.cancelledAt || null,
+        cancelled_reason: String(destination?.cancelled_reason || destination?.cancelledReason || '').trim(),
         confirmation_owner: confirmationOwner,
         confirmation_status: confirmationStatus,
         confirmed_at: destination?.confirmed_at || destination?.confirmedAt || null,
@@ -304,6 +443,109 @@ export const normalizeDeliveryDestinations = (destinations = []) => (
         .map((destination, index) => normalizeDeliveryDestination(destination, index))
 );
 
+export const isDeliveryStopCancelled = (destination = {}) => (
+    normalizeDeliveryDestination(destination).stop_status === DELIVERY_STOP_STATUS.CANCELLED
+);
+
+export const reconcileDeliveryDestinationsWithItems = (destinations = [], items = []) => {
+    const normalizedStops = normalizeDeliveryDestinations(destinations);
+    if (!normalizedStops.length) {
+        return [];
+    }
+
+    const derivedCancelledKeys = new Set();
+    const itemSummaries = buildCancellationItemSummaries(items);
+
+    itemSummaries.forEach((itemSummary) => {
+        if (!itemSummary?.cancelledQuantity) {
+            return;
+        }
+
+        const matchingStops = getMatchingStopsForItem(normalizedStops, itemSummary);
+        if (!matchingStops.length) {
+            return;
+        }
+
+        const explicitCancelledCount = matchingStops.filter((stop) => isDeliveryStopCancelled(stop)).length;
+        const targetCancelledCount = Math.min(
+            matchingStops.length,
+            Math.max(itemSummary.cancelledQuantity, explicitCancelledCount)
+        );
+
+        matchingStops.slice(0, targetCancelledCount).forEach((stop) => {
+            derivedCancelledKeys.add(stop.unit_key);
+        });
+    });
+
+    return normalizedStops.map((stop) => {
+        const isCancelled = isDeliveryStopCancelled(stop) || derivedCancelledKeys.has(stop.unit_key);
+        return {
+            ...stop,
+            stop_status: isCancelled ? DELIVERY_STOP_STATUS.CANCELLED : DELIVERY_STOP_STATUS.ACTIVE,
+            cancelled_at: isCancelled ? (stop.cancelled_at || null) : null,
+            cancelled_reason: isCancelled ? String(stop.cancelled_reason || '').trim() : '',
+        };
+    });
+};
+
+export const cancelDeliveryStopsForItem = (
+    destinations = [],
+    {
+        existingItems = [],
+        targetItemIndex = null,
+        targetProductId = null,
+        targetItemName = '',
+        quantityToCancel = 1,
+        cancelledAt = new Date().toISOString(),
+        cancelledReason = '',
+    } = {}
+) => {
+    const normalizedStops = reconcileDeliveryDestinationsWithItems(destinations, existingItems);
+    if (!normalizedStops.length) {
+        return [];
+    }
+
+    const matchingStops = getMatchingStopsForItem(normalizedStops, {
+        itemIndex: Number.isFinite(targetItemIndex) ? targetItemIndex : null,
+        productId: targetProductId ? String(targetProductId).trim() : null,
+        itemName: targetItemName,
+    }).filter((stop) => !isDeliveryStopCancelled(stop));
+
+    const stopKeysToCancel = new Set(
+        matchingStops
+            .slice(0, Math.max(0, Number.parseInt(quantityToCancel, 10) || 0))
+            .map((stop) => stop.unit_key)
+    );
+
+    return normalizedStops.map((stop) => (
+        stopKeysToCancel.has(stop.unit_key)
+            ? {
+                ...stop,
+                stop_status: DELIVERY_STOP_STATUS.CANCELLED,
+                cancelled_at: cancelledAt,
+                cancelled_reason: String(cancelledReason || '').trim(),
+            }
+            : stop
+    ));
+};
+
+export const getDeliveryStopCounts = (destinations = []) => {
+    const normalizedStops = normalizeDeliveryDestinations(destinations);
+
+    return normalizedStops.reduce((summary, stop) => {
+        if (isDeliveryStopCancelled(stop)) {
+            summary.cancelledCount += 1;
+        } else {
+            summary.activeCount += 1;
+        }
+        return summary;
+    }, {
+        totalCount: normalizedStops.length,
+        activeCount: 0,
+        cancelledCount: 0,
+    });
+};
+
 export const hasStopConfirmationFlow = (destinations = []) => (
     normalizeDeliveryDestinations(destinations).some((destination) => Boolean(destination.confirmation_owner))
 );
@@ -313,7 +555,8 @@ export const isDeliveryStopConfirmed = (destination = {}) => (
 );
 
 export const areAllDeliveryStopsConfirmed = (destinations = []) => {
-    const normalizedStops = normalizeDeliveryDestinations(destinations).filter((destination) => destination.confirmation_owner);
+    const normalizedStops = normalizeDeliveryDestinations(destinations)
+        .filter((destination) => destination.confirmation_owner && !isDeliveryStopCancelled(destination));
     return normalizedStops.length > 0 && normalizedStops.every((destination) => isDeliveryStopConfirmed(destination));
 };
 
@@ -334,6 +577,10 @@ export const confirmDeliveryStop = (
     } = {}
 ) => normalizeDeliveryDestinations(destinations).map((destination) => {
     if (destination.unit_key !== String(unitKey || '').trim()) {
+        return destination;
+    }
+
+    if (isDeliveryStopCancelled(destination)) {
         return destination;
     }
 
@@ -374,19 +621,30 @@ export const groupDeliveryDestinations = (destinations = []) => {
                 items: [],
                 unitKeys: [],
                 assignedRiderIds: [],
+                activeItemCount: 0,
+                cancelledItemCount: 0,
             });
         }
 
+        const isCancelledStop = isDeliveryStopCancelled(destination);
         groups.get(groupKey).items.push({
             unitKey: destination?.unit_key,
             itemName: destination?.item_name || 'Item',
             unitNumber: destination?.unit_number || 1,
             unitLabel: destination?.unit_label || `Unit ${destination?.unit_number || 1}`,
             quantity: destination?.quantity || 1,
+            stopStatus: isCancelledStop ? DELIVERY_STOP_STATUS.CANCELLED : DELIVERY_STOP_STATUS.ACTIVE,
+            cancelledAt: destination?.cancelled_at || null,
+            cancelledReason: destination?.cancelled_reason || '',
         });
         groups.get(groupKey).unitKeys.push(destination?.unit_key);
+        if (isCancelledStop) {
+            groups.get(groupKey).cancelledItemCount += 1;
+        } else {
+            groups.get(groupKey).activeItemCount += 1;
+        }
 
-        if (destination?.assigned_rider_id) {
+        if (!isCancelledStop && destination?.assigned_rider_id) {
             const riderId = String(destination.assigned_rider_id);
             if (!groups.get(groupKey).assignedRiderIds.includes(riderId)) {
                 groups.get(groupKey).assignedRiderIds.push(riderId);

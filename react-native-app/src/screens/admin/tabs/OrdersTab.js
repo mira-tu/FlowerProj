@@ -28,17 +28,44 @@ import {
   canCurrentUserCompleteRiderStop,
   DELIVERY_CONFIRMATION_OWNER,
   DELIVERY_CONFIRMATION_STATUS,
+  getDeliveryStopCounts,
   getDeliveryStopAssignedRiderId,
   getDeliveryStopDisplayLabel,
   groupDeliveryDestinations,
   hasStopConfirmationFlow,
+  isDeliveryStopCancelled,
   normalizeDeliveryDestinations,
+  reconcileDeliveryDestinationsWithItems,
 } from '../../../utils/deliveryDestinations';
 import { filterOrderForAssignedRider, shouldRestrictOrderToAssignedRider } from '../../../utils/riderAssignmentFilter';
 
 const getNormalizedPaymentMethod = (paymentMethod) => String(paymentMethod || '').trim().toLowerCase();
 
 const getOrderActionKey = (action, orderId) => `${action}:${orderId || 'unknown'}`;
+
+const parseJsonObject = (value) => {
+  if (!value) return {};
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      return {};
+    }
+  }
+  return typeof value === 'object' ? value : {};
+};
+
+const getOrderStopSourceItems = (order = {}) => {
+  const requestData = parseJsonObject(order?.request_data);
+  const orderItems = Array.isArray(order?.items)
+    ? [...order.items].filter(Boolean).sort((left, right) => Number(left?.id || 0) - Number(right?.id || 0))
+    : Array.isArray(order?.order_items)
+      ? [...order.order_items].filter(Boolean).sort((left, right) => Number(left?.id || 0) - Number(right?.id || 0))
+      : [];
+  const requestItems = Array.isArray(requestData?.items) ? requestData.items.filter(Boolean) : [];
+
+  return orderItems.length ? orderItems : requestItems;
+};
 
 const resolveAcceptedOrderPaymentStatus = (order) => {
   const paymentMethod = getNormalizedPaymentMethod(order?.payment_method);
@@ -218,24 +245,50 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
   }, []);
 
   const getGroupedDestinations = React.useCallback(
-    (order) => groupDeliveryDestinations(order?.multi_delivery_destinations || []),
+    (order) => groupDeliveryDestinations(
+      reconcileDeliveryDestinationsWithItems(
+        order?.multi_delivery_destinations || [],
+        getOrderStopSourceItems(order)
+      )
+    ),
     []
   );
 
   const getNormalizedStopDestinations = React.useCallback(
-    (order) => normalizeDeliveryDestinations(order?.multi_delivery_destinations || []),
+    (order) => reconcileDeliveryDestinationsWithItems(
+      order?.multi_delivery_destinations || [],
+      getOrderStopSourceItems(order)
+    ),
     []
   );
 
   const getStopFallbackAssignedRiderId = React.useCallback((order) => {
     const normalizedStops = getNormalizedStopDestinations(order);
-    if (normalizedStops.length > 1) {
+    const activeStops = normalizedStops.filter((stop) => !isDeliveryStopCancelled(stop));
+    if (activeStops.length > 1) {
       return null;
     }
 
     const fallbackAssignedRiderId = String(order?.assigned_rider || '').trim();
     return fallbackAssignedRiderId || null;
   }, [getNormalizedStopDestinations]);
+
+  const getDeliveryProofStops = React.useCallback((order) => {
+    const normalizedStops = getNormalizedStopDestinations(order)
+      .filter((stop) => !isDeliveryStopCancelled(stop));
+    if (!normalizedStops.length) {
+      return [];
+    }
+
+    if (currentUser?.role !== 'employee') {
+      return normalizedStops;
+    }
+
+    const fallbackAssignedRiderId = getStopFallbackAssignedRiderId(order);
+    return normalizedStops.filter((stop) => (
+      canCurrentUserCompleteRiderStop(stop, currentUser?.id, order?.status, fallbackAssignedRiderId)
+    ));
+  }, [currentUser?.id, currentUser?.role, getNormalizedStopDestinations, getStopFallbackAssignedRiderId]);
 
   const runOrderAction = React.useCallback(async (actionKey, action) => {
     if (actionLockRef.current) {
@@ -254,7 +307,8 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
   }, []);
 
   const getInitialStopRiderAssignments = React.useCallback((order) => {
-    const groupedDestinations = getGroupedDestinations(order);
+    const groupedDestinations = getGroupedDestinations(order)
+      .filter((group) => group.activeItemCount > 0);
     const fallbackRiderId = groupedDestinations.length <= 1 && order?.assigned_rider
       ? String(order.assigned_rider)
       : '';
@@ -269,7 +323,8 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
 
   const getAssignedRiderNamesForGroup = React.useCallback((group, order) => {
     const explicitRiderIds = Array.isArray(group?.assignedRiderIds) ? group.assignedRiderIds : [];
-    const fallbackRiderId = explicitRiderIds.length || getGroupedDestinations(order).length > 1
+    const activeGroupCount = getGroupedDestinations(order).filter((destinationGroup) => destinationGroup.activeItemCount > 0).length;
+    const fallbackRiderId = explicitRiderIds.length || activeGroupCount > 1
       ? null
       : (order?.assigned_rider ? String(order.assigned_rider) : null);
     const riderIds = explicitRiderIds.length ? explicitRiderIds : (fallbackRiderId ? [fallbackRiderId] : []);
@@ -281,7 +336,8 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
 
   const hasRequiredRiderAssignments = React.useCallback((order) => {
     const groupedDestinations = getGroupedDestinations(order);
-    const fallbackAssignedRiderId = groupedDestinations.length <= 1
+    const activeGroups = groupedDestinations.filter((group) => group.activeItemCount > 0);
+    const fallbackAssignedRiderId = activeGroups.length <= 1
       ? String(order?.assigned_rider || '').trim()
       : '';
 
@@ -289,7 +345,11 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
       return Boolean(order?.rider || fallbackAssignedRiderId);
     }
 
-    return groupedDestinations.every((group) => {
+    if (!activeGroups.length) {
+      return true;
+    }
+
+    return activeGroups.every((group) => {
       const explicitRiderIds = Array.isArray(group?.assignedRiderIds)
         ? group.assignedRiderIds.filter(Boolean)
         : [];
@@ -299,11 +359,12 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
 
   const getMissingStopAssignmentLabels = React.useCallback((order) => {
     const normalizedStops = getNormalizedStopDestinations(order);
-    const fallbackAssignedRiderId = normalizedStops.length <= 1
+    const activeStops = normalizedStops.filter((stop) => !isDeliveryStopCancelled(stop));
+    const fallbackAssignedRiderId = activeStops.length <= 1
       ? String(order?.assigned_rider || '').trim()
       : '';
 
-    return normalizedStops
+    return activeStops
       .map((stop, index) => {
         const assignedRiderId = getDeliveryStopAssignedRiderId(stop, fallbackAssignedRiderId || null);
         return assignedRiderId ? null : getDeliveryStopDisplayLabel(stop, index);
@@ -654,9 +715,14 @@ const deliveryStepperStatuses = [
   }, [currentUser?.id]);
 
   const openDeliveryStopModal = React.useCallback((order, options = {}) => {
-    const stops = getNormalizedStopDestinations(order);
+    const stops = getDeliveryProofStops(order);
     if (!stops.length) {
-      Alert.alert('No Delivery Stops', 'No delivery stops are ready for proof yet.');
+      Alert.alert(
+        'No Delivery Stops',
+        currentUser?.role === 'employee'
+          ? 'No delivery stops assigned to you are ready for proof yet.'
+          : 'No delivery stops are ready for proof yet.'
+      );
       return;
     }
 
@@ -671,14 +737,14 @@ const deliveryStepperStatuses = [
     setSelectedDeliveryProof(null);
     setDeliveryProofNote('');
     setDeliveryStopModalVisible(true);
-  }, [getNormalizedStopDestinations, getPreferredDeliveryStopKey]);
+  }, [currentUser?.role, getDeliveryProofStops, getPreferredDeliveryStopKey]);
 
   const handleConfirmDeliveryStop = React.useCallback(async () => {
     if (!orderToCompleteStops || !selectedDeliveryStopKey || isCompletingDeliveryStop) {
       return;
     }
 
-    const stops = getNormalizedStopDestinations(orderToCompleteStops);
+    const stops = getDeliveryProofStops(orderToCompleteStops);
     const selectedStop = stops.find((stop) => stop.unit_key === selectedDeliveryStopKey);
 
     if (!selectedStop) {
@@ -729,6 +795,8 @@ const deliveryStepperStatuses = [
       const response = await adminAPI.completeOrderDeliveryStop(orderToCompleteStops.id, selectedDeliveryStopKey, {
         proofFile: selectedDeliveryProof,
         proofNote: deliveryProofNote,
+        actorType: 'rider',
+        actorId: currentUser?.id || null,
       });
       const updatedOrder = response?.data?.order || null;
 
@@ -756,8 +824,8 @@ const deliveryStepperStatuses = [
     closeDeliveryStopModal,
     currentUser?.id,
     deliveryProofNote,
+    getDeliveryProofStops,
     getStopFallbackAssignedRiderId,
-    getNormalizedStopDestinations,
     isCompletingDeliveryStop,
     orderToCompleteStops,
     riderLookup,
@@ -992,6 +1060,8 @@ const deliveryStepperStatuses = [
 
   const EnhancedOrderCard = ({ item, onMessageCustomer, onPhoneCall, onAssignRider, onUpdateStatus, openReceiptModal, onPrintReceipt }) => {
     const groupedDestinations = getGroupedDestinations(item);
+    const normalizedStops = getNormalizedStopDestinations(item);
+    const stopCounts = getDeliveryStopCounts(normalizedStops);
     const requiresRiderBeforeStatusChange = (
       item.delivery_method === 'delivery'
       && item.status === 'processing'
@@ -1098,30 +1168,53 @@ const deliveryStepperStatuses = [
           <View style={styles.eoSection}>
             <View style={styles.eoSectionHeader}>
               <Ionicons name="navigate-outline" size={16} color="#6B7280" />
-              <Text style={styles.eoSectionTitle}>Delivery Stops ({groupedDestinations.length})</Text>
+              <Text style={styles.eoSectionTitle}>
+                Delivery Stops ({stopCounts.activeCount} active{stopCounts.cancelledCount ? `, ${stopCounts.cancelledCount} cancelled` : ''})
+              </Text>
             </View>
             {groupedDestinations.map((destination, index) => {
+              const groupIsCancelled = destination.activeItemCount === 0 && destination.cancelledItemCount > 0;
               const assignedRiderNames = getAssignedRiderNamesForGroup(destination, item);
 
               return (
               <View key={destination.groupKey || `${destination.recipientName}-${index}`} style={[styles.eoItemCard, index > 0 && { marginTop: 8 }]}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.eoItemName}>{destination.recipientName || `Stop ${index + 1}`}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <Text style={styles.eoItemName}>{destination.recipientName || `Stop ${index + 1}`}</Text>
+                    {destination.cancelledItemCount > 0 ? (
+                      <View style={[styles.eoDeliveryTypeBadge, { backgroundColor: groupIsCancelled ? '#FEE2E2' : '#FFE4E6' }]}>
+                        <Text style={[styles.eoDeliveryTypeBadgeText, { color: groupIsCancelled ? '#B91C1C' : '#BE123C' }]}>
+                          {groupIsCancelled ? 'Cancelled' : `${destination.cancelledItemCount} cancelled`}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
                   {destination.recipientPhone ? (
                     <Text style={styles.eoItemQuantity}>Phone: {destination.recipientPhone}</Text>
                   ) : null}
                   {destination.addressText ? (
                     <Text style={styles.eoInfoTextBold}>{destination.addressText}</Text>
                   ) : null}
-                  <Text style={[styles.eoItemQuantity, { marginTop: 6 }]}>
-                    {destination.items.map((stopItem) => `${stopItem.itemName} #${stopItem.unitNumber}`).join(', ')}
-                  </Text>
-                  <View style={styles.eoStopAssignmentRow}>
-                    <Ionicons name="bicycle-outline" size={14} color={assignedRiderNames.length ? '#2563EB' : '#F97316'} />
-                    <Text style={[styles.eoStopAssignmentText, !assignedRiderNames.length && styles.eoStopAssignmentTextPending]}>
-                      {assignedRiderNames.length ? assignedRiderNames.join(', ') : 'Rider not assigned yet'}
-                    </Text>
+                  <View style={{ marginTop: 6, gap: 4 }}>
+                    {destination.items.map((stopItem) => (
+                      <Text key={stopItem.unitKey || `${stopItem.itemName}-${stopItem.unitNumber}`} style={styles.eoItemQuantity}>
+                        {`${stopItem.itemName} #${stopItem.unitNumber}`}
+                        {stopItem.stopStatus === 'cancelled' ? ' • Cancelled' : ''}
+                      </Text>
+                    ))}
                   </View>
+                  {!groupIsCancelled ? (
+                    <View style={styles.eoStopAssignmentRow}>
+                      <Ionicons name="bicycle-outline" size={14} color={assignedRiderNames.length ? '#2563EB' : '#F97316'} />
+                      <Text style={[styles.eoStopAssignmentText, !assignedRiderNames.length && styles.eoStopAssignmentTextPending]}>
+                        {assignedRiderNames.length ? assignedRiderNames.join(', ') : 'Rider not assigned yet'}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={[styles.eoItemQuantity, { color: '#DC2626', marginTop: 6 }]}>
+                      All delivery units for this stop were cancelled.
+                    </Text>
+                  )}
                 </View>
               </View>
             )})}
@@ -1379,7 +1472,8 @@ const deliveryStepperStatuses = [
       ? Object.fromEntries(availableRiders.map((rider) => [String(rider.id), rider]))
       : riderLookup;
 
-    const groupedDestinations = getGroupedDestinations(order);
+    const groupedDestinations = getGroupedDestinations(order)
+      .filter((group) => group.activeItemCount > 0);
     setOrderToAssignRider(order);
     setRiderSearchQuery('');
     if (groupedDestinations.length > 0) {
@@ -1408,7 +1502,7 @@ const deliveryStepperStatuses = [
   };
 
   const handleSelectRider = (rider) => {
-    if (orderToAssignRider && getGroupedDestinations(orderToAssignRider).length > 0) {
+    if (orderToAssignRider && getGroupedDestinations(orderToAssignRider).some((group) => group.activeItemCount > 0)) {
       if (!selectedStopGroupKey) {
         return;
       }
@@ -1443,7 +1537,8 @@ const deliveryStepperStatuses = [
 
     await runOrderAction(getOrderActionKey('assign-rider', orderToAssignRider.id), async () => {
       try {
-        const groupedDestinations = getGroupedDestinations(orderToAssignRider);
+        const groupedDestinations = getGroupedDestinations(orderToAssignRider)
+          .filter((group) => group.activeItemCount > 0);
 
         if (groupedDestinations.length > 0) {
           const stopAssignments = groupedDestinations.map((group) => ({
@@ -1517,26 +1612,23 @@ const deliveryStepperStatuses = [
           ? amount
           : (orderToRecordPayment.amount_received || 0) + amount;
         const newStatus = newTotalReceived >= orderToRecordPayment.total ? 'paid' : 'partial';
-
-        const { error } = await supabase
-          .from('orders')
-          .update({
-            amount_received: newTotalReceived,
-            payment_status: newStatus
-          })
-          .eq('id', orderToRecordPayment.id);
-
-        if (error) throw error;
-
-        if (newStatus === 'paid' && orderToRecordPayment.payment_method?.toLowerCase() === 'gcash') {
-          await sendReceiptEmail(orderToRecordPayment, newTotalReceived);
-        }
-
-        mergeOrderIntoState({
+        const paymentResponse = await adminAPI.updateOrderPaymentStatus(
+          orderToRecordPayment.id,
+          newStatus,
+          { amountReceived: newTotalReceived }
+        );
+        const mergedOrder = {
           ...orderToRecordPayment,
+          ...(paymentResponse?.data?.order || {}),
           amount_received: newTotalReceived,
           payment_status: newStatus,
-        });
+        };
+
+        if (newStatus === 'paid' && orderToRecordPayment.payment_method?.toLowerCase() === 'gcash') {
+          await sendReceiptEmail(mergedOrder, newTotalReceived);
+        }
+
+        mergeOrderIntoState(mergedOrder);
 
         Toast.show({ type: 'success', text1: isEditPaymentMode ? 'Amount Updated' : 'Payment Recorded' });
         closePaymentModal();
@@ -1627,16 +1719,18 @@ const deliveryStepperStatuses = [
   };
 
   const assignableStopGroups = React.useMemo(
-    () => (orderToAssignRider ? getGroupedDestinations(orderToAssignRider) : []),
+    () => (orderToAssignRider
+      ? getGroupedDestinations(orderToAssignRider).filter((group) => group.activeItemCount > 0)
+      : []),
     [getGroupedDestinations, orderToAssignRider]
   );
   const deliveryStopModalStops = React.useMemo(
     () => (
       orderToCompleteStops
-        ? getNormalizedStopDestinations(orderToCompleteStops)
+        ? getDeliveryProofStops(orderToCompleteStops)
         : []
     ),
-    [getNormalizedStopDestinations, orderToCompleteStops]
+    [getDeliveryProofStops, orderToCompleteStops]
   );
 
   React.useEffect(() => {
@@ -1724,6 +1818,27 @@ const deliveryStepperStatuses = [
           <Text style={{ fontSize: 13, color: '#6B7280' }}>
             {focusedOrderBannerDescription}
           </Text>
+          {focusedEntityTarget?.source === 'refund_notification'
+            && focusedOrder?.refund_request
+            && currentUser?.role === 'admin'
+            && focusedOrder.refund_request.status === 'requested' ? (
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity
+                style={[styles.eoMainBtn, { backgroundColor: activeActionKey ? '#9CA3AF' : '#10B981', flex: 1 }]}
+                disabled={Boolean(activeActionKey)}
+                onPress={() => handleApproveRefund(focusedOrder)}
+              >
+                <Text style={styles.eoMainBtnText}>Approve Refund</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.eoMainBtn, { backgroundColor: activeActionKey ? '#9CA3AF' : '#EF4444', flex: 1 }]}
+                disabled={Boolean(activeActionKey)}
+                onPress={() => handleRejectRefund(focusedOrder)}
+              >
+                <Text style={styles.eoMainBtnText}>Reject Refund</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
           <TouchableOpacity
             onPress={clearFocusedEntityTarget}
             style={{

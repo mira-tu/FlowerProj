@@ -3,7 +3,9 @@ import { supabase } from '../config/supabase';
 import {
     DELIVERY_CONFIRMATION_OWNER,
     DELIVERY_CONFIRMATION_STATUS,
+    getDeliveryStopCounts,
     getDeliveryStopDisplayLabel,
+    isDeliveryStopCancelled,
     normalizeDeliveryDestinations,
 } from '../utils/deliveryDestinations';
 
@@ -34,6 +36,14 @@ const formatStopTimestamp = (value) => {
 };
 
 const getStopStatusConfig = (stop) => {
+    if (isDeliveryStopCancelled(stop)) {
+        return {
+            label: 'Cancelled',
+            color: '#b91c1c',
+            background: '#fee2e2',
+        };
+    }
+
     if (stop.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED) {
         return {
             label: stop.confirmed_by_actor === 'customer' ? 'Confirmed by you' : 'Delivered with rider proof',
@@ -77,9 +87,10 @@ const TrackingDeliveryStops = ({
     const canShowCustomerConfirmation = CUSTOMER_CONFIRMATION_VISIBLE_STATUSES.has(normalizedDeliveryStatus);
     const [riderLookup, setRiderLookup] = useState({});
     const stops = useMemo(
-        () => normalizeDeliveryDestinations(destinations).filter((stop) => stop.confirmation_owner),
+        () => normalizeDeliveryDestinations(destinations).filter((stop) => stop.confirmation_owner || isDeliveryStopCancelled(stop)),
         [destinations]
     );
+    const stopCounts = useMemo(() => getDeliveryStopCounts(destinations), [destinations]);
     const riderIds = useMemo(
         () => Array.from(
             new Set(
@@ -137,11 +148,12 @@ const TrackingDeliveryStops = ({
         <div className="checkout-section">
             <h5 className="section-title">
                 <i className="fas fa-route"></i>
-                {title} ({stops.length})
+                {title} ({stopCounts.activeCount} active{stopCounts.cancelledCount ? `, ${stopCounts.cancelledCount} cancelled` : ''})
             </h5>
 
             <div className="d-grid gap-3">
                 {stops.map((stop, index) => {
+                    const isCancelled = isDeliveryStopCancelled(stop);
                     const statusConfig = getStopStatusConfig(stop);
                     const assignedRiderId = String(stop.assigned_rider_id || '').trim();
                     const confirmedRiderId = String(stop.confirmed_by_user_id || '').trim();
@@ -164,6 +176,7 @@ const TrackingDeliveryStops = ({
                     const assignedRiderLabel = formatRiderLabel(assignedRider);
                     const confirmedRiderLabel = formatRiderLabel(confirmedRider);
                     const canConfirm = typeof onConfirmStop === 'function'
+                        && !isCancelled
                         && canShowCustomerConfirmation
                         && stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER
                         && stop.confirmation_status !== DELIVERY_CONFIRMATION_STATUS.CONFIRMED;
@@ -188,17 +201,19 @@ const TrackingDeliveryStops = ({
                                 </div>
 
                                 <div className="d-flex gap-2 flex-wrap justify-content-end">
-                                    <span
-                                        className="badge rounded-pill"
-                                        style={{
-                                            background: stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER ? '#fce7f3' : '#ede9fe',
-                                            color: stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER ? '#be185d' : '#6d28d9',
-                                        }}
-                                    >
-                                        {stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER
-                                            ? 'Customer confirmation'
-                                            : 'Rider proof required'}
-                                    </span>
+                                    {!isCancelled ? (
+                                        <span
+                                            className="badge rounded-pill"
+                                            style={{
+                                                background: stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER ? '#fce7f3' : '#ede9fe',
+                                                color: stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER ? '#be185d' : '#6d28d9',
+                                            }}
+                                        >
+                                            {stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER
+                                                ? 'Customer confirmation'
+                                                : 'Rider proof required'}
+                                        </span>
+                                    ) : null}
                                     <span
                                         className="badge rounded-pill"
                                         style={{ background: statusConfig.background, color: statusConfig.color }}
@@ -208,14 +223,21 @@ const TrackingDeliveryStops = ({
                                 </div>
                             </div>
 
-                            {(assignedRiderLabel || stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.RIDER) ? (
+                            {!isCancelled && (assignedRiderLabel || stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.RIDER) ? (
                                 <div className="small mt-3" style={{ color: '#2563eb', fontWeight: 600 }}>
                                     <i className="fas fa-bicycle me-2"></i>
                                     {assignedRiderLabel || 'Rider not assigned yet'}
                                 </div>
                             ) : null}
 
-                            {stop.proof_image_url ? (
+                            {isCancelled && (stop.cancelled_at || stop.cancelled_reason) ? (
+                                <div className="small mt-3" style={{ color: '#b91c1c', fontWeight: 600 }}>
+                                    {stop.cancelled_at ? `Cancelled on ${formatStopTimestamp(stop.cancelled_at)}` : 'Cancelled'}
+                                    {stop.cancelled_reason ? `: ${stop.cancelled_reason}` : ''}
+                                </div>
+                            ) : null}
+
+                            {!isCancelled && stop.proof_image_url ? (
                                 <div className="mt-3">
                                     <div className="small fw-semibold text-muted mb-2">Proof of delivery</div>
                                     <img
@@ -240,7 +262,7 @@ const TrackingDeliveryStops = ({
                                 </div>
                             ) : null}
 
-                            {stop.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED && stop.confirmed_at ? (
+                            {!isCancelled && stop.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED && stop.confirmed_at ? (
                                 <div className="small text-muted mt-3">
                                     Confirmed on {formatStopTimestamp(stop.confirmed_at)}
                                 </div>

@@ -4,6 +4,7 @@ import {
     normalizeCancellationItem,
     summarizeCancellationItems,
 } from './orderCancellation';
+import { parseMultiDeliveryNotes } from './deliveryDestinations';
 
 const ACTIVE_REFUND_STATUSES = ['requested', 'approved', 'gcash_submitted', 'processing'];
 
@@ -32,6 +33,128 @@ const toNonNegativeNumber = (value, fallback = 0) => {
 
 const getEntityData = (entity = {}) => parseJsonObject(entity?.requestData || entity?.data);
 
+const getFirstPositiveNumber = (...values) => {
+    for (const value of values) {
+        const parsed = Number.parseFloat(String(value ?? ''));
+        if (Number.isFinite(parsed) && parsed > 0) {
+            return parsed;
+        }
+    }
+
+    return 0;
+};
+
+const normalizeRefundSnapshot = (snapshot) => {
+    if (!snapshot || typeof snapshot !== 'object') {
+        return null;
+    }
+
+    const amountPaid = toNonNegativeNumber(snapshot?.amount_paid ?? snapshot?.amountPaid ?? 0, 0);
+    const preCancellationSubtotal = toNonNegativeNumber(
+        snapshot?.pre_cancellation_subtotal ?? snapshot?.preCancellationSubtotal ?? 0,
+        0,
+    );
+    const preCancellationShippingFee = toNonNegativeNumber(
+        snapshot?.pre_cancellation_shipping_fee ?? snapshot?.preCancellationShippingFee ?? 0,
+        0,
+    );
+    const preCancellationTotal = toNonNegativeNumber(
+        snapshot?.pre_cancellation_total
+        ?? snapshot?.preCancellationTotal
+        ?? (preCancellationSubtotal + preCancellationShippingFee),
+        0,
+    );
+    const paymentStatus = normalizeStatus(snapshot?.payment_status ?? snapshot?.paymentStatus ?? '');
+    const capturedAt = String(snapshot?.captured_at ?? snapshot?.capturedAt ?? '').trim();
+
+    if (
+        amountPaid <= 0
+        && preCancellationSubtotal <= 0
+        && preCancellationShippingFee <= 0
+        && preCancellationTotal <= 0
+        && !paymentStatus
+        && !capturedAt
+    ) {
+        return null;
+    }
+
+    return {
+        amount_paid: amountPaid,
+        payment_status: paymentStatus,
+        pre_cancellation_subtotal: preCancellationSubtotal,
+        pre_cancellation_shipping_fee: preCancellationShippingFee,
+        pre_cancellation_total: preCancellationTotal,
+        captured_at: capturedAt || null,
+    };
+};
+
+const getOrderNotesMetadata = (entity = {}) => {
+    if (entity?.notesMetadata && typeof entity.notesMetadata === 'object') {
+        return entity.notesMetadata;
+    }
+
+    if (typeof entity?.notes === 'string') {
+        return parseMultiDeliveryNotes(entity.notes).metadata || null;
+    }
+
+    return null;
+};
+
+export const getEntityRefundSnapshot = (entity = {}) => {
+    const entityData = getEntityData(entity);
+    const notesMetadata = getOrderNotesMetadata(entity);
+
+    return normalizeRefundSnapshot(
+        entity?.refund_snapshot
+        ?? entity?.refundSnapshot
+        ?? entityData?.refund_snapshot
+        ?? entityData?.refundSnapshot
+        ?? notesMetadata?.refund_snapshot
+        ?? notesMetadata?.refundSnapshot
+        ?? null,
+    );
+};
+
+export const createRefundSnapshot = (entity = {}) => {
+    const entityData = getEntityData(entity);
+    const amountPaid = toNonNegativeNumber(
+        entity?.amount_received ?? entityData?.amount_received ?? 0,
+        0,
+    );
+    const paymentStatus = normalizeStatus(entity?.payment_status ?? entityData?.payment_status ?? '');
+    const preCancellationSubtotal = toNonNegativeNumber(
+        entity?.subtotal ?? entityData?.subtotal ?? 0,
+        0,
+    );
+    const preCancellationShippingFee = toNonNegativeNumber(
+        entity?.shipping_fee
+        ?? entity?.delivery_fee
+        ?? entityData?.shipping_fee
+        ?? entityData?.delivery_fee
+        ?? 0,
+        0,
+    );
+    const preCancellationTotal = toNonNegativeNumber(
+        entity?.total
+        ?? entity?.finalPrice
+        ?? entity?.final_price
+        ?? entityData?.final_price
+        ?? entityData?.estimated_total
+        ?? entityData?.total
+        ?? (preCancellationSubtotal + preCancellationShippingFee),
+        0,
+    );
+
+    return normalizeRefundSnapshot({
+        amount_paid: amountPaid,
+        payment_status: paymentStatus,
+        pre_cancellation_subtotal: preCancellationSubtotal,
+        pre_cancellation_shipping_fee: preCancellationShippingFee,
+        pre_cancellation_total: preCancellationTotal,
+        captured_at: new Date().toISOString(),
+    });
+};
+
 export const hasRecordedPayment = ({ paymentStatus, amountPaid = 0 }) => (
     toNonNegativeNumber(amountPaid, 0) > 0 || normalizeStatus(paymentStatus) === 'paid'
 );
@@ -42,17 +165,18 @@ export const hasActiveRefundRequest = (refundRequest) => (
 
 export const getRefundFallbackAmount = (entity = {}) => {
     const entityData = getEntityData(entity);
+    const refundSnapshot = getEntityRefundSnapshot(entity);
 
-    return toNonNegativeNumber(
-        entity?.total
-        ?? entity?.finalPrice
-        ?? entity?.final_price
-        ?? entityData?.final_price
-        ?? entityData?.estimated_total
-        ?? entityData?.total
-        ?? 0,
+    return roundCurrency(getFirstPositiveNumber(
+        entity?.total,
+        entity?.finalPrice,
+        entity?.final_price,
+        entityData?.final_price,
+        entityData?.estimated_total,
+        entityData?.total,
+        refundSnapshot?.pre_cancellation_total,
         0,
-    );
+    ));
 };
 
 export const getEntityCancellationItems = (entity = {}) => {
@@ -65,21 +189,31 @@ export const getEntityCancellationItems = (entity = {}) => {
 
 export const getEntityShippingFee = (entity = {}) => {
     const entityData = getEntityData(entity);
+    const refundSnapshot = getEntityRefundSnapshot(entity);
 
-    return toNonNegativeNumber(
-        entity?.shipping_fee
-        ?? entity?.delivery_fee
-        ?? entityData?.shipping_fee
-        ?? entityData?.delivery_fee
-        ?? 0,
+    return roundCurrency(getFirstPositiveNumber(
+        entity?.shipping_fee,
+        entity?.delivery_fee,
+        entityData?.shipping_fee,
+        entityData?.delivery_fee,
+        refundSnapshot?.pre_cancellation_shipping_fee,
         0,
-    );
+    ));
 };
 
 export const getCancellationRefundContext = (entity = {}) => {
     const entityData = getEntityData(entity);
-    const paymentStatus = entity?.payment_status ?? entityData?.payment_status ?? '';
-    const amountPaid = toNonNegativeNumber(entity?.amount_received ?? entityData?.amount_received ?? 0, 0);
+    const refundSnapshot = getEntityRefundSnapshot(entity);
+    const paymentStatus = entity?.payment_status
+        ?? entityData?.payment_status
+        ?? refundSnapshot?.payment_status
+        ?? '';
+    const amountPaid = roundCurrency(getFirstPositiveNumber(
+        entity?.amount_received,
+        entityData?.amount_received,
+        refundSnapshot?.amount_paid,
+        0,
+    ));
     const fallbackAmount = getRefundFallbackAmount(entity);
     const paymentCap = amountPaid > 0 ? amountPaid : fallbackAmount;
     const items = getEntityCancellationItems(entity);
@@ -101,6 +235,7 @@ export const getCancellationRefundContext = (entity = {}) => {
         fallbackAmount,
         paymentCap,
         shippingFee,
+        refundSnapshot,
         summary,
         hasAnyCancellation,
         hasRecordedPayment: hasRecordedPayment({ paymentStatus, amountPaid }),

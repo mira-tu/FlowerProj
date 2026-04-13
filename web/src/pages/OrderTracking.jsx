@@ -13,7 +13,7 @@ import {
     confirmDeliveryStop,
     hasStopConfirmationFlow,
     parseMultiDeliveryNotes,
-    parseOrderDeliveryDestinations,
+    reconcileDeliveryDestinationsWithItems,
     serializeMultiDeliveryNotes,
 } from '../utils/deliveryDestinations';
 import {
@@ -139,6 +139,7 @@ const OrderTracking = ({ user }) => {
                 };
             }
 
+            const parsedOrderNotes = parseMultiDeliveryNotes(foundOrder.notes);
             const orderNotesGcashReference = getOrderGcashReferenceFromNotes(foundOrder.notes);
             const orderNotesAdditionalReceipts = getOrderAdditionalReceiptsFromNotes(foundOrder.notes);
             const normalizedAdditionalReceipts = normalizeAdditionalReceiptEntries(
@@ -146,7 +147,10 @@ const OrderTracking = ({ user }) => {
                     ? foundOrder.additional_receipts
                     : orderNotesAdditionalReceipts
             );
-            const itemSummary = summarizeCancellationItems(foundOrder.order_items || []);
+            const sortedOrderItems = Array.isArray(foundOrder.order_items)
+                ? [...foundOrder.order_items].sort((left, right) => Number(left?.id || 0) - Number(right?.id || 0))
+                : [];
+            const itemSummary = summarizeCancellationItems(sortedOrderItems);
             const displayItems = itemSummary.items.map((item) => ({
                 ...item,
                 quantity: item.remainingQuantity,
@@ -161,12 +165,17 @@ const OrderTracking = ({ user }) => {
                 address: foundOrder.addresses,
                 deliveryMethod: foundOrder.delivery_method,
                 pickupTime: foundOrder.pickup_time,
-                multiDeliveryDestinations: parseOrderDeliveryDestinations(foundOrder),
+                notesMetadata: parsedOrderNotes.metadata || null,
+                multiDeliveryDestinations: reconcileDeliveryDestinationsWithItems(
+                    parsedOrderNotes.destinations,
+                    sortedOrderItems
+                ),
                 subtotal: itemSummary.hasItems ? itemSummary.remainingSubtotal : foundOrder.subtotal,
                 shipping_fee: itemSummary.allCancelled ? 0 : foundOrder.shipping_fee,
                 total: itemSummary.hasItems
                     ? (itemSummary.allCancelled ? 0 : (itemSummary.remainingSubtotal + Number(foundOrder.shipping_fee || 0)))
                     : foundOrder.total,
+                refund_snapshot: parsedOrderNotes.metadata?.refund_snapshot || null,
                 gcash_reference_number: foundOrder.gcash_reference_number || orderNotesGcashReference || null,
                 additional_receipts: normalizedAdditionalReceipts,
             };
@@ -454,7 +463,11 @@ const OrderTracking = ({ user }) => {
         try {
             const confirmedAt = new Date().toISOString();
             const parsedNotes = parseMultiDeliveryNotes(order.notes);
-            const updatedDestinations = confirmDeliveryStop(parsedNotes.destinations, stop.unit_key, {
+            const reconciledDestinations = reconcileDeliveryDestinationsWithItems(
+                parsedNotes.destinations,
+                order?.items || []
+            );
+            const updatedDestinations = confirmDeliveryStop(reconciledDestinations, stop.unit_key, {
                 actorType: 'customer',
                 actorUserId: user?.id || order.user_id || null,
                 confirmedAt,
@@ -464,6 +477,7 @@ const OrderTracking = ({ user }) => {
                 notes: serializeMultiDeliveryNotes({
                     destinations: updatedDestinations,
                     note: parsedNotes.note,
+                    metadata: parsedNotes.metadata,
                 }),
             };
 
@@ -487,7 +501,7 @@ const OrderTracking = ({ user }) => {
                 .from('orders')
                 .update(updatePayload)
                 .eq('id', order.id)
-                .select('notes, status, status_timestamps, payment_status, amount_received, updated_at')
+                .select('notes, status, status_timestamps, payment_status, amount_received')
                 .single();
 
             if (error) {
