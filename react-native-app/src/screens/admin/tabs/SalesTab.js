@@ -419,13 +419,16 @@ const SalesTab = () => {
   const historyLoaded = sectionLoadKey.history === activeFilterKey;
   const productsLoaded = sectionLoadKey.products === activeFilterKey;
   const hasBestSellerResults = bestSellers.catalogProducts.length > 0 || bestSellers.bookingFlowers.length > 0 || bestSellers.customizedFlowers.length > 0;
-  const isCompactSalesSheet = !isWeb && width <= 420;
-  const useStackedDetailRows = isCompactSalesSheet || width <= 720;
-  const salesSheetHorizontalPadding = isCompactSalesSheet ? 16 : 20;
-  const salesSheetWidth = isWeb ? 580 : Math.min(width - (isCompactSalesSheet ? 20 : 28), 500);
+  const isCompactSalesSheet = !isWeb && width <= 480;
+  const useStackedDetailRows = !isWeb || width <= 720;
+  const salesSheetHorizontalPadding = isWeb ? 20 : (isCompactSalesSheet ? 18 : 20);
+  const salesSheetWidth = isWeb ? 580 : Math.min(width - (isCompactSalesSheet ? 12 : 18), 560);
   const salesSheetMaxHeight = isWeb
     ? Math.min(Math.max(height - 48, 520), 780)
-    : Math.min(Math.max(height - 28, 340), 680);
+    : Math.max(420, Math.min(height - 12, 760));
+  const salesSheetMinHeight = isWeb
+    ? 0
+    : Math.min(salesSheetMaxHeight, Math.max(420, Math.round(height * 0.72)));
   const currentSales = salesData.cashSales;
   const currentCalendarMonthKey = formatMonthKey(calendarMonthDate);
   const currentMonthKey = formatMonthKey(new Date());
@@ -1388,10 +1391,10 @@ const SalesTab = () => {
         style={[
           styles.modalContainer,
           !isWeb && {
-            justifyContent: 'center',
-            alignItems: 'center',
-            paddingHorizontal: isCompactSalesSheet ? 10 : 14,
-            paddingVertical: 12,
+            justifyContent: 'flex-end',
+            alignItems: 'stretch',
+            paddingHorizontal: isCompactSalesSheet ? 6 : 10,
+            paddingVertical: 6,
           },
         ]}
       >
@@ -1403,8 +1406,9 @@ const SalesTab = () => {
               width: salesSheetWidth,
               maxWidth: salesSheetWidth,
               maxHeight: salesSheetMaxHeight,
+              minHeight: salesSheetMinHeight,
               padding: 0,
-              borderRadius: isCompactSalesSheet ? 18 : 22,
+              borderRadius: isCompactSalesSheet ? 20 : 22,
               overflow: 'hidden',
               alignSelf: 'center',
             },
@@ -1428,8 +1432,8 @@ const SalesTab = () => {
               contentContainerStyle={{
                 paddingHorizontal: salesSheetHorizontalPadding,
                 paddingTop: 16,
-                paddingBottom: 24,
-                flexGrow: children ? 0 : 1,
+                paddingBottom: 28,
+                flexGrow: 1,
               }}
             >
               {children || (
