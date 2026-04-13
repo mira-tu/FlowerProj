@@ -4205,7 +4205,22 @@ export const adminAPI = {
 
             return { data };
         } catch (error) {
-            throw new Error(getDeliveryProofCompletionErrorMessage(error));
+            if (!shouldFallbackToDirectWorkflow(error)) {
+                throw new Error(getDeliveryProofCompletionErrorMessage(error));
+            }
+
+            console.warn('Falling back to direct order delivery stop completion:', error.message);
+
+            try {
+                return {
+                    data: await completeOrderDeliveryStopDirect(orderId, unitKey, {
+                        ...options,
+                        proofFile: normalizedProofFile,
+                    }),
+                };
+            } catch (directError) {
+                throw new Error(getDeliveryProofCompletionErrorMessage(directError));
+            }
         }
     },
 
@@ -5459,7 +5474,22 @@ export const adminAPI = {
 
             return { data };
         } catch (error) {
-            throw new Error(getDeliveryProofCompletionErrorMessage(error));
+            if (!shouldFallbackToDirectWorkflow(error)) {
+                throw new Error(getDeliveryProofCompletionErrorMessage(error));
+            }
+
+            console.warn('Falling back to direct request delivery stop completion:', error.message);
+
+            try {
+                return {
+                    data: await completeRequestDeliveryStopDirect(requestId, unitKey, {
+                        ...options,
+                        proofFile: normalizedProofFile,
+                    }),
+                };
+            } catch (directError) {
+                throw new Error(getDeliveryProofCompletionErrorMessage(directError));
+            }
         }
     },
 
