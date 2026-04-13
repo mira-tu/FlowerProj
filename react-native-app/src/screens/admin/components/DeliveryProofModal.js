@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import {
+  Alert,
   Image,
   Modal,
   ScrollView,
@@ -70,6 +71,24 @@ const getSelectedStopMessage = ({
   return '';
 };
 
+const getNormalizedSelectedProof = (asset = {}) => {
+  const normalizedUri = String(asset?.uri || '').trim();
+  const uriFileName = normalizedUri.split(/[\\/]/).pop()?.split('?')[0] || '';
+  const fileName = String(asset?.fileName || asset?.name || uriFileName || `delivery-proof-${Date.now()}.jpg`).trim();
+  const mimeType = String(asset?.mimeType || asset?.type || '').trim().toLowerCase() || 'image/jpeg';
+  const base64 = String(asset?.base64 || '').trim();
+
+  return {
+    ...asset,
+    uri: normalizedUri,
+    fileName,
+    name: fileName,
+    mimeType,
+    type: mimeType,
+    base64,
+  };
+};
+
 const DeliveryProofModal = ({
   visible,
   onClose,
@@ -120,21 +139,41 @@ const DeliveryProofModal = ({
   );
 
   const previewUri = selectedProof?.uri || selectedStop?.proof_image_url || null;
+  const hasSelectedProof = Boolean(String(selectedProof?.uri || '').trim() || String(selectedProof?.base64 || '').trim());
 
   const pickDeliveryProofImage = async () => {
     if (!canCompleteSelectedStop || isSubmitting) {
       return;
     }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      quality: 0.8,
-      base64: true,
-    });
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission?.granted) {
+        Alert.alert(
+          'Photo Access Needed',
+          'Please allow photo library access so the rider can upload a delivery proof.'
+        );
+        return;
+      }
 
-    if (!result.canceled && result.assets?.[0]) {
-      onChangeProof?.(result.assets[0]);
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8,
+        base64: true,
+      });
+
+      if (result.canceled || !result.assets?.[0]) {
+        return;
+      }
+
+      onChangeProof?.(getNormalizedSelectedProof(result.assets[0]));
+    } catch (error) {
+      console.error('Error picking delivery proof image:', error);
+      Alert.alert(
+        'Proof Photo Error',
+        'We could not open or read the selected photo. Please try again.'
+      );
     }
   };
 
@@ -347,7 +386,7 @@ const DeliveryProofModal = ({
                 <TouchableOpacity
                   style={[styles.modalButton, styles.saveButton]}
                   onPress={onSubmit}
-                  disabled={isSubmitting || !canCompleteSelectedStop || !selectedProof?.base64}
+                  disabled={isSubmitting || !canCompleteSelectedStop || !hasSelectedProof}
                 >
                   <Text style={styles.buttonText}>
                     {isSubmitting ? 'Saving...' : confirmButtonLabel}

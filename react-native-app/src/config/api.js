@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system';
 import { supabase } from './supabase';
 import { decode } from 'base64-arraybuffer';
 import {
@@ -414,17 +415,118 @@ const getImageFileExtension = (file = {}) => {
     return sourceMatch?.[1]?.toLowerCase?.() || 'jpg';
 };
 
-const uploadDeliveryProofImage = async (file, { entityType, entityId, unitKey }) => {
-    if (!file?.base64) {
+const getDeliveryProofFileName = (file = {}) => {
+    const extension = getImageFileExtension(file);
+    const rawName = String(file?.fileName || file?.name || file?.uri || '').trim();
+    const baseName = rawName.split(/[\\/]/).pop()?.split('?')[0] || '';
+    const sanitizedName = baseName
+        .replace(/[^a-z0-9._-]+/gi, '-')
+        .replace(/^-+|-+$/g, '');
+
+    if (!sanitizedName) {
+        return `delivery-proof-${Date.now()}.${extension}`;
+    }
+
+    return /\.[a-z0-9]+$/i.test(sanitizedName)
+        ? sanitizedName
+        : `${sanitizedName}.${extension}`;
+};
+
+const getDeliveryProofMimeType = (file = {}) => {
+    const mimeType = String(file?.mimeType || file?.type || '').trim().toLowerCase();
+    if (mimeType) {
+        return mimeType;
+    }
+
+    const extension = getImageFileExtension(file);
+    return `image/${extension === 'jpg' ? 'jpeg' : extension}`;
+};
+
+const readDeliveryProofBase64FromUri = async (file = {}) => {
+    const sourceUri = String(file?.uri || '').trim();
+
+    if (!sourceUri) {
+        throw new Error('Proof photo is missing its file location.');
+    }
+
+    const dataUrlMatch = sourceUri.match(/^data:.*?;base64,(.+)$/i);
+    if (dataUrlMatch?.[1]) {
+        return dataUrlMatch[1].trim();
+    }
+
+    let workingUri = sourceUri;
+    let tempUri = '';
+
+    try {
+        if (sourceUri.startsWith('content://')) {
+            const cacheBase = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+            if (!cacheBase) {
+                throw new Error('No readable cache directory is available for the proof photo.');
+            }
+
+            tempUri = `${cacheBase}delivery-proof-${Date.now()}.${getImageFileExtension(file)}`;
+            await FileSystem.copyAsync({ from: sourceUri, to: tempUri });
+            workingUri = tempUri;
+        }
+
+        const base64 = await FileSystem.readAsStringAsync(workingUri, {
+            encoding: FileSystem.EncodingType.Base64,
+        });
+
+        if (!String(base64 || '').trim()) {
+            throw new Error('The selected proof photo could not be read.');
+        }
+
+        return String(base64).trim();
+    } catch (error) {
+        console.error('Error reading delivery proof photo:', error);
+        throw new Error('Could not read the selected proof photo. Please choose it again.');
+    } finally {
+        if (tempUri) {
+            try {
+                await FileSystem.deleteAsync(tempUri, { idempotent: true });
+            } catch (cleanupError) {
+                console.warn('Could not remove temporary proof photo file:', cleanupError?.message || cleanupError);
+            }
+        }
+    }
+};
+
+const normalizeDeliveryProofFile = async (file = {}) => {
+    if (!file || typeof file !== 'object') {
         throw new Error('Proof photo is required.');
     }
 
+    const existingBase64 = String(file?.base64 || '').trim();
+    const normalizedUri = String(file?.uri || '').trim();
+    const fileName = getDeliveryProofFileName(file);
+    const mimeType = getDeliveryProofMimeType(file);
+    const base64 = existingBase64 || await readDeliveryProofBase64FromUri(file);
+
+    if (!base64) {
+        throw new Error('Proof photo is required.');
+    }
+
+    return {
+        ...file,
+        uri: normalizedUri,
+        fileName,
+        name: String(file?.name || fileName).trim() || fileName,
+        mimeType,
+        type: mimeType,
+        base64,
+    };
+};
+
+const uploadDeliveryProofImage = async (file, { entityType, entityId, unitKey }) => {
+    const normalizedProofFile = await normalizeDeliveryProofFile(file);
+
     const safeEntityType = String(entityType || 'delivery').trim().toLowerCase();
     const safeUnitKey = String(unitKey || 'stop').trim().replace(/[^a-z0-9_-]+/gi, '-');
-    const extension = getImageFileExtension(file);
-    const contentType = file?.mimeType || `image/${extension === 'jpg' ? 'jpeg' : extension}`;
+    const extension = getImageFileExtension(normalizedProofFile);
+    const contentType = normalizedProofFile.mimeType || `image/${extension === 'jpg' ? 'jpeg' : extension}`;
     const fileName = `delivery-proofs/${safeEntityType}-${entityId || 'record'}-${safeUnitKey}-${Date.now()}.${extension}`;
-    const arrayBuffer = decode(file.base64);
+    const arrayBuffer = decode(normalizedProofFile.base64);
 
     const { data: uploadData, error: uploadError } = await supabase.storage
         .from('receipts')
@@ -858,7 +960,7 @@ const completeOrderDeliveryStopDirect = async (orderId, unitKey, options = {}) =
         };
     }
 
-    if (!options?.proofFile?.base64) {
+    if (!options?.proofFile?.base64 && !options?.proofFile?.uri) {
         throw new Error('Proof photo is required before completing this delivery stop.');
     }
 
@@ -2775,7 +2877,7 @@ const completeRequestDeliveryStopDirect = async (requestId, unitKey, options = {
         };
     }
 
-    if (!options?.proofFile?.base64) {
+    if (!options?.proofFile?.base64 && !options?.proofFile?.uri) {
         throw new Error('Proof photo is required before completing this delivery stop.');
     }
 
@@ -3993,10 +4095,11 @@ export const adminAPI = {
     },
 
     completeOrderDeliveryStop: async (orderId, unitKey, options = {}) => {
+        const normalizedProofFile = await normalizeDeliveryProofFile(options?.proofFile || null);
         const data = await invokeAdminWorkflow('complete_order_delivery_stop', {
             orderId,
             unitKey,
-            proofFile: options?.proofFile || null,
+            proofFile: normalizedProofFile,
             proofNote: options?.proofNote || '',
         });
 
@@ -5241,10 +5344,11 @@ export const adminAPI = {
     },
 
     completeRequestDeliveryStop: async (requestId, unitKey, options = {}) => {
+        const normalizedProofFile = await normalizeDeliveryProofFile(options?.proofFile || null);
         const data = await invokeAdminWorkflow('complete_request_delivery_stop', {
             requestId,
             unitKey,
-            proofFile: options?.proofFile || null,
+            proofFile: normalizedProofFile,
             proofNote: options?.proofNote || '',
         });
 

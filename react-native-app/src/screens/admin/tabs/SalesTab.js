@@ -365,7 +365,7 @@ const normalizeBestSellerSections = (payload) => {
 };
 
 const SalesTab = () => {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const isWeb = Platform.OS === 'web';
   const todayKey = formatDateKey(new Date());
   const [salesData, setSalesData] = useState(createEmptySalesData);
@@ -420,8 +420,12 @@ const SalesTab = () => {
   const productsLoaded = sectionLoadKey.products === activeFilterKey;
   const hasBestSellerResults = bestSellers.catalogProducts.length > 0 || bestSellers.bookingFlowers.length > 0 || bestSellers.customizedFlowers.length > 0;
   const isCompactSalesSheet = !isWeb && width <= 420;
+  const useStackedDetailRows = isCompactSalesSheet || width <= 720;
   const salesSheetHorizontalPadding = isCompactSalesSheet ? 16 : 20;
   const salesSheetWidth = isWeb ? 580 : Math.min(width - (isCompactSalesSheet ? 20 : 28), 500);
+  const salesSheetMaxHeight = isWeb
+    ? Math.min(Math.max(height - 48, 520), 780)
+    : Math.min(Math.max(height - 28, 340), 680);
   const currentSales = salesData.cashSales;
   const currentCalendarMonthKey = formatMonthKey(calendarMonthDate);
   const currentMonthKey = formatMonthKey(new Date());
@@ -810,10 +814,10 @@ const SalesTab = () => {
     return (
       <View
         style={{
-          flexDirection: isCompactSalesSheet ? 'column' : 'row',
+          flexDirection: useStackedDetailRows ? 'column' : 'row',
           justifyContent: 'space-between',
-          alignItems: isCompactSalesSheet ? 'flex-start' : 'flex-start',
-          gap: isCompactSalesSheet ? 4 : 12,
+          alignItems: 'flex-start',
+          gap: useStackedDetailRows ? 4 : 12,
           paddingVertical: 7,
           borderBottomWidth: 1,
           borderBottomColor: '#F3F4F6',
@@ -821,7 +825,7 @@ const SalesTab = () => {
       >
         <Text
           style={{
-            flex: isCompactSalesSheet ? 0 : 1,
+            flex: useStackedDetailRows ? 0 : 1,
             minWidth: 0,
             flexShrink: 1,
             color: '#6B7280',
@@ -833,14 +837,14 @@ const SalesTab = () => {
         </Text>
         <Text
           style={{
-            flex: isCompactSalesSheet ? 0 : 1.4,
+            flex: useStackedDetailRows ? 0 : 1.4,
             minWidth: 0,
             flexShrink: 1,
             color: '#111827',
             fontSize: 12,
             fontWeight: '700',
-            textAlign: isCompactSalesSheet ? 'left' : 'right',
-            alignSelf: isCompactSalesSheet ? 'stretch' : 'auto',
+            textAlign: useStackedDetailRows ? 'left' : 'right',
+            alignSelf: useStackedDetailRows ? 'stretch' : 'auto',
             lineHeight: 18,
           }}
         >
@@ -859,11 +863,11 @@ const SalesTab = () => {
 
     return (
       <View key={`${item?.name || 'item'}-${index}`} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' }}>
-        <View style={{ flexDirection: isCompactSalesSheet ? 'column' : 'row', justifyContent: 'space-between', gap: isCompactSalesSheet ? 4 : 10 }}>
-          <Text style={{ flex: isCompactSalesSheet ? 0 : 1, minWidth: 0, flexShrink: 1, color: '#111827', fontSize: 13, fontWeight: '700', lineHeight: 19 }}>
+        <View style={{ flexDirection: useStackedDetailRows ? 'column' : 'row', justifyContent: 'space-between', gap: useStackedDetailRows ? 4 : 10 }}>
+          <Text style={{ flex: useStackedDetailRows ? 0 : 1, minWidth: 0, flexShrink: 1, color: '#111827', fontSize: 13, fontWeight: '700', lineHeight: 19 }}>
             {item?.name || `Item ${index + 1}`} x {safeQuantity}
           </Text>
-          <Text style={{ color: '#16A34A', fontSize: 13, fontWeight: '700', textAlign: isCompactSalesSheet ? 'left' : 'right' }}>
+          <Text style={{ color: '#16A34A', fontSize: 13, fontWeight: '700', textAlign: useStackedDetailRows ? 'left' : 'right' }}>
             {formatCurrency(lineTotal)}
           </Text>
         </View>
@@ -1394,11 +1398,11 @@ const SalesTab = () => {
         <View style={[
           styles.modalContent,
           isWeb
-            ? { width: 580, maxHeight: '92%', padding: 0, borderRadius: 18, overflow: 'hidden' }
+            ? { width: 580, maxHeight: salesSheetMaxHeight, padding: 0, borderRadius: 18, overflow: 'hidden' }
             : {
               width: salesSheetWidth,
               maxWidth: salesSheetWidth,
-              maxHeight: '92%',
+              maxHeight: salesSheetMaxHeight,
               padding: 0,
               borderRadius: isCompactSalesSheet ? 18 : 22,
               overflow: 'hidden',
@@ -1415,13 +1419,28 @@ const SalesTab = () => {
             </TouchableOpacity>
           </View>
 
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            style={{ flex: 1, minHeight: 0 }}
-            contentContainerStyle={{ paddingHorizontal: salesSheetHorizontalPadding, paddingTop: 16, paddingBottom: 24 }}
-          >
-            {children}
-          </ScrollView>
+          <View style={{ flex: 1, minHeight: 160 }}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+              style={{ flex: 1 }}
+              contentContainerStyle={{
+                paddingHorizontal: salesSheetHorizontalPadding,
+                paddingTop: 16,
+                paddingBottom: 24,
+                flexGrow: children ? 0 : 1,
+              }}
+            >
+              {children || (
+                <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 20 }}>
+                  <Text style={{ color: '#6B7280', fontSize: 13, textAlign: 'center', lineHeight: 20 }}>
+                    No sale details are available for this record yet.
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
 
           <View style={{ paddingHorizontal: salesSheetHorizontalPadding, paddingTop: 12, paddingBottom: isWeb ? 18 : 22, borderTopWidth: 1, borderTopColor: '#F3F4F6', backgroundColor: '#fff' }}>
             <TouchableOpacity style={{ backgroundColor: '#ec4899', borderRadius: 14, minHeight: 48, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' }} onPress={onClose}>

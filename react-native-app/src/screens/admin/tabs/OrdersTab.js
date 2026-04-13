@@ -718,7 +718,7 @@ const deliveryStepperStatuses = [
       return;
     }
 
-    if (!selectedDeliveryProof?.base64) {
+    if (!selectedDeliveryProof?.base64 && !selectedDeliveryProof?.uri) {
       Alert.alert('Proof Required', 'Please upload a delivery proof photo before completing this stop.');
       return;
     }
@@ -2164,7 +2164,7 @@ const deliveryStepperStatuses = [
                     || !selectedDeliveryStop
                     || selectedDeliveryStop.confirmation_owner !== DELIVERY_CONFIRMATION_OWNER.RIDER
                     || selectedDeliveryStop.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED
-                    || !selectedDeliveryProof?.base64
+                    || (!selectedDeliveryProof?.base64 && !selectedDeliveryProof?.uri)
                   }
                 >
                   <Text style={styles.buttonText}>
