@@ -176,6 +176,12 @@ const getImageUri = (image) => {
 };
 
 const pickImageAsset = async () => {
+  const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (!permission?.granted) {
+    Alert.alert('Permission needed', 'Photo library access is required to select images.');
+    return null;
+  }
+
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ImagePicker.MediaTypeOptions.Images,
     allowsEditing: true,

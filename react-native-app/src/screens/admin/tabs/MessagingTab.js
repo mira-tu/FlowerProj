@@ -8,7 +8,6 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { supabase } from '../../../config/supabase';
@@ -27,13 +26,12 @@ const extractCustomOrderReference = (messageText = '') => {
     };
 };
 
-const MessagingTab = ({ customerToMessage, setCustomerToMessage, setActiveTab, setFocusedEntityTarget }) => {
+const MessagingTab = ({ currentUser, customerToMessage, setCustomerToMessage, setActiveTab, setFocusedEntityTarget }) => {
     const [conversations, setConversations] = useState([]);
     const [selectedConversation, setSelectedConversation] = useState(null);
     const [messages, setMessages] = useState([]);
     const [loading, setLoading] = useState(false);
     const [newMessage, setNewMessage] = useState('');
-    const [currentUser, setCurrentUser] = useState(null);
     const flatListRef = React.useRef(null);
     const navigation = useNavigation();
 
@@ -83,15 +81,19 @@ const MessagingTab = ({ customerToMessage, setCustomerToMessage, setActiveTab, s
         }
     }, [fetchConversations]);
 
-    // Get current user from AsyncStorage
     useEffect(() => {
-        const loadInitialData = async () => {
-            const userJson = await AsyncStorage.getItem('currentUser');
-            if (userJson) setCurrentUser(JSON.parse(userJson));
-            else navigation.navigate('Login');
-        };
-        loadInitialData();
-    }, [navigation]);
+        if (!currentUser) {
+            setConversations([]);
+            setSelectedConversation(null);
+            setMessages([]);
+        }
+    }, [currentUser]);
+
+    useEffect(() => {
+        if (!currentUser) {
+            navigation.navigate('Login');
+        }
+    }, [currentUser, navigation]);
 
     // Fetch conversations when user is loaded
     useFocusEffect(

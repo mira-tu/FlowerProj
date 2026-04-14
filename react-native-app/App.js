@@ -1,10 +1,11 @@
-import React, { useEffect } from 'react';
-import { View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import AdminDashboard from './src/screens/AdminDashboard';
 import LoginScreen from './src/screens/LoginScreen';
 import ResetPasswordScreen from './src/screens/ResetPasswordScreen';
+import { authAPI } from './src/config/api';
 import { supabase } from './src/config/supabase';
 import { Linking } from 'react-native';
 import Toast, { BaseToast, ErrorToast } from 'react-native-toast-message';
@@ -68,58 +69,100 @@ const toastConfig = {
 
 const Stack = createNativeStackNavigator();
 
+const parseDeepLinkTokens = (url) => {
+  const hashIndex = url.indexOf('#');
+  if (hashIndex === -1) {
+    return null;
+  }
+
+  const params = {};
+  const hash = url.substring(hashIndex + 1);
+  hash.split('&').forEach((pair) => {
+    const [key, value] = pair.split('=');
+    if (key) {
+      params[key] = value;
+    }
+  });
+
+  return params;
+};
+
+const isResetPasswordUrl = (url = '') => url.includes('reset-password');
+
 function App() {
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
+  const [initialRouteName, setInitialRouteName] = useState('Login');
+
   useEffect(() => {
-    // Handle Deep Linking
+    let isActive = true;
+
     const handleDeepLink = async (event) => {
       const url = event.url;
-      if (!url) return;
+      if (!url) return false;
 
       console.log('Deep link received:', url);
+      const params = parseDeepLinkTokens(url);
 
-      // Check for Supabase auth tokens in hash
-      // Format: flowerforge-admin://reset-password#access_token=...&refresh_token=...
       if (url.includes('access_token') || url.includes('refresh_token')) {
         try {
-          // Extract hash part
-          const hashIndex = url.indexOf('#');
-          if (hashIndex !== -1) {
-            const hash = url.substring(hashIndex + 1);
-            const params = {};
-            hash.split('&').forEach(pair => {
-              const [key, value] = pair.split('=');
-              params[key] = value;
+          if (params?.access_token && params?.refresh_token) {
+            const { error } = await supabase.auth.setSession({
+              access_token: params.access_token,
+              refresh_token: params.refresh_token,
             });
 
-            if (params.access_token && params.refresh_token) {
-              const { error } = await supabase.auth.setSession({
-                access_token: params.access_token,
-                refresh_token: params.refresh_token,
-              });
-
-              if (error) throw error;
-
-              // Navigate to ResetPassword after setting session
-              // We need a ref or wait for navigation container to be ready, 
-              // but if this runs on mount, the initial route is Login.
-              // We can rely on the navigation linking prop or manual navigation if we have ref.
-              // However, since we are inside App component, we don't have navigation prop.
-              // We'll use linking config for routing but session setting here.
-            }
+            if (error) throw error;
           }
+          return true;
         } catch (error) {
           console.error('Error handling deep link session:', error);
           Toast.show({ type: 'error', text1: 'Link Error', text2: 'Invalid or expired link' });
+          return false;
+        }
+      }
+
+      return isResetPasswordUrl(url);
+    };
+
+    const bootstrapApp = async () => {
+      try {
+        const initialUrl = await Linking.getInitialURL();
+
+        if (initialUrl) {
+          const handledResetLink = await handleDeepLink({ url: initialUrl });
+
+          if (isResetPasswordUrl(initialUrl)) {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (isActive) {
+              setInitialRouteName(handledResetLink && session ? 'ResetPassword' : 'Login');
+            }
+            return;
+          }
+        }
+
+        const response = await authAPI.getMe();
+        if (isActive) {
+          setInitialRouteName(response?.data ? 'AdminDashboard' : 'Login');
+        }
+      } catch (error) {
+        console.error('App bootstrap error:', error);
+        if (isActive) {
+          setInitialRouteName('Login');
+        }
+      } finally {
+        if (isActive) {
+          setIsBootstrapping(false);
         }
       }
     };
 
     const sub = Linking.addEventListener('url', handleDeepLink);
-    Linking.getInitialURL().then((url) => {
-      if (url) handleDeepLink({ url });
-    });
+    bootstrapApp();
 
-    return () => sub.remove();
+    return () => {
+      isActive = false;
+      sub.remove();
+    };
   }, []);
 
   const linking = {
@@ -135,26 +178,34 @@ function App() {
 
   return (
     <View style={{ flex: 1 }}>
-
-      <NavigationContainer linking={linking} fallback={<View />}>
-        <Stack.Navigator initialRouteName="Login">
-          <Stack.Screen
-            name="Login"
-            component={LoginScreen}
-            options={{ headerShown: false }}
-          />
-          <Stack.Screen
-            name="AdminDashboard"
-            component={AdminDashboard}
-            options={{ headerShown: false }}
-          />
-          <Stack.Screen
-            name="ResetPassword"
-            component={ResetPasswordScreen} // Handles the actual password update
-            options={{ headerShown: false }}
-          />
-        </Stack.Navigator>
-      </NavigationContainer>
+      {isBootstrapping ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f4f6f9' }}>
+          <ActivityIndicator size="large" color="#ec4899" />
+          <Text style={{ marginTop: 12, fontSize: 16, fontWeight: '600', color: '#374151' }}>
+            Loading...
+          </Text>
+        </View>
+      ) : (
+        <NavigationContainer linking={linking} fallback={<View />}>
+          <Stack.Navigator initialRouteName={initialRouteName}>
+            <Stack.Screen
+              name="Login"
+              component={LoginScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="AdminDashboard"
+              component={AdminDashboard}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="ResetPassword"
+              component={ResetPasswordScreen}
+              options={{ headerShown: false }}
+            />
+          </Stack.Navigator>
+        </NavigationContainer>
+      )}
       <Toast config={toastConfig} />
     </View>
   );

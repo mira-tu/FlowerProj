@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,6 @@ import {
   SafeAreaView,
   ActivityIndicator,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { authAPI } from '../config/api';
 import AdminHeroGraphic from '../components/AdminHeroGraphic';
@@ -19,51 +18,6 @@ const LoginScreen = () => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-
-  useEffect(() => {
-    let isActive = true;
-
-    const restoreSession = async () => {
-      setLoading(true);
-
-      try {
-        const response = await authAPI.restoreStaffSession();
-
-        if (!isActive) {
-          return;
-        }
-
-        if (!response.data) {
-          await AsyncStorage.multiRemove(['token', 'currentUser']);
-          return;
-        }
-
-        const { user, token } = response.data;
-        await AsyncStorage.multiSet([
-          ['token', token],
-          ['currentUser', JSON.stringify(user)],
-        ]);
-
-        navigation.reset({
-          index: 0,
-          routes: [{ name: 'AdminDashboard' }],
-        });
-      } catch (error) {
-        console.error('Session restore error:', error?.message || error);
-        await AsyncStorage.multiRemove(['token', 'currentUser']);
-      } finally {
-        if (isActive) {
-          setLoading(false);
-        }
-      }
-    };
-
-    restoreSession();
-
-    return () => {
-      isActive = false;
-    };
-  }, [navigation]);
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -76,13 +30,9 @@ const LoginScreen = () => {
 
     try {
       const response = await authAPI.staffLogin({ email: email.trim(), password });
-      const { user, token } = response.data;
-
-      // Save token and user data
-      await AsyncStorage.multiSet([
-        ['token', token],
-        ['currentUser', JSON.stringify(user)],
-      ]);
+      if (!response.data?.user) {
+        throw new Error('Login failed: No user data returned.');
+      }
 
       // Navigate to dashboard
       navigation.reset({

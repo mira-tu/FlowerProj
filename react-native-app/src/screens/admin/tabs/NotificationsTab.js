@@ -13,7 +13,12 @@ import { supabase } from '../../../config/supabase';
 import RiderAssignmentPreview from '../components/RiderAssignmentPreview';
 import styles from '../../AdminDashboard.styles';
 import { formatTimestamp, getPaymentStatusDisplay, getStatusColor, getStatusLabel } from '../adminHelpers';
-import { groupDeliveryDestinations, parseMultiDeliveryNotes } from '../../../utils/deliveryDestinations';
+import {
+  canCurrentUserCompleteRiderStop,
+  groupDeliveryDestinations,
+  normalizeDeliveryDestinations,
+  parseMultiDeliveryNotes,
+} from '../../../utils/deliveryDestinations';
 import {
   aggregateAssignedOrderItems,
   buildAssignedShippingAddress,
@@ -154,6 +159,43 @@ const pickFirstValue = (...values) => {
 const compactRows = (rows) =>
   rows.filter((row) => row.value !== null && row.value !== undefined && row.value !== '');
 
+const getCompatibilityAssignedStops = (destinations = [], recordAssignedRiderId = null, currentUserId = null) => {
+  const normalizedStops = normalizeDeliveryDestinations(destinations);
+  const normalizedCurrentUserId = String(currentUserId || '').trim();
+  const normalizedRecordAssignedRiderId = String(recordAssignedRiderId || '').trim();
+
+  if (!normalizedStops.length || !normalizedCurrentUserId) {
+    return [];
+  }
+
+  const explicitlyAssignedStops = getAssignedDestinationsForRider(normalizedStops, normalizedCurrentUserId);
+  if (explicitlyAssignedStops.length) {
+    return explicitlyAssignedStops;
+  }
+
+  if (normalizedStops.length === 1 && normalizedRecordAssignedRiderId === normalizedCurrentUserId) {
+    return normalizedStops;
+  }
+
+  return [];
+};
+
+const getPreferredProofStopKey = (destinations = [], currentUserId = null, recordStatus = '', recordAssignedRiderId = null) => {
+  const normalizedStops = normalizeDeliveryDestinations(destinations);
+  if (!normalizedStops.length) {
+    return null;
+  }
+
+  const fallbackAssignedRiderId = normalizedStops.length <= 1
+    ? (String(recordAssignedRiderId || '').trim() || null)
+    : null;
+  const proofReadyStop = normalizedStops.find((stop) => (
+    canCurrentUserCompleteRiderStop(stop, currentUserId, recordStatus, fallbackAssignedRiderId)
+  ));
+
+  return proofReadyStop?.unit_key || null;
+};
+
 const formatRequestTypeLabel = (requestType) => {
   if (requestType === 'booking') return 'Custom Order';
   if (requestType === 'customized') return 'Customizer Studio';
@@ -163,10 +205,19 @@ const formatRequestTypeLabel = (requestType) => {
 
 const buildOrderPreview = (order, currentUserId = null) => {
   const parsedNotes = parseMultiDeliveryNotes(order.notes);
-  const assignedDestinations = currentUserId
-    ? getAssignedDestinationsForRider(parsedNotes.destinations, currentUserId)
-    : [];
+  const normalizedDestinations = normalizeDeliveryDestinations(parsedNotes.destinations);
+  const assignedDestinations = getCompatibilityAssignedStops(
+    normalizedDestinations,
+    order?.assigned_rider,
+    currentUserId
+  );
   const assignedStops = groupDeliveryDestinations(assignedDestinations);
+  const preferredStopKey = getPreferredProofStopKey(
+    normalizedDestinations,
+    currentUserId,
+    order?.status,
+    order?.assigned_rider
+  );
   const assignedOrderItems = assignedDestinations.length
     ? aggregateAssignedOrderItems(order.order_items || [], assignedDestinations)
     : (order.order_items || []);
@@ -246,17 +297,35 @@ const buildOrderPreview = (order, currentUserId = null) => {
       { label: 'Shipping', value: formatCurrency(order.shipping_fee) },
       { label: 'Total', value: formatCurrency(order.total), emphasis: true },
     ]),
+    canOpenDeliveryProof: Boolean(preferredStopKey),
+    preferredStopKey,
   };
 };
 
 const buildRequestPreview = (request, currentUserId = null) => {
   const parsedRequestData = parseMaybeJson(request.data);
-  const { requestData, assignedDestinations } = currentUserId
+  const { requestData } = currentUserId
     ? filterRequestDataForAssignedRider(parsedRequestData, currentUserId)
     : { requestData: parsedRequestData, assignedDestinations: [] };
+  const normalizedDestinations = normalizeDeliveryDestinations(
+    Array.isArray(parsedRequestData?.multi_delivery_destinations)
+      ? parsedRequestData.multi_delivery_destinations
+      : []
+  );
+  const assignedDestinations = getCompatibilityAssignedStops(
+    normalizedDestinations,
+    request?.assigned_rider,
+    currentUserId
+  );
   const deliveryMethod = requestData.delivery_method || request.delivery_method;
   const requestTypeLabel = formatRequestTypeLabel(request.type);
   const paymentMethod = requestData.payment_method || 'gcash';
+  const preferredStopKey = getPreferredProofStopKey(
+    normalizedDestinations,
+    currentUserId,
+    request?.status,
+    request?.assigned_rider
+  );
   const arrangements = Array.isArray(requestData.arrangementSelections)
     ? requestData.arrangementSelections
         .map((selection) => {
@@ -436,6 +505,8 @@ const buildRequestPreview = (request, currentUserId = null) => {
         ? { label: 'Total', value: formatCurrency(request.final_price), emphasis: true }
         : null,
     ].filter(Boolean)),
+    canOpenDeliveryProof: Boolean(preferredStopKey),
+    preferredStopKey,
   };
 };
 
@@ -580,6 +651,11 @@ const NotificationsTab = ({ currentUser, setActiveTab, setFocusedEntityTarget, r
         await markAsRead(notification.id);
       }
 
+      console.log('[admin-perf] notification open start', {
+        notificationId: notification.id,
+        type: notification.type || null,
+      });
+
       const target = resolveNotificationTarget(notification.link);
       const isExpandableAssignment =
         notification.type === 'rider_assignment' &&
@@ -597,6 +673,13 @@ const NotificationsTab = ({ currentUser, setActiveTab, setFocusedEntityTarget, r
         if (!isCollapsing && !previewByNotificationId[notification.id]) {
           await loadPreviewForNotification(notification.id, target);
         }
+
+        console.log('[admin-perf] notification open success', {
+          notificationId: notification.id,
+          targetTab: target.tab || null,
+          entityType: target.entityType || null,
+          previewMode: 'assignment',
+        });
         return;
       }
 
@@ -608,6 +691,13 @@ const NotificationsTab = ({ currentUser, setActiveTab, setFocusedEntityTarget, r
           notificationId: notification.id,
         });
         setActiveTab?.(target.tab);
+
+        console.log('[admin-perf] notification open success', {
+          notificationId: notification.id,
+          targetTab: target.tab || null,
+          entityType: target.entityType || null,
+          previewMode: 'refund',
+        });
         return;
       }
 
@@ -617,17 +707,28 @@ const NotificationsTab = ({ currentUser, setActiveTab, setFocusedEntityTarget, r
       } else {
         await loadNotifications({ silent: true });
       }
+
+      console.log('[admin-perf] notification open success', {
+        notificationId: notification.id,
+        targetTab: target.tab || null,
+        entityType: target.entityType || null,
+      });
     } catch (error) {
       console.error('Error opening notification:', error);
       Alert.alert('Error', 'Failed to open notification.');
     }
   };
 
-  const handleOpenDeliveryProof = async (notification) => {
+  const handleOpenDeliveryProof = async (notification, preview = null) => {
     try {
       if (!notification?.id) {
         return;
       }
+
+      console.log('[admin-perf] notification proof open start', {
+        notificationId: notification.id,
+        previewStopKey: preview?.preferredStopKey || null,
+      });
 
       if (!notification.is_read) {
         await markAsRead(notification.id);
@@ -643,9 +744,17 @@ const NotificationsTab = ({ currentUser, setActiveTab, setFocusedEntityTarget, r
         entityId: target.entityId,
         source: 'rider_assignment',
         openDeliveryProof: true,
+        preferredStopKey: preview?.preferredStopKey || null,
         notificationId: notification.id,
       });
       setActiveTab?.(target.tab);
+
+      console.log('[admin-perf] notification proof open success', {
+        notificationId: notification.id,
+        targetTab: target.tab || null,
+        entityType: target.entityType || null,
+        entityId: target.entityId || null,
+      });
     } catch (error) {
       console.error('Error opening delivery proof shortcut:', error);
       Alert.alert('Error', 'Failed to open the delivery proof screen.');
@@ -711,7 +820,11 @@ const NotificationsTab = ({ currentUser, setActiveTab, setFocusedEntityTarget, r
     return (
       <RiderAssignmentPreview
         preview={previewByNotificationId[notificationId]}
-        onOpenDeliveryProof={() => handleOpenDeliveryProof(notification)}
+        onOpenDeliveryProof={
+          previewByNotificationId[notificationId]?.canOpenDeliveryProof
+            ? () => handleOpenDeliveryProof(notification, previewByNotificationId[notificationId])
+            : null
+        }
       />
     );
   };

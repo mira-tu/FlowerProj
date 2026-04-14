@@ -2,13 +2,8 @@ import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import styles from '../../AdminDashboard.styles';
-import { getAdminRoleLabel } from '../adminHelpers';
 
-const AdminHeader = ({ currentUser, onMenuPress, onNotificationsPress, unreadNotificationCount = 0 }) => {
-  const roleLabel = getAdminRoleLabel(currentUser?.role);
-  const workspaceLabel = `${roleLabel} Workspace`;
-  const displayName = currentUser?.name || currentUser?.email || 'Signed in';
-  const isEmployee = currentUser?.role === 'employee';
+const AdminHeader = ({ onMenuPress, onNotificationsPress, unreadNotificationCount = 0 }) => {
 
   return (
     <View style={styles.header}>
@@ -18,24 +13,6 @@ const AdminHeader = ({ currentUser, onMenuPress, onNotificationsPress, unreadNot
 
       <View style={styles.headerCenter}>
         <Text style={styles.headerTitle}>Joccery's Flower Shop</Text>
-        <Text style={styles.headerSubtitle} numberOfLines={1}>
-          {`${displayName} - ${workspaceLabel}`}
-        </Text>
-        <View
-          style={[
-            styles.headerRoleBadge,
-            isEmployee ? styles.headerRoleBadgeEmployee : styles.headerRoleBadgeAdmin,
-          ]}
-        >
-          <Text
-            style={[
-              styles.headerRoleBadgeText,
-              isEmployee ? styles.headerRoleBadgeTextEmployee : styles.headerRoleBadgeTextAdmin,
-            ]}
-          >
-            {roleLabel}
-          </Text>
-        </View>
       </View>
 
       <View style={styles.headerActions}>

@@ -2,12 +2,11 @@ import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import styles from '../../AdminDashboard.styles';
-import { getAdminRoleLabel, getInitials } from '../adminHelpers';
 
 const MAIN_MENU_ITEMS = [
   { tab: 'catalogue', icon: 'flower-outline', label: 'Catalogue', color: '#ec4899' },
   { tab: 'orders', icon: 'cart-outline', label: 'Orders' },
-  { tab: 'requests', icon: 'calendar-outline', label: 'Requests & Bookings' },
+  { tab: 'requests', icon: 'calendar-outline', label: 'Requests' },
   { tab: 'stock', icon: 'cube-outline', label: 'Stock' },
   { tab: 'fees', icon: 'cash-outline', label: 'Delivery Fees' },
   { tab: 'messaging', icon: 'chatbubbles-outline', label: 'Messaging' },
@@ -30,10 +29,8 @@ const MenuItem = ({ icon, label, onPress, color = '#333', textStyle }) => (
 );
 
 const AdminMenuModal = ({ visible, onClose, setActiveTab, currentUser, onLogoutPress }) => {
-  const roleLabel = getAdminRoleLabel(currentUser?.role);
-  const displayName = currentUser?.name || currentUser?.email || 'Staff User';
-  const isEmployee = currentUser?.role === 'employee';
   const isAdmin = currentUser?.role === 'admin';
+  const displayName = currentUser?.name || 'Staff User';
 
   const selectTab = (tab) => {
     setActiveTab(tab);
@@ -62,34 +59,10 @@ const AdminMenuModal = ({ visible, onClose, setActiveTab, currentUser, onLogoutP
 
           <ScrollView>
             <View style={styles.menuProfileCard}>
-              <View style={styles.menuProfileAvatar}>
-                <Text style={styles.menuProfileAvatarText}>{getInitials(displayName)}</Text>
-              </View>
-
               <View style={styles.menuProfileInfo}>
                 <Text style={styles.menuProfileName} numberOfLines={1}>
                   {displayName}
                 </Text>
-                {currentUser?.email ? (
-                  <Text style={styles.menuProfileEmail} numberOfLines={1}>
-                    {currentUser.email}
-                  </Text>
-                ) : null}
-                <View
-                  style={[
-                    styles.menuProfileRoleBadge,
-                    isEmployee ? styles.menuProfileRoleBadgeEmployee : styles.menuProfileRoleBadgeAdmin,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.menuProfileRoleBadgeText,
-                      isEmployee ? styles.menuProfileRoleBadgeTextEmployee : styles.menuProfileRoleBadgeTextAdmin,
-                    ]}
-                  >
-                    {`${roleLabel} Account`}
-                  </Text>
-                </View>
               </View>
             </View>
 

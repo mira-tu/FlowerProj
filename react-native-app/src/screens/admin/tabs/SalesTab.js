@@ -428,7 +428,7 @@ const SalesTab = () => {
     : Math.max(420, Math.min(height - 12, 760));
   const salesSheetMinHeight = isWeb
     ? 0
-    : Math.min(salesSheetMaxHeight, Math.max(420, Math.round(height * 0.72)));
+    : Math.min(salesSheetMaxHeight, Math.max(400, Math.round(height * 0.68)));
   const currentSales = salesData.cashSales;
   const currentCalendarMonthKey = formatMonthKey(calendarMonthDate);
   const currentMonthKey = formatMonthKey(new Date());
@@ -1391,10 +1391,10 @@ const SalesTab = () => {
         style={[
           styles.modalContainer,
           !isWeb && {
-            justifyContent: 'flex-end',
+            justifyContent: 'center',
             alignItems: 'stretch',
             paddingHorizontal: isCompactSalesSheet ? 6 : 10,
-            paddingVertical: 6,
+            paddingVertical: isCompactSalesSheet ? 10 : 16,
           },
         ]}
       >

@@ -1251,12 +1251,13 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   menuProfileCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 4,
     backgroundColor: '#fdf2f8',
     borderRadius: 16,
-    padding: 16,
-    marginBottom: 6,
+    padding: 14,
+    marginBottom: 12,
   },
   menuProfileAvatar: {
     width: 48,
@@ -1675,12 +1676,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 15,
-    marginBottom: 10,
+    marginBottom: 15,
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
+  },
+  requestSummaryCard: {
+    minHeight: 390,
   },
   requestHeader: {
     flexDirection: 'row',
@@ -1932,10 +1936,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   acceptButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#22C55E',
   },
   rejectButton: {
-    backgroundColor: '#F44336',
+    backgroundColor: '#EF4444',
   },
   buttonText: {
     color: '#fff',
@@ -2028,13 +2032,14 @@ const styles = StyleSheet.create({
     maxWidth: 560,
     paddingHorizontal: 18,
     paddingTop: 18,
-    paddingBottom: 16,
+    paddingBottom: 18,
     overflow: 'hidden',
   },
   assignRiderModalBody: {
     flex: 1,
     minHeight: 0,
     paddingTop: 12,
+    paddingBottom: 6,
   },
   stopAssignmentList: {
     borderWidth: 1,
@@ -2049,6 +2054,7 @@ const styles = StyleSheet.create({
   },
   stopAssignmentListContent: {
     paddingVertical: 4,
+    paddingBottom: 12,
   },
   stopAssignmentRow: {
     flexDirection: 'row',
@@ -2126,6 +2132,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: 12,
     paddingVertical: 4,
+    paddingBottom: 14,
   },
   assignRiderEmptyText: {
     textAlign: 'center',
@@ -2134,10 +2141,14 @@ const styles = StyleSheet.create({
     paddingVertical: 24,
   },
   assignRiderFooter: {
-    marginTop: 10,
-    paddingTop: 12,
+    marginTop: 14,
+    paddingTop: 14,
+    paddingBottom: 4,
     borderTopWidth: 1,
     borderTopColor: '#f3f4f6',
+    backgroundColor: '#fff',
+    zIndex: 3,
+    elevation: 3,
   },
   stopAssignmentSummaryHeader: {
     flexDirection: 'row',

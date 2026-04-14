@@ -106,11 +106,16 @@ const getFunctionErrorMessage = async (error, fallbackMessage) => {
 };
 
 const invokeAdminWorkflow = async (action, payload = {}) => {
+    const startedAt = Date.now();
     const accessToken = await getWorkflowAccessToken();
 
     if (!accessToken) {
         throw new Error('Your admin session expired. Please sign in again to continue.');
     }
+
+    console.log('[admin-perf] workflow start', {
+        action,
+    });
 
     const { data, error } = await supabase.functions.invoke(ADMIN_WORKFLOW_FUNCTION, {
         body: {
@@ -125,6 +130,11 @@ const invokeAdminWorkflow = async (action, payload = {}) => {
     });
 
     if (error) {
+        console.log('[admin-perf] workflow failed', {
+            action,
+            durationMs: Date.now() - startedAt,
+            message: error?.message || String(error),
+        });
         const message = await getFunctionErrorMessage(error, `Failed to ${action.replace(/_/g, ' ')}.`);
         const enrichedError = new Error(message);
         enrichedError.name = error?.name || 'AdminWorkflowError';
@@ -133,15 +143,40 @@ const invokeAdminWorkflow = async (action, payload = {}) => {
     }
 
     if (data?.error) {
+        console.log('[admin-perf] workflow returned error payload', {
+            action,
+            durationMs: Date.now() - startedAt,
+            message: data.error,
+        });
         throw new Error(data.error);
     }
 
+    console.log('[admin-perf] workflow success', {
+        action,
+        durationMs: Date.now() - startedAt,
+    });
     return data;
 };
 
 const shouldFallbackToDirectWorkflow = (error) => {
     const message = String(error?.message || '').toLowerCase();
     const name = String(error?.name || error?.cause?.name || '').toLowerCase();
+    const status = Number(error?.status || error?.cause?.status || error?.cause?.context?.status || 0);
+
+    if (status === 401 || status === 403 || status === 404 || status === 500 || status === 502 || status === 503 || status === 504) {
+        return true;
+    }
+
+    if ([
+        'not authorized',
+        'permission denied',
+        'entity not authorized',
+        'function not found',
+        'function not deployed',
+        'latest manage-admin-workflows function is not deployed yet',
+    ].some((token) => message.includes(token))) {
+        return true;
+    }
 
     return [
         'functionsfetcherror',
@@ -164,7 +199,7 @@ const isGenericAdminWorkflowTransportError = (error) => {
     const causeMessage = String(error?.cause?.message || '').trim().toLowerCase();
     const status = Number(error?.status || error?.cause?.status || error?.cause?.context?.status || 0);
 
-    if (status === 404 || status === 500 || status === 502 || status === 503 || status === 504) {
+    if (status === 404 || status === 502 || status === 503 || status === 504) {
         return true;
     }
 
@@ -180,8 +215,6 @@ const isGenericAdminWorkflowTransportError = (error) => {
         || value.includes('network request failed')
         || value.includes('network error')
         || value.includes('load failed')
-        || value.includes('unsupported workflow action')
-        || value.includes('unknown workflow action')
         || value.includes('function not found')
     ));
 };
@@ -352,6 +385,11 @@ const updateOrderRecordAndReload = async (id, updatePayload, verifier) => {
         .maybeSingle();
 
     if (error && !isEmptySingleResultError(error)) {
+        console.error('[admin-perf] order db update failed', {
+            orderId: id,
+            message: error.message,
+            code: error.code,
+        });
         throw error;
     }
 
@@ -499,11 +537,28 @@ const getDeliveryProofMimeType = (file = {}) => {
     return `image/${extension === 'jpg' ? 'jpeg' : extension}`;
 };
 
-const readDeliveryProofBase64FromUri = async (file = {}) => {
+const getNormalizedImageFileName = (file = {}, prefix = 'image') => {
+    const extension = getImageFileExtension(file);
+    const rawName = String(file?.fileName || file?.name || file?.uri || '').trim();
+    const baseName = rawName.split(/[\\/]/).pop()?.split('?')[0] || '';
+    const sanitizedName = baseName
+        .replace(/[^a-z0-9._-]+/gi, '-')
+        .replace(/^-+|-+$/g, '');
+
+    if (!sanitizedName) {
+        return `${prefix}-${Date.now()}.${extension}`;
+    }
+
+    return /\.[a-z0-9]+$/i.test(sanitizedName)
+        ? sanitizedName
+        : `${sanitizedName}.${extension}`;
+};
+
+const readImageBase64FromUri = async (file = {}, { label = 'image', tempPrefix = 'image' } = {}) => {
     const sourceUri = String(file?.uri || '').trim();
 
     if (!sourceUri) {
-        throw new Error('Proof photo is missing its file location.');
+        throw new Error(`${label} is missing its file location.`);
     }
 
     const dataUrlMatch = sourceUri.match(/^data:.*?;base64,(.+)$/i);
@@ -518,10 +573,10 @@ const readDeliveryProofBase64FromUri = async (file = {}) => {
         if (sourceUri.startsWith('content://')) {
             const cacheBase = FileSystem.cacheDirectory || FileSystem.documentDirectory;
             if (!cacheBase) {
-                throw new Error('No readable cache directory is available for the proof photo.');
+                throw new Error(`No readable cache directory is available for the ${label}.`);
             }
 
-            tempUri = `${cacheBase}delivery-proof-${Date.now()}.${getImageFileExtension(file)}`;
+            tempUri = `${cacheBase}${tempPrefix}-${Date.now()}.${getImageFileExtension(file)}`;
             await FileSystem.copyAsync({ from: sourceUri, to: tempUri });
             workingUri = tempUri;
         }
@@ -531,38 +586,49 @@ const readDeliveryProofBase64FromUri = async (file = {}) => {
         });
 
         if (!String(base64 || '').trim()) {
-            throw new Error('The selected proof photo could not be read.');
+            throw new Error(`The selected ${label} could not be read.`);
         }
 
         return String(base64).trim();
     } catch (error) {
-        console.error('Error reading delivery proof photo:', error);
-        throw new Error('Could not read the selected proof photo. Please choose it again.');
+        console.error(`Error reading ${label}:`, error);
+        throw new Error(`Could not read the selected ${label}. Please choose it again.`);
     } finally {
         if (tempUri) {
             try {
                 await FileSystem.deleteAsync(tempUri, { idempotent: true });
             } catch (cleanupError) {
-                console.warn('Could not remove temporary proof photo file:', cleanupError?.message || cleanupError);
+                console.warn(`Could not remove temporary ${label} file:`, cleanupError?.message || cleanupError);
             }
         }
     }
 };
 
-const normalizeDeliveryProofFile = async (file = {}) => {
+const normalizeImageAsset = async (file = {}, { label = 'image', defaultNamePrefix = 'image' } = {}) => {
     if (!file || typeof file !== 'object') {
-        throw new Error('Proof photo is required.');
+        throw new Error(`${label} is required.`);
     }
 
     const existingBase64 = String(file?.base64 || '').trim();
     const normalizedUri = String(file?.uri || '').trim();
-    const fileName = getDeliveryProofFileName(file);
+    const fileName = getNormalizedImageFileName(file, defaultNamePrefix);
     const mimeType = getDeliveryProofMimeType(file);
-    const base64 = existingBase64 || await readDeliveryProofBase64FromUri(file);
+    const base64 = existingBase64 || await readImageBase64FromUri(file, {
+        label,
+        tempPrefix: defaultNamePrefix,
+    });
 
     if (!base64) {
-        throw new Error('Proof photo is required.');
+        throw new Error(`${label} is required.`);
     }
+
+    console.log('[upload] normalized asset', {
+        label,
+        uriScheme: normalizedUri.split(':')[0] || 'unknown',
+        hasBase64: Boolean(base64),
+        fileName,
+        mimeType,
+    });
 
     return {
         ...file,
@@ -575,30 +641,83 @@ const normalizeDeliveryProofFile = async (file = {}) => {
     };
 };
 
+const normalizeDeliveryProofFile = async (file = {}) => {
+    const normalizedFile = await normalizeImageAsset(file, {
+        label: 'proof photo',
+        defaultNamePrefix: 'delivery-proof',
+    });
+
+    return {
+        ...normalizedFile,
+        fileName: getDeliveryProofFileName(normalizedFile),
+        name: String(normalizedFile?.name || normalizedFile?.fileName).trim() || getDeliveryProofFileName(normalizedFile),
+    };
+};
+
+const uploadNormalizedImageToBucket = async (
+    file,
+    {
+        bucket,
+        folder,
+        fileNamePrefix,
+        upsert = false,
+        label = 'image',
+    }
+) => {
+    const normalizedFile = await normalizeImageAsset(file, {
+        label,
+        defaultNamePrefix: fileNamePrefix,
+    });
+    const extension = getImageFileExtension(normalizedFile);
+    const safeFolder = String(folder || '').trim().replace(/^\/+|\/+$/g, '');
+    const fileName = `${safeFolder ? `${safeFolder}/` : ''}${fileNamePrefix}-${Date.now()}.${extension}`;
+    const contentType = normalizedFile.mimeType || `image/${extension === 'jpg' ? 'jpeg' : extension}`;
+    const arrayBuffer = decode(normalizedFile.base64);
+
+    console.log('[upload] sending asset', {
+        bucket,
+        label,
+        fileName,
+        contentType,
+        bytes: arrayBuffer?.byteLength || 0,
+        upsert,
+    });
+
+    const { data: uploadData, error: uploadError } = await supabase.storage
+        .from(bucket)
+        .upload(fileName, arrayBuffer, {
+            cacheControl: '3600',
+            upsert,
+            contentType,
+        });
+
+    if (uploadError) {
+        console.error('[upload] storage error', {
+            bucket,
+            label,
+            message: uploadError.message,
+            name: uploadError.name,
+        });
+        throw uploadError;
+    }
+
+    const { data: publicUrlData } = supabase.storage.from(bucket).getPublicUrl(uploadData.path);
+    return publicUrlData?.publicUrl || null;
+};
+
 const uploadDeliveryProofImage = async (file, { entityType, entityId, unitKey }) => {
     const normalizedProofFile = await normalizeDeliveryProofFile(file);
 
     const safeEntityType = String(entityType || 'delivery').trim().toLowerCase();
     const safeUnitKey = String(unitKey || 'stop').trim().replace(/[^a-z0-9_-]+/gi, '-');
     const extension = getImageFileExtension(normalizedProofFile);
-    const contentType = normalizedProofFile.mimeType || `image/${extension === 'jpg' ? 'jpeg' : extension}`;
-    const fileName = `delivery-proofs/${safeEntityType}-${entityId || 'record'}-${safeUnitKey}-${Date.now()}.${extension}`;
-    const arrayBuffer = decode(normalizedProofFile.base64);
-
-    const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('receipts')
-        .upload(fileName, arrayBuffer, {
-            cacheControl: '3600',
-            upsert: false,
-            contentType,
-        });
-
-    if (uploadError) {
-        throw uploadError;
-    }
-
-    const { data: publicUrlData } = supabase.storage.from('receipts').getPublicUrl(uploadData.path);
-    return publicUrlData?.publicUrl || null;
+    return uploadNormalizedImageToBucket(normalizedProofFile, {
+        bucket: 'receipts',
+        folder: 'delivery-proofs',
+        fileNamePrefix: `${safeEntityType}-${entityId || 'record'}-${safeUnitKey}.${extension}`.replace(/\.[a-z0-9]+$/i, ''),
+        upsert: false,
+        label: 'proof photo',
+    });
 };
 
 const normalizeDeliveryProofNote = (value) => {
@@ -1050,10 +1169,19 @@ const completeOrderDeliveryStopDirect = async (orderId, unitKey, options = {}) =
         : 'staff';
     const confirmedAt = new Date().toISOString();
     const proofNote = normalizeDeliveryProofNote(options?.proofNote);
+    console.log('[admin-perf] order delivery stop proof upload start', {
+        orderId,
+        unitKey,
+    });
     const proofImageUrl = await uploadDeliveryProofImage(options.proofFile, {
         entityType: 'order',
         entityId: orderId,
         unitKey: normalizedUnitKey,
+    });
+    console.log('[admin-perf] order delivery stop proof upload success', {
+        orderId,
+        unitKey,
+        hasProofImageUrl: Boolean(proofImageUrl),
     });
     const updatedDestinations = confirmDeliveryStop(normalizedStops, normalizedUnitKey, {
         actorType,
@@ -1105,6 +1233,11 @@ const completeOrderDeliveryStopDirect = async (orderId, unitKey, options = {}) =
             return true;
         }
     );
+    console.log('[admin-perf] order delivery stop db update success', {
+        orderId,
+        unitKey,
+        allConfirmed,
+    });
 
     if (currentOrder?.user_id) {
         try {
@@ -2974,10 +3107,19 @@ const completeRequestDeliveryStopDirect = async (requestId, unitKey, options = {
         : 'staff';
     const confirmedAt = new Date().toISOString();
     const proofNote = normalizeDeliveryProofNote(options?.proofNote);
+    console.log('[admin-perf] request delivery stop proof upload start', {
+        requestId,
+        unitKey,
+    });
     const proofImageUrl = await uploadDeliveryProofImage(options.proofFile, {
         entityType: String(currentRequest?.type || 'request').trim().toLowerCase() || 'request',
         entityId: requestId,
         unitKey: normalizedUnitKey,
+    });
+    console.log('[admin-perf] request delivery stop proof upload success', {
+        requestId,
+        unitKey,
+        hasProofImageUrl: Boolean(proofImageUrl),
     });
     const updatedDestinations = confirmDeliveryStop(normalizedStops, normalizedUnitKey, {
         actorType,
@@ -3025,8 +3167,19 @@ const completeRequestDeliveryStopDirect = async (requestId, unitKey, options = {
         .single();
 
     if (error) {
+        console.error('[admin-perf] request delivery stop db update failed', {
+            requestId,
+            unitKey,
+            message: error.message,
+            code: error.code,
+        });
         throw error;
     }
+    console.log('[admin-perf] request delivery stop db update success', {
+        requestId,
+        unitKey,
+        allConfirmed,
+    });
 
     const persistedData = parseJsonObject(data?.data);
     const persistedStops = reconcileDeliveryDestinationsWithItems(
@@ -3483,31 +3636,14 @@ export const productAPI = {
         let imageUrl = null;
         const imageFile = formData.image;
 
-        if (imageFile && imageFile.base64) {
+        if (imageFile && (imageFile.base64 || imageFile.uri)) {
             try {
-                const fileName = imageFile.fileName || `product-${Date.now()}.jpg`;
-                const contentType = imageFile.mimeType || 'image/jpeg';
-                const arrayBuffer = decode(imageFile.base64);
-
-                const { data: uploadData, error: uploadError } = await supabase.storage
-                    .from('product-images')
-                    .upload(fileName, arrayBuffer, {
-                        cacheControl: '3600',
-                        upsert: false,
-                        contentType,
-                    });
-
-                if (uploadError) {
-                    console.error('Supabase upload error:', uploadError);
-                    throw uploadError;
-                }
-
-                const { data: publicUrlData } = supabase.storage
-                    .from('product-images')
-                    .getPublicUrl(uploadData.path);
-
-                imageUrl = publicUrlData.publicUrl;
-
+                imageUrl = await uploadNormalizedImageToBucket(imageFile, {
+                    bucket: 'product-images',
+                    fileNamePrefix: 'product',
+                    upsert: false,
+                    label: 'product image',
+                });
             } catch (error) {
                 console.error('Error processing image:', error);
                 throw new Error('Failed to upload image: ' + error.message);
@@ -3563,26 +3699,14 @@ export const productAPI = {
         let imageUrl = formData.image_url_hidden;
         const imageFile = formData.image;
 
-        if (imageFile && imageFile.base64) {
+        if (imageFile && (imageFile.base64 || imageFile.uri) && !String(imageFile.uri || '').startsWith('http')) {
             try {
-                const fileName = imageFile.fileName || `${Date.now()}.jpg`;
-                const contentType = imageFile.mimeType || 'image/jpeg';
-                const arrayBuffer = decode(imageFile.base64);
-
-                const { data: uploadData, error: uploadError } = await supabase.storage
-                    .from('product-images')
-                    .upload(fileName, arrayBuffer, {
-                        cacheControl: '3600',
-                        upsert: true,
-                        contentType: contentType,
-                    });
-
-                if (uploadError) {
-                    console.error('Error uploading image:', uploadError);
-                    throw uploadError;
-                }
-                const { data: publicUrlData } = supabase.storage.from('product-images').getPublicUrl(uploadData.path);
-                imageUrl = publicUrlData.publicUrl; // Set new image URL
+                imageUrl = await uploadNormalizedImageToBucket(imageFile, {
+                    bucket: 'product-images',
+                    fileNamePrefix: 'product',
+                    upsert: true,
+                    label: 'product image',
+                });
             } catch (error) {
                 console.error('Error processing image for update:', error);
                 throw new Error('Failed to upload image for update: ' + error.message);
@@ -3755,37 +3879,7 @@ const STAFF_ROLES = new Set(['admin', 'employee']);
 
 const isStaffRole = (role) => STAFF_ROLES.has(role);
 
-const buildFallbackStaffProfile = (user) => {
-    const fallbackRole = user?.user_metadata?.role;
-
-    if (!isStaffRole(fallbackRole)) {
-        return null;
-    }
-
-    return {
-        role: fallbackRole,
-        name: user.user_metadata?.name || user.email,
-        phone: user.user_metadata?.phone || null,
-    };
-};
-
-const restoreMissingStaffProfile = async (user, profile) => {
-    const { error: upsertError } = await supabase
-        .from('users')
-        .upsert({
-            id: user.id,
-            name: profile.name,
-            email: user.email,
-            phone: profile.phone,
-            role: profile.role,
-        }, { onConflict: 'id' });
-
-    if (upsertError) {
-        console.warn('Non-blocking: failed to restore missing staff profile row:', upsertError);
-    }
-};
-
-const getStaffProfile = async (user, { restoreMissingProfile = false } = {}) => {
+const getStaffProfile = async (user) => {
     const { data: profile, error: profileError } = await supabase
         .from('users')
         .select('role, name, phone')
@@ -3799,18 +3893,11 @@ const getStaffProfile = async (user, { restoreMissingProfile = false } = {}) => 
     if (profile) {
         return profile;
     }
-
-    const fallbackProfile = buildFallbackStaffProfile(user);
-
-    if (fallbackProfile && restoreMissingProfile) {
-        await restoreMissingStaffProfile(user, fallbackProfile);
-    }
-
-    return fallbackProfile;
+    return null;
 };
 
 const buildStaffSessionPayload = async (session) => {
-    const profile = await getStaffProfile(session.user, { restoreMissingProfile: true });
+    const profile = await getStaffProfile(session.user);
 
     if (!profile) {
         await supabase.auth.signOut();
@@ -3823,7 +3910,6 @@ const buildStaffSessionPayload = async (session) => {
     }
 
     return {
-        token: session.access_token,
         user: {
             ...session.user,
             ...profile,
@@ -3884,7 +3970,7 @@ export const authAPI = {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return { data: null };
 
-        const profile = await getStaffProfile(user, { restoreMissingProfile: true });
+        const profile = await getStaffProfile(user);
 
         if (!profile || !isStaffRole(profile.role)) {
             await supabase.auth.signOut();
@@ -3894,32 +3980,6 @@ export const authAPI = {
         return { data: { ...user, ...profile } };
     },
 
-    restoreStaffSession: async () => {
-        const { data: sessionData, error } = await supabase.auth.getSession();
-
-        if (error) {
-            throw error;
-        }
-
-        let session = sessionData.session;
-
-        if (!session?.user) {
-            const { data: refreshedData, error: refreshError } = await supabase.auth.refreshSession();
-            if (refreshError) {
-                console.warn('Unable to refresh staff session:', refreshError.message);
-            }
-
-            session = refreshedData?.session || null;
-        }
-
-        if (!session?.user) {
-            return { data: null };
-        }
-
-        return {
-            data: await buildStaffSessionPayload(session),
-        };
-    },
 };
 
 // Admin API - Supabase-backed admin operations
@@ -4194,6 +4254,13 @@ export const adminAPI = {
 
     completeOrderDeliveryStop: async (orderId, unitKey, options = {}) => {
         const normalizedProofFile = await normalizeDeliveryProofFile(options?.proofFile || null);
+        const startedAt = Date.now();
+
+        console.log('[admin-perf] order delivery stop completion start', {
+            orderId,
+            unitKey,
+            hasProof: Boolean(normalizedProofFile?.base64 || normalizedProofFile?.uri),
+        });
 
         try {
             const data = await invokeAdminWorkflow('complete_order_delivery_stop', {
@@ -4203,22 +4270,49 @@ export const adminAPI = {
                 proofNote: options?.proofNote || '',
             });
 
+            console.log('[admin-perf] order delivery stop completion success', {
+                orderId,
+                unitKey,
+                path: 'edge',
+                durationMs: Date.now() - startedAt,
+            });
             return { data };
         } catch (error) {
             if (!shouldFallbackToDirectWorkflow(error)) {
+                console.log('[admin-perf] order delivery stop completion failed', {
+                    orderId,
+                    unitKey,
+                    path: 'edge',
+                    durationMs: Date.now() - startedAt,
+                    message: error?.message || String(error),
+                });
                 throw new Error(getDeliveryProofCompletionErrorMessage(error));
             }
 
             console.warn('Falling back to direct order delivery stop completion:', error.message);
 
             try {
-                return {
+                const response = {
                     data: await completeOrderDeliveryStopDirect(orderId, unitKey, {
                         ...options,
                         proofFile: normalizedProofFile,
                     }),
                 };
+                console.log('[admin-perf] order delivery stop completion success', {
+                    orderId,
+                    unitKey,
+                    path: 'direct',
+                    durationMs: Date.now() - startedAt,
+                });
+                return response;
             } catch (directError) {
+                console.log('[admin-perf] order delivery stop completion failed', {
+                    orderId,
+                    unitKey,
+                    path: 'direct',
+                    durationMs: Date.now() - startedAt,
+                    message: directError?.message || String(directError),
+                });
                 throw new Error(getDeliveryProofCompletionErrorMessage(directError));
             }
         }
@@ -5463,6 +5557,13 @@ export const adminAPI = {
 
     completeRequestDeliveryStop: async (requestId, unitKey, options = {}) => {
         const normalizedProofFile = await normalizeDeliveryProofFile(options?.proofFile || null);
+        const startedAt = Date.now();
+
+        console.log('[admin-perf] request delivery stop completion start', {
+            requestId,
+            unitKey,
+            hasProof: Boolean(normalizedProofFile?.base64 || normalizedProofFile?.uri),
+        });
 
         try {
             const data = await invokeAdminWorkflow('complete_request_delivery_stop', {
@@ -5472,22 +5573,49 @@ export const adminAPI = {
                 proofNote: options?.proofNote || '',
             });
 
+            console.log('[admin-perf] request delivery stop completion success', {
+                requestId,
+                unitKey,
+                path: 'edge',
+                durationMs: Date.now() - startedAt,
+            });
             return { data };
         } catch (error) {
             if (!shouldFallbackToDirectWorkflow(error)) {
+                console.log('[admin-perf] request delivery stop completion failed', {
+                    requestId,
+                    unitKey,
+                    path: 'edge',
+                    durationMs: Date.now() - startedAt,
+                    message: error?.message || String(error),
+                });
                 throw new Error(getDeliveryProofCompletionErrorMessage(error));
             }
 
             console.warn('Falling back to direct request delivery stop completion:', error.message);
 
             try {
-                return {
+                const response = {
                     data: await completeRequestDeliveryStopDirect(requestId, unitKey, {
                         ...options,
                         proofFile: normalizedProofFile,
                     }),
                 };
+                console.log('[admin-perf] request delivery stop completion success', {
+                    requestId,
+                    unitKey,
+                    path: 'direct',
+                    durationMs: Date.now() - startedAt,
+                });
+                return response;
             } catch (directError) {
+                console.log('[admin-perf] request delivery stop completion failed', {
+                    requestId,
+                    unitKey,
+                    path: 'direct',
+                    durationMs: Date.now() - startedAt,
+                    message: directError?.message || String(directError),
+                });
                 throw new Error(getDeliveryProofCompletionErrorMessage(directError));
             }
         }
@@ -5557,30 +5685,14 @@ export const adminAPI = {
         let imageUrl = null;
         const imageFile = formData.image;
 
-        if (imageFile && imageFile.base64) {
+        if (imageFile && (imageFile.base64 || imageFile.uri)) {
             try {
-                const fileName = imageFile.fileName || `stock-${Date.now()}.jpg`;
-                const contentType = imageFile.mimeType || 'image/jpeg';
-                const arrayBuffer = decode(imageFile.base64);
-
-                const { data: uploadData, error: uploadError } = await supabase.storage
-                    .from('stock-images')
-                    .upload(fileName, arrayBuffer, {
-                        cacheControl: '3600',
-                        upsert: false,
-                        contentType,
-                    });
-
-                if (uploadError) {
-                    throw uploadError;
-                }
-
-                const { data: publicUrlData } = supabase.storage
-                    .from('stock-images')
-                    .getPublicUrl(uploadData.path);
-
-                imageUrl = publicUrlData.publicUrl;
-
+                imageUrl = await uploadNormalizedImageToBucket(imageFile, {
+                    bucket: 'stock-images',
+                    fileNamePrefix: 'stock',
+                    upsert: false,
+                    label: 'stock image',
+                });
             } catch (error) {
                 console.error('Error processing stock image:', error);
                 throw new Error('Failed to upload stock image: ' + error.message);
@@ -5655,29 +5767,14 @@ export const adminAPI = {
         const imageFile = formData.image;
         const oldImageUrl = formData.old_image_url; // Assuming this is passed for old image deletion
 
-        if (imageFile && imageFile.base64) {
+        if (imageFile && (imageFile.base64 || imageFile.uri) && !String(imageFile.uri || '').startsWith('http')) {
             try {
-                const fileName = imageFile.fileName || `stock-${Date.now()}.jpg`;
-                const contentType = imageFile.mimeType || 'image/jpeg';
-                const arrayBuffer = decode(imageFile.base64);
-
-                const { data: uploadData, error: uploadError } = await supabase.storage
-                    .from('stock-images')
-                    .upload(fileName, arrayBuffer, {
-                        cacheControl: '3600',
-                        upsert: true,
-                        contentType,
-                    });
-
-                if (uploadError) {
-                    throw uploadError;
-                }
-
-                const { data: publicUrlData } = supabase.storage
-                    .from('stock-images')
-                    .getPublicUrl(uploadData.path);
-
-                imageUrl = publicUrlData.publicUrl;
+                imageUrl = await uploadNormalizedImageToBucket(imageFile, {
+                    bucket: 'stock-images',
+                    fileNamePrefix: 'stock',
+                    upsert: true,
+                    label: 'stock image',
+                });
 
                 // Delete old image if it exists and a new one was uploaded
                 if (oldImageUrl && oldImageUrl !== imageUrl) {
@@ -5771,24 +5868,13 @@ export const adminAPI = {
 // Upload API - uses Supabase Storage
 export const uploadAPI = {
     image: async (file) => {
-        const res = await fetch(file.uri);
-        const blob = await res.blob();
-        const fileName = file.name || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-        const { data: uploadData, error: uploadError } = await supabase.storage
-            .from('product-images')
-            .upload(fileName, blob, {
-                cacheControl: '3600',
-                upsert: false,
-                contentType: file.type,
-            });
-
-        if (uploadError) {
-            throw uploadError;
-        }
-
-        const { data: publicUrlData } = supabase.storage.from('product-images').getPublicUrl(uploadData.path);
-        return { data: { url: publicUrlData.publicUrl } };
+        const url = await uploadNormalizedImageToBucket(file, {
+            bucket: 'product-images',
+            fileNamePrefix: 'upload',
+            upsert: false,
+            label: 'image',
+        });
+        return { data: { url } };
     }
 };
 

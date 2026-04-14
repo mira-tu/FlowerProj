@@ -6,7 +6,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { authAPI } from '../config/api';
 import { supabase } from '../config/supabase';
@@ -28,7 +27,6 @@ import SalesTab from './admin/tabs/SalesTab';
 import StockTab from './admin/tabs/StockTab';
 import styles from './AdminDashboard.styles';
 
-const SESSION_STORAGE_KEYS = ['currentUser', 'token'];
 const EMPLOYEE_RESTRICTED_TABS = new Set(['sales', 'about', 'contact', 'employees', 'customOrder']);
 
 const AdminDashboard = () => {
@@ -70,39 +68,34 @@ const AdminDashboard = () => {
   useEffect(() => {
     let isActive = true;
 
-    const loadStaffSession = async () => {
+    const syncCurrentUser = async () => {
       setLoading(true);
       try {
-        const restoredSession = await authAPI.restoreStaffSession();
+        const response = await authAPI.getMe();
+        const user = response?.data ?? null;
 
         if (!isActive) {
           return;
         }
 
-        if (!restoredSession?.data?.user) {
-          await AsyncStorage.multiRemove(SESSION_STORAGE_KEYS);
+        if (!user) {
+          setCurrentUser(null);
           goToLogin();
           return;
         }
 
-        const { user, token } = restoredSession.data;
         if (user.role !== 'admin' && user.role !== 'employee') {
           Alert.alert('Access Denied', 'You do not have permission to access this page');
+          setCurrentUser(null);
           goToLogin();
           return;
         }
 
-        await AsyncStorage.multiSet([
-          ['token', token],
-          ['currentUser', JSON.stringify(user)],
-        ]);
-        if (isActive) {
-          setCurrentUser(user);
-        }
+        setCurrentUser(user);
       } catch (error) {
         console.error('Error checking user:', error);
-        await AsyncStorage.multiRemove(SESSION_STORAGE_KEYS);
         if (isActive) {
+          setCurrentUser(null);
           goToLogin();
         }
       } finally {
@@ -112,10 +105,28 @@ const AdminDashboard = () => {
       }
     };
 
-    loadStaffSession();
+    syncCurrentUser();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!isActive) {
+        return;
+      }
+
+      if (!session) {
+        setCurrentUser(null);
+        setLoading(false);
+        goToLogin();
+        return;
+      }
+
+      syncCurrentUser();
+    });
 
     return () => {
       isActive = false;
+      subscription.unsubscribe();
     };
   }, [navigation]);
 
@@ -175,7 +186,6 @@ const AdminDashboard = () => {
   const performLogout = async () => {
     try {
       await authAPI.logout();
-      await AsyncStorage.multiRemove(SESSION_STORAGE_KEYS);
     } catch (e) {
       console.warn('Logout cleanup error:', e);
     }
@@ -225,6 +235,7 @@ const AdminDashboard = () => {
       case 'messaging':
         return (
           <MessagingTab
+            currentUser={currentUser}
             customerToMessage={customerToMessage}
             setCustomerToMessage={setCustomerToMessage}
             setActiveTab={setActiveTab}

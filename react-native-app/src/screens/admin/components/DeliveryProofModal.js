@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import {
   Alert,
@@ -108,9 +108,26 @@ const DeliveryProofModal = ({
   riderLookup = {},
   confirmButtonLabel = 'Complete Stop',
 }) => {
-  const { height: screenHeight } = useWindowDimensions();
+  const { height: screenHeight, width: screenWidth } = useWindowDimensions();
   const modalMaxHeight = Math.max(460, Math.min(screenHeight - 36, 780));
+  const isCompactFooter = screenWidth <= 480;
+  const [expandedProofVisible, setExpandedProofVisible] = useState(false);
   const effectiveFallbackAssignedRiderId = stops.length <= 1 ? fallbackAssignedRiderId : null;
+
+  const closeModal = () => {
+    setExpandedProofVisible(false);
+    onClose?.();
+  };
+
+  const openProofViewer = () => {
+    if (previewUri) {
+      setExpandedProofVisible(true);
+    }
+  };
+
+  const closeProofViewer = () => {
+    setExpandedProofVisible(false);
+  };
 
   const selectedStop = useMemo(
     () => stops.find((stop) => stop.unit_key === selectedStopKey) || stops[0] || null,
@@ -141,6 +158,12 @@ const DeliveryProofModal = ({
   const previewUri = selectedProof?.uri || selectedStop?.proof_image_url || null;
   const hasSelectedProof = Boolean(String(selectedProof?.uri || '').trim() || String(selectedProof?.base64 || '').trim());
 
+  useEffect(() => {
+    if (!visible) {
+      setExpandedProofVisible(false);
+    }
+  }, [visible]);
+
   const pickDeliveryProofImage = async () => {
     if (!canCompleteSelectedStop || isSubmitting) {
       return;
@@ -167,7 +190,14 @@ const DeliveryProofModal = ({
         return;
       }
 
-      onChangeProof?.(getNormalizedSelectedProof(result.assets[0]));
+      const normalizedProof = getNormalizedSelectedProof(result.assets[0]);
+      console.log('[admin-perf] delivery proof picker selected', {
+        uriScheme: normalizedProof.uri?.split(':')[0] || 'unknown',
+        hasBase64: Boolean(normalizedProof.base64),
+        fileName: normalizedProof.fileName,
+        mimeType: normalizedProof.mimeType,
+      });
+      onChangeProof?.(normalizedProof);
     } catch (error) {
       console.error('Error picking delivery proof image:', error);
       Alert.alert(
@@ -183,7 +213,7 @@ const DeliveryProofModal = ({
       transparent
       animationType="fade"
       statusBarTranslucent
-      onRequestClose={onClose}
+      onRequestClose={closeModal}
     >
       <View style={styles.statusModalBackdrop}>
         <View style={[styles.timelineModalContainer, { maxHeight: modalMaxHeight, height: modalMaxHeight }]}>
@@ -321,11 +351,13 @@ const DeliveryProofModal = ({
                   </TouchableOpacity>
 
                   {previewUri ? (
-                    <Image
-                      source={{ uri: previewUri }}
-                      style={{ width: '100%', height: 180, borderRadius: 16, backgroundColor: '#F3F4F6' }}
-                      resizeMode="cover"
-                    />
+                    <TouchableOpacity activeOpacity={0.9} onPress={openProofViewer}>
+                      <Image
+                        source={{ uri: previewUri }}
+                        style={{ width: '100%', height: 200, borderRadius: 16, backgroundColor: '#F3F4F6' }}
+                        resizeMode="contain"
+                      />
+                    </TouchableOpacity>
                   ) : null}
 
                   <TextInput
@@ -357,11 +389,13 @@ const DeliveryProofModal = ({
                   </Text>
 
                   {previewUri ? (
-                    <Image
-                      source={{ uri: previewUri }}
-                      style={{ width: '100%', height: 180, borderRadius: 16, backgroundColor: '#F3F4F6' }}
-                      resizeMode="cover"
-                    />
+                    <TouchableOpacity activeOpacity={0.9} onPress={openProofViewer}>
+                      <Image
+                        source={{ uri: previewUri }}
+                        style={{ width: '100%', height: 200, borderRadius: 16, backgroundColor: '#F3F4F6' }}
+                        resizeMode="contain"
+                      />
+                    </TouchableOpacity>
                   ) : null}
 
                   {selectedStop?.proof_note ? (
@@ -373,22 +407,47 @@ const DeliveryProofModal = ({
               ) : null}
             </ScrollView>
 
-            <View style={{ paddingHorizontal: 20, paddingBottom: 20 }}>
-              <View style={styles.modalButtons}>
+            <View style={{ paddingHorizontal: 20, paddingBottom: 20, paddingTop: 4, borderTopWidth: 1, borderTopColor: '#F3F4F6', backgroundColor: '#fff' }}>
+              <View style={[
+                styles.modalButtons,
+                {
+                  marginTop: 0,
+                  flexDirection: isCompactFooter ? 'column' : 'row',
+                  gap: isCompactFooter ? 12 : 10,
+                },
+              ]}>
                 <TouchableOpacity
-                  style={[styles.modalButton, styles.cancelButton]}
-                  onPress={onClose}
+                  style={[
+                    styles.modalButton,
+                    styles.cancelButton,
+                    {
+                      minHeight: 54,
+                      borderRadius: 16,
+                      flex: isCompactFooter ? 0 : 1,
+                      width: isCompactFooter ? '100%' : undefined,
+                    },
+                  ]}
+                  onPress={closeModal}
                   disabled={isSubmitting}
                 >
-                  <Text style={styles.buttonText}>Close</Text>
+                  <Text style={[styles.buttonText, { fontSize: 15 }]}>Close</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={[styles.modalButton, styles.saveButton]}
+                  style={[
+                    styles.modalButton,
+                    styles.saveButton,
+                    {
+                      minHeight: 54,
+                      borderRadius: 16,
+                      flex: isCompactFooter ? 0 : 1,
+                      width: isCompactFooter ? '100%' : undefined,
+                    },
+                  ]}
                   onPress={onSubmit}
                   disabled={isSubmitting || !canCompleteSelectedStop || !hasSelectedProof}
                 >
-                  <Text style={styles.buttonText}>
+                  <Text style={[styles.buttonText, { fontSize: 15 }]}>
                     {isSubmitting ? 'Saving...' : confirmButtonLabel}
                   </Text>
                 </TouchableOpacity>
@@ -397,6 +456,34 @@ const DeliveryProofModal = ({
           </View>
         </View>
       </View>
+
+      <Modal
+        visible={Boolean(expandedProofVisible && previewUri)}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={closeProofViewer}
+      >
+        <TouchableOpacity
+          style={styles.assignmentImageModalBackdrop}
+          activeOpacity={1}
+          onPress={closeProofViewer}
+        >
+          <View style={styles.assignmentImageModalCard}>
+            {previewUri ? (
+              <Image
+                source={{ uri: previewUri }}
+                style={[styles.assignmentImageModalImage, { height: Math.min(Math.max(screenHeight * 0.68, 280), 520) }]}
+                resizeMode="contain"
+              />
+            ) : null}
+
+            <Text style={styles.assignmentImageModalLabel}>
+              Delivery proof preview
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </Modal>
   );
 };

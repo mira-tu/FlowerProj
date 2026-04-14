@@ -1,6 +1,6 @@
-
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../config/supabase';
 import { useNavigation } from '@react-navigation/native';
 import Toast from 'react-native-toast-message';
@@ -10,6 +10,45 @@ const ResetPasswordScreen = () => {
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [loading, setLoading] = useState(false);
+
+    const returnToLogin = async () => {
+        await supabase.auth.signOut();
+        await AsyncStorage.multiRemove(['token', 'currentUser']);
+        navigation.reset({
+            index: 0,
+            routes: [{ name: 'Login' }],
+        });
+    };
+
+    useEffect(() => {
+        let isActive = true;
+
+        const validateResetSession = async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+
+            if (!isActive) {
+                return;
+            }
+
+            if (!session) {
+                Toast.show({
+                    type: 'error',
+                    text1: 'Link Error',
+                    text2: 'Invalid or expired link',
+                });
+                navigation.reset({
+                    index: 0,
+                    routes: [{ name: 'Login' }],
+                });
+            }
+        };
+
+        validateResetSession();
+
+        return () => {
+            isActive = false;
+        };
+    }, [navigation]);
 
     const handleResetPassword = async () => {
         if (!password || !confirmPassword) {
@@ -35,8 +74,7 @@ const ResetPasswordScreen = () => {
             });
 
             // Sign out just to be safe and redirect to login
-            await supabase.auth.signOut();
-            navigation.navigate('Login');
+            await returnToLogin();
 
         } catch (error) {
             console.error('Password reset error:', error);
@@ -82,7 +120,7 @@ const ResetPasswordScreen = () => {
 
                 <TouchableOpacity
                     style={styles.backButton}
-                    onPress={() => navigation.navigate('Login')}
+                    onPress={returnToLogin}
                 >
                     <Text style={styles.backButtonText}>Back to Login</Text>
                 </TouchableOpacity>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getStatusLabel, getPaymentStatusDisplay } from '../adminHelpers';
 
@@ -16,6 +16,8 @@ import { getStatusLabel, getPaymentStatusDisplay } from '../adminHelpers';
  *    When true, "Record Pay" only shows if item.receipt_url exists.
  */
 const PaymentDetailsSection = ({ item, styles, onRecordPay, onEditAmount, onViewReceipt, requireReceipt = false }) => {
+    const { width } = useWindowDimensions();
+    const isCompactHeader = width <= 420;
     const isGCash = item.payment_method?.toLowerCase() === 'gcash' || !item.payment_method;
     const isPaid = item.payment_status === 'paid';
     const isTerminal = ['pending', 'cancelled', 'declined'].includes(item.status);
@@ -34,9 +36,20 @@ const PaymentDetailsSection = ({ item, styles, onRecordPay, onEditAmount, onView
     const statusColor = isPaid ? '#22C55E' : '#FFA726';
 
     return (
-        <View style={styles.eoSection}>
+        <View style={[styles.eoSection, { paddingBottom: 18, overflow: 'visible' }]}>
             {/* Section Header with Record Pay button */}
-            <View style={[styles.eoSectionHeader, { justifyContent: 'space-between', marginBottom: 16 }]}>
+            <View
+                style={[
+                    styles.eoSectionHeader,
+                    {
+                        justifyContent: 'space-between',
+                        marginBottom: 16,
+                        alignItems: isCompactHeader ? 'flex-start' : 'center',
+                        flexDirection: isCompactHeader ? 'column' : 'row',
+                        gap: 10,
+                    },
+                ]}
+            >
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                     <Ionicons name="card" size={16} color="#6B7280" />
                     <Text style={styles.eoSectionTitle}>Payment Details</Text>
@@ -44,7 +57,16 @@ const PaymentDetailsSection = ({ item, styles, onRecordPay, onEditAmount, onView
                 {showRecordPay && (
                     <TouchableOpacity
                         onPress={onRecordPay}
-                        style={{ backgroundColor: '#3B82F6', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6 }}
+                        style={{
+                            backgroundColor: '#3B82F6',
+                            paddingHorizontal: 16,
+                            paddingVertical: 10,
+                            borderRadius: 10,
+                            minHeight: 42,
+                            alignSelf: isCompactHeader ? 'stretch' : 'flex-start',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                        }}
                     >
                         <Text style={{ color: 'white', fontSize: 13, fontWeight: 'bold' }}>Record Pay</Text>
                     </TouchableOpacity>

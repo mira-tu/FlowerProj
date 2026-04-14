@@ -5,6 +5,7 @@ import {
   Image,
   Linking,
   Modal,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -24,7 +25,6 @@ import styles from '../../AdminDashboard.styles';
 import { formatTimestamp, getPaymentStatusDisplay, getStatusColor, getStatusLabel } from '../adminHelpers';
 import DeliveryProofModal from '../components/DeliveryProofModal';
 import PaymentDetailsSection from '../components/PaymentDetailsSection';
-import { generateAndShareReceipt } from '../../../utils/receiptGenerator';
 import {
   canCurrentUserCompleteRiderStop,
   DELIVERY_CONFIRMATION_OWNER,
@@ -2010,7 +2010,6 @@ const RequestSummaryCard = React.memo(({
   activeActionKey,
   onMessageCustomer,
   onPhoneCall,
-  onPrintReceipt,
   onOpenDetails,
   onProvidePrice,
   onDecline,
@@ -2034,7 +2033,7 @@ const RequestSummaryCard = React.memo(({
     && item.payment_status !== 'paid';
 
   return (
-    <View style={styles.eoCard}>
+    <View style={[styles.eoCard, styles.requestSummaryCard]}>
       <View style={styles.eoCardHeader}>
         <View style={{ flex: 1, gap: 6 }}>
           <Text style={styles.eoLabel}>Request #{item.request_number}</Text>
@@ -2108,12 +2107,6 @@ const RequestSummaryCard = React.memo(({
             ) : null}
           </View>
           <View style={styles.eoActionButtons}>
-            <TouchableOpacity
-              style={{ backgroundColor: '#6B7280', width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' }}
-              onPress={() => onPrintReceipt(item)}
-            >
-              <Ionicons name="print" size={18} color="#fff" />
-            </TouchableOpacity>
             <TouchableOpacity style={styles.eoIconBtnGreen} onPress={() => onPhoneCall(item.contact_number || item.user_phone)}>
               <Ionicons name="call" size={18} color="#fff" />
             </TouchableOpacity>
@@ -2135,11 +2128,11 @@ const RequestSummaryCard = React.memo(({
 
         {item.status === 'pending' && item.type === 'customized' ? (
           <View style={[styles.customizedRequestActionRow, { marginTop: 10 }]}>
-            <TouchableOpacity
-              style={[styles.eoMainBtn, styles.customizedRequestActionButton, { backgroundColor: isActionBusy ? '#9CA3AF' : '#10B981' }]}
-              disabled={isActionBusy}
-              onPress={() => onAcceptPendingCustomized(item)}
-            >
+              <TouchableOpacity
+                style={[styles.eoMainBtn, styles.customizedRequestActionButton, { backgroundColor: isActionBusy ? '#9CA3AF' : '#22C55E' }]}
+                disabled={isActionBusy}
+                onPress={() => onAcceptPendingCustomized(item)}
+              >
               <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
               <Text style={styles.eoMainBtnText}>Accept</Text>
             </TouchableOpacity>
@@ -2587,7 +2580,17 @@ const resolveAcceptedRequestStatus = (request) => {
 };
 
 const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntityTarget, clearFocusedEntityTarget }) => {
-  const { height: screenHeight } = useWindowDimensions();
+  const { height: screenHeight, width: screenWidth } = useWindowDimensions();
+  const isWeb = Platform.OS === 'web';
+  const isCompactQuoteSheet = !isWeb && screenWidth <= 480;
+  const quoteModalHorizontalPadding = isWeb ? 20 : (isCompactQuoteSheet ? 18 : 20);
+  const quoteModalWidth = isWeb ? 580 : Math.min(screenWidth - (isCompactQuoteSheet ? 12 : 18), 560);
+  const quoteModalMaxHeight = isWeb
+    ? Math.min(Math.max(screenHeight - 48, 520), 780)
+    : Math.max(420, Math.min(screenHeight - 12, 760));
+  const quoteModalMinHeight = isWeb
+    ? 0
+    : Math.min(quoteModalMaxHeight, Math.max(420, Math.round(screenHeight * 0.72)));
 
   const handlePhoneCall = React.useCallback((phoneNumber) => {
     if (phoneNumber && phoneNumber !== 'N/A' && phoneNumber.trim() !== '') {
@@ -2661,6 +2664,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   const [selectedDeliveryProof, setSelectedDeliveryProof] = useState(null);
   const [deliveryProofNote, setDeliveryProofNote] = useState('');
   const [isCompletingDeliveryStop, setIsCompletingDeliveryStop] = useState(false);
+  const [expandedDeliveryProofVisible, setExpandedDeliveryProofVisible] = useState(false);
 
   const filteredAndSortedRiders = React.useMemo(() => {
     let result = [...riders];
@@ -2686,9 +2690,25 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
 
     actionLockRef.current = actionKey;
     setActiveActionKey(actionKey);
+    const startedAt = Date.now();
+
+    console.log('[admin-perf] request action start', {
+      actionKey,
+    });
 
     try {
       await action();
+      console.log('[admin-perf] request action success', {
+        actionKey,
+        durationMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      console.log('[admin-perf] request action failed', {
+        actionKey,
+        durationMs: Date.now() - startedAt,
+        message: error?.message || String(error),
+      });
+      throw error;
     } finally {
       actionLockRef.current = null;
       setActiveActionKey(null);
@@ -2962,6 +2982,8 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     () => deliveryStopModalStops.find((stop) => stop.unit_key === selectedDeliveryStopKey) || null,
     [deliveryStopModalStops, selectedDeliveryStopKey]
   );
+  const isCompactDeliveryProofLayout = screenWidth <= 480;
+  const deliveryProofPreviewUri = selectedDeliveryProof?.uri || selectedDeliveryStop?.proof_image_url || null;
 
   React.useEffect(() => {
     if (!deliveryStopModalVisible || !deliveryStopModalStops.length) {
@@ -3132,10 +3154,6 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     const finalUrl = url.startsWith('http') ? url : `${BASE_URL}${url}`;
     setSelectedReceiptUrl(finalUrl);
     setReceiptModalVisible(true);
-  }, []);
-
-  const handlePrintReceipt = React.useCallback((requestItem) => {
-    generateAndShareReceipt(requestItem, true);
   }, []);
 
 
@@ -3597,6 +3615,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     setSelectedDeliveryProof(null);
     setDeliveryProofNote('');
     setIsCompletingDeliveryStop(false);
+    setExpandedDeliveryProofVisible(false);
   }, []);
 
   const getPreferredDeliveryStopKey = React.useCallback((request, stops = []) => {
@@ -3691,6 +3710,12 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     }
 
     setIsCompletingDeliveryStop(true);
+    const startedAt = Date.now();
+    console.log('[admin-perf] request proof submit start', {
+      requestId: requestToCompleteStops.id,
+      stopKey: selectedDeliveryStopKey,
+      hasProof: Boolean(selectedDeliveryProof?.base64 || selectedDeliveryProof?.uri),
+    });
 
     try {
       const response = await adminAPI.completeRequestDeliveryStop(requestToCompleteStops.id, selectedDeliveryStopKey, {
@@ -3712,10 +3737,21 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
       if (updatedRequest) {
         mergeRequestIntoState(updatedRequest);
       }
+      console.log('[admin-perf] request proof submit success', {
+        requestId: requestToCompleteStops.id,
+        stopKey: selectedDeliveryStopKey,
+        durationMs: Date.now() - startedAt,
+      });
       closeDetailsModal();
       closeDeliveryStopModal();
       queueRequestsRefresh();
     } catch (error) {
+      console.log('[admin-perf] request proof submit failed', {
+        requestId: requestToCompleteStops.id,
+        stopKey: selectedDeliveryStopKey,
+        durationMs: Date.now() - startedAt,
+        message: error?.message || String(error),
+      });
       const errorMessage = error?.message || 'Failed to complete this delivery stop.';
       Toast.show({ type: 'error', text1: 'Completion Failed', text2: errorMessage });
       Alert.alert('Completion Failed', errorMessage);
@@ -3755,7 +3791,9 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     }
 
     autoOpenedDeliveryProofTargetRef.current = targetKey;
-    openDeliveryStopModal(focusedRequest);
+    openDeliveryStopModal(focusedRequest, {
+      preferredStopKey: focusedEntityTarget?.preferredStopKey,
+    });
   }, [deliveryStopModalVisible, focusedEntityTarget, focusedRequest, openDeliveryStopModal]);
 
   const openRequestStatusModal = React.useCallback((request) => {
@@ -4502,7 +4540,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     });
   };
 
-  const EnhancedRequestCard = ({ item, onMessageCustomer, onPhoneCall, openDetailsModal, openReceiptModal, onAssignRider, onUpdateStatus, onProvidePrice, onDecline, onPrintReceipt, onOpenCustomizedItem }) => {
+  const EnhancedRequestCard = ({ item, onMessageCustomer, onPhoneCall, openDetailsModal, openReceiptModal, onAssignRider, onUpdateStatus, onProvidePrice, onDecline, onOpenCustomizedItem }) => {
     const isCustomizedRequest = item.type === 'customized';
     const isBookingRequest = item.type === 'booking';
     const customizedItems = isCustomizedRequest ? getCustomizedRequestItems(item) : [];
@@ -4545,12 +4583,6 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
               <Text style={styles.eoCustomerName} numberOfLines={1}>{item.user_name}</Text>
             </View>
             <View style={styles.eoActionButtons}>
-              <TouchableOpacity
-                style={{ backgroundColor: '#6B7280', width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' }}
-                onPress={(e) => { e.stopPropagation(); onPrintReceipt(item); }}
-              >
-                <Ionicons name="print" size={20} color="#fff" />
-              </TouchableOpacity>
               <TouchableOpacity style={styles.eoIconBtnGreen} onPress={(e) => { e.stopPropagation(); onPhoneCall(item.contact_number || item.user_phone); }}>
                 <Ionicons name="call" size={20} color="#fff" />
               </TouchableOpacity>
@@ -4961,7 +4993,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
           {item.status === 'pending' && item.type === 'customized' && (
             <View style={styles.customizedRequestActionRow}>
               <TouchableOpacity
-                style={[styles.eoMainBtn, styles.customizedRequestActionButton, { backgroundColor: isActionBusy ? '#9CA3AF' : '#10B981' }]}
+                style={[styles.eoMainBtn, styles.customizedRequestActionButton, { backgroundColor: isActionBusy ? '#9CA3AF' : '#22C55E' }]}
                 disabled={isActionBusy}
                 onPress={() => handleAcceptPendingRequest(item)}
               >
@@ -5067,7 +5099,6 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
         openQuoteModal(requestItem);
       }}
       onDecline={handleDeclineRequest}
-      onPrintReceipt={handlePrintReceipt}
       onOpenCustomizedItem={openCustomizedItemModal}
     />
   ), [
@@ -5076,7 +5107,6 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     handleDeclineRequest,
     handleMessageCustomer,
     handlePhoneCall,
-    handlePrintReceipt,
     openDetailsModal,
     openQuoteModal,
     openReceiptModal,
@@ -5095,7 +5125,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
 
   return (
     <View style={styles.tabContent}>
-      <Text style={styles.tabTitle}>Requests & Bookings</Text>
+      <Text style={styles.tabTitle}>Requests</Text>
 
       {/* Scrollable Status Filters */}
       <View style={{ marginBottom: 15 }}>
@@ -5174,7 +5204,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
             && focusedRequest.refund_request.status === 'requested' ? (
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <TouchableOpacity
-                style={[styles.eoMainBtn, { backgroundColor: activeActionKey ? '#9CA3AF' : '#10B981', flex: 1 }]}
+                style={[styles.eoMainBtn, { backgroundColor: activeActionKey ? '#9CA3AF' : '#22C55E', flex: 1 }]}
                 disabled={Boolean(activeActionKey)}
                 onPress={() => handleApproveRefund(focusedRequest)}
               >
@@ -5534,12 +5564,14 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                     </Text>
                   </TouchableOpacity>
 
-                  {selectedDeliveryProof?.uri ? (
-                    <Image
-                      source={{ uri: selectedDeliveryProof.uri }}
-                      style={{ width: '100%', height: 180, borderRadius: 16, backgroundColor: '#F3F4F6' }}
-                      resizeMode="cover"
-                    />
+                  {deliveryProofPreviewUri ? (
+                    <TouchableOpacity activeOpacity={0.9} onPress={() => setExpandedDeliveryProofVisible(true)}>
+                      <Image
+                        source={{ uri: deliveryProofPreviewUri }}
+                        style={{ width: '100%', height: 200, borderRadius: 16, backgroundColor: '#F3F4F6' }}
+                        resizeMode="contain"
+                      />
+                    </TouchableOpacity>
                   ) : null}
 
                   <TextInput
@@ -5572,16 +5604,40 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                 </View>
               ) : null}
 
-              <View style={styles.modalButtons}>
+              <View style={[
+                styles.modalButtons,
+                isCompactDeliveryProofLayout && {
+                  flexDirection: 'column',
+                  gap: 12,
+                },
+              ]}>
                 <TouchableOpacity
-                  style={[styles.modalButton, styles.cancelButton]}
+                  style={[
+                    styles.modalButton,
+                    styles.cancelButton,
+                    isCompactDeliveryProofLayout && {
+                      flex: 0,
+                      width: '100%',
+                      minHeight: 54,
+                      borderRadius: 16,
+                    },
+                  ]}
                   onPress={closeDeliveryStopModal}
                   disabled={isCompletingDeliveryStop}
                 >
-                  <Text style={styles.buttonText}>Close</Text>
+                  <Text style={[styles.buttonText, isCompactDeliveryProofLayout && { fontSize: 15 }]}>Close</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.modalButton, styles.saveButton]}
+                  style={[
+                    styles.modalButton,
+                    styles.saveButton,
+                    isCompactDeliveryProofLayout && {
+                      flex: 0,
+                      width: '100%',
+                      minHeight: 54,
+                      borderRadius: 16,
+                    },
+                  ]}
                   onPress={handleConfirmDeliveryStop}
                   disabled={
                     isCompletingDeliveryStop
@@ -5599,6 +5655,34 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
             </View>
           </View>
         </View>
+
+        <Modal
+          visible={Boolean(expandedDeliveryProofVisible && deliveryProofPreviewUri)}
+          transparent
+          animationType="fade"
+          statusBarTranslucent
+          onRequestClose={() => setExpandedDeliveryProofVisible(false)}
+        >
+          <TouchableOpacity
+            style={styles.assignmentImageModalBackdrop}
+            activeOpacity={1}
+            onPress={() => setExpandedDeliveryProofVisible(false)}
+          >
+            <View style={styles.assignmentImageModalCard}>
+              {deliveryProofPreviewUri ? (
+                <Image
+                  source={{ uri: deliveryProofPreviewUri }}
+                  style={[styles.assignmentImageModalImage, { height: Math.min(Math.max(screenHeight * 0.68, 280), 520) }]}
+                  resizeMode="contain"
+                />
+              ) : null}
+
+              <Text style={styles.assignmentImageModalLabel}>
+                Delivery proof preview
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </Modal>
       </Modal>
       )}
 
@@ -5708,21 +5792,72 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
 
       {/* Provide Quote Modal */}
       < Modal visible={quoteModalVisible} animationType="fade" transparent onRequestClose={closeQuoteModal}>
-        <View style={styles.modalContainer}>
-          <View style={[styles.modalContent, { maxHeight: '90%' }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{isEditingCustomOrderQuote ? 'Edit Breakdown' : 'Provide Price'}</Text>
-              <TouchableOpacity onPress={closeQuoteModal} disabled={Boolean(activeActionKey)}>
+        <View
+          style={[
+            styles.modalContainer,
+            !isWeb && {
+              justifyContent: 'flex-end',
+              alignItems: 'stretch',
+              paddingHorizontal: isCompactQuoteSheet ? 6 : 10,
+              paddingVertical: 6,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.modalContent,
+              isWeb
+                ? { width: 580, maxHeight: quoteModalMaxHeight, padding: 0, borderRadius: 18, overflow: 'hidden' }
+                : {
+                  width: quoteModalWidth,
+                  maxWidth: quoteModalWidth,
+                  maxHeight: quoteModalMaxHeight,
+                  minHeight: quoteModalMinHeight,
+                  padding: 0,
+                  borderRadius: isCompactQuoteSheet ? 20 : 22,
+                  overflow: 'hidden',
+                  alignSelf: 'center',
+                },
+            ]}
+          >
+            <View
+              style={{
+                paddingHorizontal: quoteModalHorizontalPadding,
+                paddingTop: 18,
+                paddingBottom: 14,
+                borderBottomWidth: 1,
+                borderBottomColor: '#F3F4F6',
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: 12,
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalTitle}>{isEditingCustomOrderQuote ? 'Edit Breakdown' : 'Provide Price'}</Text>
+                <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 4, lineHeight: 18 }}>
+                  Request #{requestToQuote?.request_number}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={closeQuoteModal} disabled={Boolean(activeActionKey)} style={{ padding: 8 }}>
                 <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
-            <Text style={[styles.modalSubtitle, { textAlign: 'left', paddingHorizontal: 20 }]}>Request #{requestToQuote?.request_number}</Text>
 
-            <ScrollView
-              style={{ flex: 1 }}
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={[quoteStyles.quoteScrollContent, { paddingBottom: 20 }]}
-            >
+            <View style={{ flex: 1, minHeight: 160 }}>
+              <ScrollView
+                style={{ flex: 1 }}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={[
+                  quoteStyles.quoteScrollContent,
+                  {
+                    paddingHorizontal: quoteModalHorizontalPadding,
+                    paddingTop: 16,
+                    paddingBottom: 28,
+                    flexGrow: 1,
+                  },
+                ]}
+              >
               {isCustomOrderQuote ? (
                 <>
                   <View style={quoteStyles.quoteSummaryCard}>
@@ -6013,23 +6148,35 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                   </View>
                 </>
               )}
-            </ScrollView>
+              </ScrollView>
+            </View>
 
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={closeQuoteModal}
-                disabled={Boolean(activeActionKey)}
-              >
-                <Text style={styles.buttonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.saveButton]}
-                onPress={handleProvideQuote}
-                disabled={Boolean(activeActionKey)}
-              >
-                <Text style={styles.buttonText}>Submit Price</Text>
-              </TouchableOpacity>
+            <View
+              style={{
+                paddingHorizontal: quoteModalHorizontalPadding,
+                paddingTop: 12,
+                paddingBottom: isWeb ? 18 : 22,
+                borderTopWidth: 1,
+                borderTopColor: '#F3F4F6',
+                backgroundColor: '#fff',
+              }}
+            >
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={closeQuoteModal}
+                  disabled={Boolean(activeActionKey)}
+                >
+                  <Text style={styles.buttonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.saveButton]}
+                  onPress={handleProvideQuote}
+                  disabled={Boolean(activeActionKey)}
+                >
+                  <Text style={styles.buttonText}>Submit Price</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </View>

@@ -23,7 +23,6 @@ import styles from '../../AdminDashboard.styles';
 import { formatTimestamp, getPaymentStatusDisplay, getStatusLabel } from '../adminHelpers';
 import DeliveryProofModal from '../components/DeliveryProofModal';
 import PaymentDetailsSection from '../components/PaymentDetailsSection';
-import { generateAndShareReceipt } from '../../../utils/receiptGenerator';
 import {
   canCurrentUserCompleteRiderStop,
   DELIVERY_CONFIRMATION_OWNER,
@@ -115,7 +114,7 @@ const maskGcashNumber = (value) => {
 };
 
 const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, focusedEntityTarget, clearFocusedEntityTarget }) => {
-  const { height: screenHeight } = useWindowDimensions();
+  const { height: screenHeight, width: screenWidth } = useWindowDimensions();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -158,6 +157,7 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
   const [selectedDeliveryProof, setSelectedDeliveryProof] = useState(null);
   const [deliveryProofNote, setDeliveryProofNote] = useState('');
   const [isCompletingDeliveryStop, setIsCompletingDeliveryStop] = useState(false);
+  const [expandedDeliveryProofVisible, setExpandedDeliveryProofVisible] = useState(false);
 
   const filteredAndSortedRiders = React.useMemo(() => {
     let result = [...riders];
@@ -297,9 +297,25 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
 
     actionLockRef.current = actionKey;
     setActiveActionKey(actionKey);
+    const startedAt = Date.now();
+
+    console.log('[admin-perf] order action start', {
+      actionKey,
+    });
 
     try {
       await action();
+      console.log('[admin-perf] order action success', {
+        actionKey,
+        durationMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      console.log('[admin-perf] order action failed', {
+        actionKey,
+        durationMs: Date.now() - startedAt,
+        message: error?.message || String(error),
+      });
+      throw error;
     } finally {
       actionLockRef.current = null;
       setActiveActionKey(null);
@@ -696,6 +712,7 @@ const deliveryStepperStatuses = [
     setSelectedDeliveryProof(null);
     setDeliveryProofNote('');
     setIsCompletingDeliveryStop(false);
+    setExpandedDeliveryProofVisible(false);
   }, []);
 
   const getPreferredDeliveryStopKey = React.useCallback((order, stops = []) => {
@@ -790,6 +807,12 @@ const deliveryStepperStatuses = [
     }
 
     setIsCompletingDeliveryStop(true);
+    const startedAt = Date.now();
+    console.log('[admin-perf] order proof submit start', {
+      orderId: orderToCompleteStops.id,
+      stopKey: selectedDeliveryStopKey,
+      hasProof: Boolean(selectedDeliveryProof?.base64 || selectedDeliveryProof?.uri),
+    });
 
     try {
       const response = await adminAPI.completeOrderDeliveryStop(orderToCompleteStops.id, selectedDeliveryStopKey, {
@@ -811,9 +834,20 @@ const deliveryStepperStatuses = [
       if (updatedOrder) {
         mergeOrderIntoState(updatedOrder);
       }
+      console.log('[admin-perf] order proof submit success', {
+        orderId: orderToCompleteStops.id,
+        stopKey: selectedDeliveryStopKey,
+        durationMs: Date.now() - startedAt,
+      });
       closeDeliveryStopModal();
       queueOrdersRefresh();
     } catch (error) {
+      console.log('[admin-perf] order proof submit failed', {
+        orderId: orderToCompleteStops.id,
+        stopKey: selectedDeliveryStopKey,
+        durationMs: Date.now() - startedAt,
+        message: error?.message || String(error),
+      });
       const errorMessage = error?.message || 'Failed to complete this delivery stop.';
       Toast.show({ type: 'error', text1: 'Completion Failed', text2: errorMessage });
       Alert.alert('Completion Failed', errorMessage);
@@ -852,7 +886,9 @@ const deliveryStepperStatuses = [
     }
 
     autoOpenedDeliveryProofTargetRef.current = targetKey;
-    openDeliveryStopModal(focusedOrder);
+    openDeliveryStopModal(focusedOrder, {
+      preferredStopKey: focusedEntityTarget?.preferredStopKey,
+    });
   }, [deliveryStopModalVisible, focusedEntityTarget, focusedOrder, openDeliveryStopModal]);
 
   const openStatusModal = (order) => {
@@ -1058,7 +1094,7 @@ const deliveryStepperStatuses = [
     setIsEditPaymentMode(false);
   };
 
-  const EnhancedOrderCard = ({ item, onMessageCustomer, onPhoneCall, onAssignRider, onUpdateStatus, openReceiptModal, onPrintReceipt }) => {
+  const EnhancedOrderCard = ({ item, onMessageCustomer, onPhoneCall, onAssignRider, onUpdateStatus, openReceiptModal }) => {
     const groupedDestinations = getGroupedDestinations(item);
     const normalizedStops = getNormalizedStopDestinations(item);
     const stopCounts = getDeliveryStopCounts(normalizedStops);
@@ -1115,12 +1151,6 @@ const deliveryStepperStatuses = [
               <Text style={styles.eoCustomerName} numberOfLines={1}>{item.customer_name}</Text>
             </View>
             <View style={styles.eoActionButtons}>
-              <TouchableOpacity
-                style={{ backgroundColor: '#6B7280', width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' }}
-                onPress={() => onPrintReceipt(item)}
-              >
-                <Ionicons name="print" size={20} color="#fff" />
-              </TouchableOpacity>
               <TouchableOpacity style={styles.eoIconBtnGreen} onPress={() => onPhoneCall(item.customer_phone)}>
                 <Ionicons name="call" size={20} color="#fff" />
               </TouchableOpacity>
@@ -1732,6 +1762,8 @@ const deliveryStepperStatuses = [
     ),
     [getDeliveryProofStops, orderToCompleteStops]
   );
+  const isCompactDeliveryProofLayout = screenWidth <= 480;
+  const deliveryProofPreviewUri = selectedDeliveryProof?.uri || selectedDeliveryStop?.proof_image_url || null;
 
   React.useEffect(() => {
     if (!deliveryStopModalVisible || !deliveryStopModalStops.length) {
@@ -1743,6 +1775,7 @@ const deliveryStepperStatuses = [
       setSelectedDeliveryStopKey(deliveryStopModalStops[0]?.unit_key || null);
       setSelectedDeliveryProof(null);
       setDeliveryProofNote('');
+      setExpandedDeliveryProofVisible(false);
     }
   }, [deliveryStopModalStops, deliveryStopModalVisible, selectedDeliveryStopKey]);
 
@@ -1863,7 +1896,6 @@ const deliveryStepperStatuses = [
           onAssignRider={handleAssignRider}
           onUpdateStatus={openStatusModal}
           openReceiptModal={(url) => { setSelectedReceiptUrl(url); setReceiptModalVisible(true); }}
-          onPrintReceipt={(item) => generateAndShareReceipt(item, false)}
         />}
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={{ paddingBottom: 20, paddingHorizontal: 16 }}
@@ -2225,12 +2257,14 @@ const deliveryStepperStatuses = [
                     </Text>
                   </TouchableOpacity>
 
-                  {selectedDeliveryProof?.uri ? (
-                    <Image
-                      source={{ uri: selectedDeliveryProof.uri }}
-                      style={{ width: '100%', height: 180, borderRadius: 16, backgroundColor: '#F3F4F6' }}
-                      resizeMode="cover"
-                    />
+                  {deliveryProofPreviewUri ? (
+                    <TouchableOpacity activeOpacity={0.9} onPress={() => setExpandedDeliveryProofVisible(true)}>
+                      <Image
+                        source={{ uri: deliveryProofPreviewUri }}
+                        style={{ width: '100%', height: 200, borderRadius: 16, backgroundColor: '#F3F4F6' }}
+                        resizeMode="contain"
+                      />
+                    </TouchableOpacity>
                   ) : null}
 
                   <TextInput
@@ -2263,16 +2297,40 @@ const deliveryStepperStatuses = [
                 </View>
               ) : null}
 
-              <View style={styles.modalButtons}>
+              <View style={[
+                styles.modalButtons,
+                isCompactDeliveryProofLayout && {
+                  flexDirection: 'column',
+                  gap: 12,
+                },
+              ]}>
                 <TouchableOpacity
-                  style={[styles.modalButton, styles.cancelButton]}
+                  style={[
+                    styles.modalButton,
+                    styles.cancelButton,
+                    isCompactDeliveryProofLayout && {
+                      flex: 0,
+                      width: '100%',
+                      minHeight: 54,
+                      borderRadius: 16,
+                    },
+                  ]}
                   onPress={closeDeliveryStopModal}
                   disabled={isCompletingDeliveryStop}
                 >
-                  <Text style={styles.buttonText}>Close</Text>
+                  <Text style={[styles.buttonText, isCompactDeliveryProofLayout && { fontSize: 15 }]}>Close</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.modalButton, styles.saveButton]}
+                  style={[
+                    styles.modalButton,
+                    styles.saveButton,
+                    isCompactDeliveryProofLayout && {
+                      flex: 0,
+                      width: '100%',
+                      minHeight: 54,
+                      borderRadius: 16,
+                    },
+                  ]}
                   onPress={handleConfirmDeliveryStop}
                   disabled={
                     isCompletingDeliveryStop
@@ -2290,6 +2348,34 @@ const deliveryStepperStatuses = [
             </View>
           </View>
         </View>
+
+        <Modal
+          visible={Boolean(expandedDeliveryProofVisible && deliveryProofPreviewUri)}
+          transparent
+          animationType="fade"
+          statusBarTranslucent
+          onRequestClose={() => setExpandedDeliveryProofVisible(false)}
+        >
+          <TouchableOpacity
+            style={styles.assignmentImageModalBackdrop}
+            activeOpacity={1}
+            onPress={() => setExpandedDeliveryProofVisible(false)}
+          >
+            <View style={styles.assignmentImageModalCard}>
+              {deliveryProofPreviewUri ? (
+                <Image
+                  source={{ uri: deliveryProofPreviewUri }}
+                  style={[styles.assignmentImageModalImage, { height: Math.min(Math.max(screenHeight * 0.68, 280), 520) }]}
+                  resizeMode="contain"
+                />
+              ) : null}
+
+              <Text style={styles.assignmentImageModalLabel}>
+                Delivery proof preview
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </Modal>
       </Modal>
       )}
 

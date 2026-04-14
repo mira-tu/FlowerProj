@@ -9,8 +9,24 @@ const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl || process.env.EXPO
 const supabaseAnonKey = Constants.expoConfig?.extra?.supabaseAnonKey || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Supabase URL or Anon Key is missing. Please ensure your .env file is correctly configured.');
+  const message = 'Supabase configuration is missing. Define EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY for local Expo and EAS builds.';
+  console.error(message, {
+    hasExpoConfigUrl: Boolean(Constants.expoConfig?.extra?.supabaseUrl),
+    hasExpoConfigAnonKey: Boolean(Constants.expoConfig?.extra?.supabaseAnonKey),
+    hasProcessEnvUrl: Boolean(process.env.EXPO_PUBLIC_SUPABASE_URL),
+    hasProcessEnvAnonKey: Boolean(process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY),
+  });
+
+  if (__DEV__) {
+    throw new Error(message);
+  }
 }
+
+console.log('[supabase] config resolved', {
+  hasUrl: Boolean(supabaseUrl),
+  hasAnonKey: Boolean(supabaseAnonKey),
+  source: Constants.expoConfig?.extra?.supabaseUrl ? 'expo-extra' : 'process-env',
+});
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
