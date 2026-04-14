@@ -17,6 +17,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "
 const GMAIL_USER = Deno.env.get("GMAIL_USER") ?? "";
 const GMAIL_APP_PASSWORD = Deno.env.get("GMAIL_APP_PASSWORD") ?? "";
 const ALLOWED_ROLES = new Set(["admin", "employee"]);
+const CUSTOMER_REQUEST_ACTIONS = new Set(["reserve_request_stock"]);
 const CUSTOMER_REFUND_ACTIONS = new Set(["create_refund_request", "submit_refund_gcash_details"]);
 const MULTI_DELIVERY_NOTES_PREFIX = "[multi_delivery_v1]";
 const ACTIVE_REFUND_STATUSES = ["requested", "approved", "gcash_submitted", "processing"];
@@ -894,13 +895,14 @@ serve(async (req) => {
 
     const callerRole = callerProfile?.role ?? null;
     const isStaffCaller = Boolean(callerRole && ALLOWED_ROLES.has(callerRole));
+    const isCustomerRequestAction = CUSTOMER_REQUEST_ACTIONS.has(action);
     const isCustomerRefundAction = CUSTOMER_REFUND_ACTIONS.has(action);
 
-    if (profileError && !callerRole && !isCustomerRefundAction) {
+    if (profileError && !callerRole && !isCustomerRefundAction && !isCustomerRequestAction) {
       return json(403, { error: "Could not verify caller role." });
     }
 
-    if (!isCustomerRefundAction && !isStaffCaller) {
+    if (!isCustomerRefundAction && !isCustomerRequestAction && !isStaffCaller) {
       return json(403, { error: "Only admin and employee accounts can perform this action." });
     }
 
@@ -1027,6 +1029,61 @@ serve(async (req) => {
         );
 
         return json(200, { success: true, refundRequest });
+      }
+
+      case "reserve_request_stock": {
+        const requestId = body?.requestId;
+        const allocations = Array.isArray(body?.allocations) ? body.allocations : [];
+
+        if (!requestId || !allocations.length) {
+          return json(400, { error: "A request id and stock allocations are required." });
+        }
+
+        const { data: requestRecord, error: fetchError } = await adminClient
+          .from("requests")
+          .select("id, user_id, data, request_number")
+          .eq("id", requestId)
+          .single();
+
+        if (fetchError) {
+          throw fetchError;
+        }
+
+        if (String(requestRecord?.user_id ?? "") !== String(caller.id)) {
+          return json(403, { error: "You can only reserve stock for your own request." });
+        }
+
+        const currentData = parseMaybeJson(requestRecord?.data);
+        await syncRequestStockAllocationState(
+          adminClient,
+          requestId,
+          {
+            ...(currentData && typeof currentData === "object" ? currentData : {}),
+            stock_allocations: allocations,
+            stock_allocation_status: "pending",
+          },
+          "reserve",
+        );
+
+        const { data: updatedRequest, error: updateError } = await adminClient
+          .from("requests")
+          .update({
+            data: {
+              ...(currentData && typeof currentData === "object" ? currentData : {}),
+              stock_allocations: allocations,
+              stock_allocation_status: "reserved",
+              stock_allocation_reserved_at: new Date().toISOString(),
+            },
+          })
+          .eq("id", requestId)
+          .select()
+          .single();
+
+        if (updateError) {
+          throw updateError;
+        }
+
+        return json(200, { success: true, request: updatedRequest });
       }
 
       case "update_order_status":

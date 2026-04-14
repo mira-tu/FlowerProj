@@ -1655,6 +1655,25 @@ const toAbsoluteImageUrl = (value) => {
   return `${BASE_URL}${text.startsWith('/') ? text : `/${text}`}`;
 };
 
+const getPreferredRequestPreviewImage = (request, item = null) => {
+  const requestData = normalizeRequestData(request);
+
+  return firstNonEmpty(
+    item?.previewImageUrl,
+    item?.preview_image_url,
+    item?.image,
+    item?.image_url,
+    requestData?.previewImageUrl,
+    requestData?.preview_image_url,
+    requestData?.image,
+    requestData?.image_url,
+    request?.previewImageUrl,
+    request?.preview_image_url,
+    request?.image,
+    request?.image_url,
+  );
+};
+
 const clampPreviewRatio = (value) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 0;
@@ -1916,8 +1935,13 @@ const getCompactRequestPreviewUri = (item) => {
   if (item.type === 'customized') {
     const firstCustomizedItem = getCustomizedRequestItems(item)[0];
     return toAbsoluteImageUrl(
+      firstCustomizedItem?.previewImageUrl
+      ||
       firstCustomizedItem?.imageUri
       || firstCustomizedItem?.image_url
+      || item?.previewImageUrl
+      || item?.preview_image_url
+      || item?.image
       || item?.image_url
     );
   }
@@ -2425,12 +2449,19 @@ const getBookingRequestItems = (request) => {
 
 const getCustomizedRequestItems = (request) => {
   const requestData = normalizeRequestData(request);
+  const canonicalPreviewImageUrl = getPreferredRequestPreviewImage(request, requestData);
   const hasLegacyCustomizedItem =
     requestData.bundleSize ||
     requestData.flower ||
     requestData.wrapper ||
     requestData.ribbon ||
+    requestData.preview_image_url ||
+    requestData.previewImageUrl ||
+    requestData.image ||
     requestData.image_url ||
+    request?.preview_image_url ||
+    request?.previewImageUrl ||
+    request?.image ||
     request?.image_url;
 
   const sourceItems = Array.isArray(requestData.items) && requestData.items.length
@@ -2442,7 +2473,8 @@ const getCustomizedRequestItems = (request) => {
         bundleSize: requestData.bundleSize ?? null,
         wrapper: requestData.wrapper ?? null,
         ribbon: requestData.ribbon ?? null,
-        image_url: requestData.image_url || request?.image_url || null,
+        image_url: canonicalPreviewImageUrl,
+        previewImageUrl: canonicalPreviewImageUrl,
         price: requestData.price ?? null,
         message: requestData.message ?? '',
       }]
@@ -2510,8 +2542,19 @@ const getCustomizedRequestItems = (request) => {
       itemIndex: index,
       label: `Bouquet ${index + 1}`,
       title,
-      imageUri: toAbsoluteImageUrl(item?.image_url || item?.image || item?.photo || request?.image_url),
-      previewComposition: item?.previewComposition || item?.preview_composition || null,
+      imageUri: toAbsoluteImageUrl(
+        item?.previewImageUrl
+        || item?.preview_image_url
+        || item?.image_url
+        || item?.image
+        || item?.photo
+        || requestData.previewImageUrl
+        || requestData.preview_image_url
+        || requestData.image
+        || requestData.image_url
+      ),
+      previewImageUrl: getPreferredRequestPreviewImage(request, item),
+      previewComposition: item?.previewComposition || item?.preview_composition || requestData.previewComposition || requestData.preview_composition || null,
       flowersText,
       wrapperName,
       ribbonName,
@@ -3242,10 +3285,10 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
               <Text style={styles.customizedRequestItemMeta}>
                 {normalizedItems.length > 1 ? `Custom Order Item ${index + 1}` : 'Custom Order Details'}
               </Text>
-              {toAbsoluteImageUrl(item.image_url || item.image || request.image_url) ? (
+              {toAbsoluteImageUrl(getPreferredRequestPreviewImage(request, item)) ? (
                 <View style={styles.imageSection}>
                   <Image
-                    source={{ uri: toAbsoluteImageUrl(item.image_url || item.image || request.image_url) }}
+                    source={{ uri: toAbsoluteImageUrl(getPreferredRequestPreviewImage(request, item)) }}
                     style={styles.fullImage}
                     resizeMode="contain"
                   />
@@ -3503,7 +3546,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
 
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
-    await loadRequests({ showLoader: false });
+     void loadRequests({ showLoader: false });
     setRefreshing(false);
   }, [loadRequests]);
 
@@ -3592,7 +3635,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
         Toast.show({ type: 'success', text1: declineAction === 'cancel' ? 'Request Cancelled' : 'Request Declined' });
         closeRequestDeclineModal();
         closeDetailsModal();
-        await loadRequests({ showLoader: false });
+        void loadRequests({ showLoader: false });
       } catch (error) {
         console.error('Decline request error:', error);
         Toast.show({ type: 'error', text1: 'Decline Failed' });
@@ -4472,7 +4515,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
           refundAmount: requestItem.amount_received || requestItem.final_price || requestItem.refund_request.refund_amount,
         });
         Toast.show({ type: 'success', text1: 'Refund Approved' });
-        await loadRequests({ showLoader: false });
+        void loadRequests({ showLoader: false });
       } catch (error) {
         console.error('Error approving refund:', error);
         const errorMessage = error?.message || 'Failed to approve refund.';
@@ -4492,7 +4535,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
           rejectionReason: 'Refund request was not approved by admin.',
         });
         Toast.show({ type: 'success', text1: 'Refund Rejected' });
-        await loadRequests({ showLoader: false });
+        void loadRequests({ showLoader: false });
       } catch (error) {
         console.error('Error rejecting refund:', error);
         const errorMessage = error?.message || 'Failed to reject refund.';
@@ -4511,7 +4554,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
           actorId: currentUser?.id,
         });
         Toast.show({ type: 'success', text1: 'Refund Processing Started' });
-        await loadRequests({ showLoader: false });
+        void loadRequests({ showLoader: false });
       } catch (error) {
         console.error('Error starting refund processing:', error);
         const errorMessage = error?.message || 'Failed to start refund processing.';
@@ -4530,7 +4573,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
           actorId: currentUser?.id,
         });
         Toast.show({ type: 'success', text1: 'Refund Completed' });
-        await loadRequests({ showLoader: false });
+        void loadRequests({ showLoader: false });
       } catch (error) {
         console.error('Error completing refund:', error);
         const errorMessage = error?.message || 'Failed to complete refund.';

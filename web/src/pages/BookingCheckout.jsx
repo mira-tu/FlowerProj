@@ -446,7 +446,7 @@ const BookingCheckout = ({ user }) => {
                 )
             ).join(' | ');
             const combinedArrangementSummary = buildBookingArrangementSummary(combinedArrangementSelections);
-            const firstItemImage = uploadedItems.find((item) => item?.image_url)?.image_url || null;
+            const firstItemImage = uploadedItems.find((item) => item?.image_url)?.image_url || uploadedItems[0]?.image || null;
 
             const newRequest = {
                 request_number: requestNumber,
@@ -499,6 +499,11 @@ const BookingCheckout = ({ user }) => {
                     delivery_method: deliveryMethod,
                     pickup_time: pickupDateTime,
                     shipping_fee: customOrderReviewShippingFee,
+                    image_url: firstItemImage,
+                    image: uploadedItems[0]?.image || null,
+                    preview_image_url: uploadedItems[0]?.preview_image_url || firstItemImage || null,
+                    previewComposition: uploadedItems[0]?.previewComposition || uploadedItems[0]?.preview_composition || null,
+                    stock_allocation_status: 'pending',
                     stock_allocations: stockAllocations,
                 },
             };

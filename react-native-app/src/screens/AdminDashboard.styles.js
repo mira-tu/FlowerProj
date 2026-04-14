@@ -27,6 +27,7 @@ const styles = StyleSheet.create({
   headerCenter: {
     flex: 1,
     alignItems: 'center',
+    gap: 4,
   },
   headerActions: {
     flexDirection: 'row',
@@ -1275,6 +1276,7 @@ const styles = StyleSheet.create({
   },
   menuProfileInfo: {
     flex: 1,
+    gap: 6,
   },
   menuProfileName: {
     fontSize: 16,
@@ -1684,7 +1686,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   requestSummaryCard: {
-    minHeight: 390,
+    minHeight: 430,
   },
   requestHeader: {
     flexDirection: 'row',

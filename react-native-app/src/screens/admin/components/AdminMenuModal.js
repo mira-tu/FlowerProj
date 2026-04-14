@@ -29,8 +29,13 @@ const MenuItem = ({ icon, label, onPress, color = '#333', textStyle }) => (
 );
 
 const AdminMenuModal = ({ visible, onClose, setActiveTab, currentUser, onLogoutPress }) => {
-  const isAdmin = currentUser?.role === 'admin';
-  const displayName = currentUser?.name || 'Staff User';
+  const normalizedRole = String(currentUser?.role || '').trim().toLowerCase();
+  const isAdmin = normalizedRole === 'admin';
+  const roleLabel = isAdmin ? 'Admin' : (normalizedRole === 'employee' ? 'Employee' : '');
+  const rawDisplayName = String(currentUser?.name || '').trim();
+  const displayName = rawDisplayName && !rawDisplayName.includes('@')
+    ? rawDisplayName
+    : `${roleLabel || 'Staff'} Account`;
 
   const selectTab = (tab) => {
     setActiveTab(tab);
@@ -63,6 +68,19 @@ const AdminMenuModal = ({ visible, onClose, setActiveTab, currentUser, onLogoutP
                 <Text style={styles.menuProfileName} numberOfLines={1}>
                   {displayName}
                 </Text>
+                {roleLabel ? (
+                  <View style={[
+                    styles.menuProfileRoleBadge,
+                    isAdmin ? styles.menuProfileRoleBadgeAdmin : styles.menuProfileRoleBadgeEmployee,
+                  ]}>
+                    <Text style={[
+                      styles.menuProfileRoleBadgeText,
+                      isAdmin ? styles.menuProfileRoleBadgeTextAdmin : styles.menuProfileRoleBadgeTextEmployee,
+                    ]}>
+                      {roleLabel}
+                    </Text>
+                  </View>
+                ) : null}
               </View>
             </View>
 

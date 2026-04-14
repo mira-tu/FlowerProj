@@ -572,7 +572,7 @@ const CustomizedCheckout = ({ user }) => {
             shipping_fee: shippingFee,
             payment_status,
             gcash_reference_number: selectedPayment === 'gcash' ? normalizedGcashReference : null,
-            image_url: firstItem.image_url || null,
+            image_url: firstItem.image_url || firstItem.image || null,
             notes: null,
             data: {
                 items: uploadedItems,
@@ -591,7 +591,11 @@ const CustomizedCheckout = ({ user }) => {
                 shipping_fee: shippingFee,
                 receipt_url: uploadedReceiptUrl,
                 gcash_reference_number: selectedPayment === 'gcash' ? normalizedGcashReference : null,
-                image_url: firstItem.image_url || null,
+                image_url: firstItem.image_url || firstItem.image || null,
+                image: firstItem.image || null,
+                preview_image_url: firstItem.preview_image_url || firstItem.image_url || firstItem.image || null,
+                previewComposition: firstItem.previewComposition || firstItem.preview_composition || null,
+                stock_allocation_status: 'pending',
                 stock_allocations: stockAllocations,
             },
         };

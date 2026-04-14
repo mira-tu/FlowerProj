@@ -42,6 +42,18 @@ const getNormalizedPaymentMethod = (paymentMethod) => String(paymentMethod || ''
 
 const getOrderActionKey = (action, orderId) => `${action}:${orderId || 'unknown'}`;
 
+const toAbsoluteImageUrl = (value) => {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  if (/^(https?:\/\/|data:)/i.test(text)) return text;
+  return `${BASE_URL}${text.startsWith('/') ? text : `/${text}`}`;
+};
+
+const formatOrderItemPrice = (value) => {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed.toFixed(2) : '0.00';
+};
+
 const parseJsonObject = (value) => {
   if (!value) return {};
   if (typeof value === 'string') {
@@ -1156,7 +1168,11 @@ const deliveryStepperStatuses = [
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.eoIconBtnBlue}
-                onPress={() => onMessageCustomer(item.users?.id, item.users?.name, item.users?.email)}
+                onPress={() => onMessageCustomer(
+                  item.users?.id || item.customer_id || null,
+                  item.users?.name || item.customer_name || 'Customer',
+                  item.users?.email || item.customer_email || null
+                )}
               >
                 <Ionicons name="chatbubble" size={20} color="#fff" />
               </TouchableOpacity>
@@ -1260,9 +1276,9 @@ const deliveryStepperStatuses = [
             {item.items.map((orderItem, index) => (
               <View key={index} style={[styles.eoItemCard, index > 0 && { marginTop: 8 }]}>
                 <View style={styles.eoItemImage}>
-                  {orderItem.image_url ? (
+                  {toAbsoluteImageUrl(orderItem?.image_url || orderItem?.image) ? (
                     <Image
-                      source={{ uri: orderItem.image_url }}
+                      source={{ uri: toAbsoluteImageUrl(orderItem?.image_url || orderItem?.image) }}
                       style={{ width: '100%', height: '100%', resizeMode: 'contain' }}
                     />
                   ) : (
@@ -1270,7 +1286,7 @@ const deliveryStepperStatuses = [
                   )}
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.eoItemName}>{orderItem.name}</Text>
+                  <Text style={styles.eoItemName}>{orderItem?.name || 'Item'}</Text>
                   <Text style={styles.eoItemQuantity}>
                     Quantity: {orderItem.remaining_quantity ?? orderItem.quantity}
                   </Text>
@@ -1279,7 +1295,7 @@ const deliveryStepperStatuses = [
                       Cancelled: {orderItem.cancelled_quantity}
                     </Text>
                   )}
-                  <Text style={styles.eoItemPrice}>₱{orderItem.price.toFixed(2)}</Text>
+                  <Text style={styles.eoItemPrice}>PHP {formatOrderItemPrice(orderItem?.price)}</Text>
                 </View>
               </View>
             ))}
@@ -1300,7 +1316,7 @@ const deliveryStepperStatuses = [
             </View>
             <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <View style={[styles.eoPaymentStatus, { backgroundColor: '#3B82F6' }]}>
-                <Text style={styles.eoPaymentStatusText}>{item.rider.name}</Text>
+                <Text style={styles.eoPaymentStatusText}>{item.rider?.name || 'Assigned Rider'}</Text>
               </View>
             </View>
           </View>
@@ -1680,7 +1696,7 @@ const deliveryStepperStatuses = [
           refundAmount: order.amount_received || order.total || order.refund_request.refund_amount,
         });
         Toast.show({ type: 'success', text1: 'Refund Approved' });
-        await loadOrders({ showLoader: false });
+        void loadOrders({ showLoader: false });
       } catch (error) {
         console.error('Error approving refund:', error);
         const errorMessage = error?.message || 'Failed to approve refund.';
@@ -1700,7 +1716,7 @@ const deliveryStepperStatuses = [
           rejectionReason: 'Refund request was not approved by admin.',
         });
         Toast.show({ type: 'success', text1: 'Refund Rejected' });
-        await loadOrders({ showLoader: false });
+        void loadOrders({ showLoader: false });
       } catch (error) {
         console.error('Error rejecting refund:', error);
         const errorMessage = error?.message || 'Failed to reject refund.';
@@ -1719,7 +1735,7 @@ const deliveryStepperStatuses = [
           actorId: currentUser?.id,
         });
         Toast.show({ type: 'success', text1: 'Refund Processing Started' });
-        await loadOrders({ showLoader: false });
+        void loadOrders({ showLoader: false });
       } catch (error) {
         console.error('Error starting refund processing:', error);
         const errorMessage = error?.message || 'Failed to start refund processing.';
@@ -1738,7 +1754,7 @@ const deliveryStepperStatuses = [
           actorId: currentUser?.id,
         });
         Toast.show({ type: 'success', text1: 'Refund Completed' });
-        await loadOrders({ showLoader: false });
+        void loadOrders({ showLoader: false });
       } catch (error) {
         console.error('Error completing refund:', error);
         const errorMessage = error?.message || 'Failed to complete refund.';

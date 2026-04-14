@@ -132,6 +132,18 @@ const isMissingRequestStockAllocationRpcError = (error) => {
     || (combined.includes('stock_allocations') && combined.includes('404'));
 };
 
+const isMissingManageAdminWorkflowsError = (error) => {
+  const message = String(error?.message || '').toLowerCase();
+  const details = String(error?.details || '').toLowerCase();
+  const hint = String(error?.hint || '').toLowerCase();
+  const combined = `${message} ${details} ${hint}`;
+
+  return combined.includes('manage-admin-workflows')
+    || combined.includes('not deployed')
+    || combined.includes('function not found')
+    || combined.includes('404');
+};
+
 export const reserveRequestStockAllocations = async ({
   supabase,
   requestId,
@@ -141,6 +153,22 @@ export const reserveRequestStockAllocations = async ({
     return { success: true, skipped: true, usedFallback: false };
   }
 
+  const { data: functionResult, error: functionError } = await supabase.functions.invoke('manage-admin-workflows', {
+    body: {
+      action: 'reserve_request_stock',
+      requestId,
+      allocations,
+    },
+  });
+
+  if (!functionError && functionResult?.success !== false) {
+    return { success: true, skipped: false, usedFallback: false, viaFunction: true };
+  }
+
+  if (functionError && !isMissingManageAdminWorkflowsError(functionError)) {
+    console.warn('Request stock reservation edge function failed. Falling back to RPC.', functionError);
+  }
+
   const { error } = await supabase.rpc('apply_request_stock_allocations', {
     p_request_id: requestId,
     p_allocations: allocations,
@@ -148,12 +176,12 @@ export const reserveRequestStockAllocations = async ({
   });
 
   if (!error) {
-    return { success: true, skipped: false, usedFallback: false };
+    return { success: true, skipped: false, usedFallback: true, viaFunction: false };
   }
 
   if (isMissingRequestStockAllocationRpcError(error)) {
     console.warn('Request stock allocation RPC is unavailable. Falling back to trigger-based reservation handling.');
-    return { success: true, skipped: false, usedFallback: true };
+    return { success: true, skipped: false, usedFallback: true, viaFunction: false };
   }
 
   return { success: false, error, skipped: false, usedFallback: false };
