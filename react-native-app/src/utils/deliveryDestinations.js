@@ -225,6 +225,13 @@ const getMatchingStopsForItem = (destinations = [], itemSummary = {}) => {
 };
 
 export const normalizeDeliveryDestination = (destination = {}, index = 0) => {
+    const assignedRiderId = String(
+        destination?.assigned_rider_id
+        ?? destination?.assignedRiderId
+        ?? destination?.assigned_rider
+        ?? destination?.assignedRider
+        ?? ''
+    ).trim() || null;
     const confirmationOwner = normalizeConfirmationOwner(
         destination?.confirmation_owner ?? destination?.confirmationOwner,
         null
@@ -256,6 +263,8 @@ export const normalizeDeliveryDestination = (destination = {}, index = 0) => {
         stop_status: stopStatus,
         cancelled_at: destination?.cancelled_at || destination?.cancelledAt || null,
         cancelled_reason: String(destination?.cancelled_reason || destination?.cancelledReason || '').trim(),
+        assigned_rider_id: assignedRiderId,
+        assignedRiderId: assignedRiderId,
         confirmation_owner: confirmationOwner,
         confirmation_status: confirmationStatus,
         confirmed_at: destination?.confirmed_at || destination?.confirmedAt || null,
@@ -390,6 +399,8 @@ export const getDeliveryStopAssignedRiderId = (destination = {}, fallbackAssigne
     const assignedRiderId = String(
         normalizedDestination?.assigned_rider_id
         ?? normalizedDestination?.assignedRiderId
+        ?? normalizedDestination?.assigned_rider
+        ?? normalizedDestination?.assignedRider
         ?? fallbackAssignedRiderId
         ?? ''
     ).trim();
@@ -528,8 +539,9 @@ export const groupDeliveryDestinations = (destinations = []) => {
             group.activeItemCount += 1;
         }
 
-        if (!isCancelledStop && destination?.assigned_rider_id) {
-            const riderId = String(destination.assigned_rider_id);
+        const assignedRiderId = getDeliveryStopAssignedRiderId(destination);
+        if (!isCancelledStop && assignedRiderId) {
+            const riderId = String(assignedRiderId);
             if (!group.assignedRiderIds.includes(riderId)) {
                 group.assignedRiderIds.push(riderId);
             }

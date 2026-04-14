@@ -141,6 +141,14 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
   const ridersLoadInProgressRef = useRef(false);
   const autoOpenedDeliveryProofTargetRef = useRef(null);
 
+  const isOrderActionBusyFor = React.useCallback((orderId) => {
+    if (!activeActionKey || !orderId) {
+      return false;
+    }
+
+    return String(activeActionKey).endsWith(`:${String(orderId)}`);
+  }, [activeActionKey]);
+
   const [statusModalVisible, setStatusModalVisible] = useState(false);
   const [orderToUpdate, setOrderToUpdate] = useState(null);
   const [selectedStatus, setSelectedStatus] = useState(null);
@@ -175,11 +183,14 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
     let result = [...riders];
     if (riderSearchQuery) {
       result = result.filter(rider =>
-        rider.name.toLowerCase().includes(riderSearchQuery.toLowerCase()) ||
-        rider.email.toLowerCase().includes(riderSearchQuery.toLowerCase())
+        String(rider?.name || rider?.email || '')
+          .toLowerCase()
+          .includes(riderSearchQuery.toLowerCase())
       );
     }
-    result.sort((a, b) => a.name.localeCompare(b.name));
+    result.sort((a, b) => (
+      String(a?.name || a?.email || '').localeCompare(String(b?.name || b?.email || ''))
+    ));
     return result;
   }, [riders, riderSearchQuery]);
 
@@ -303,10 +314,6 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
   }, [currentUser?.id, currentUser?.role, getNormalizedStopDestinations, getStopFallbackAssignedRiderId]);
 
   const runOrderAction = React.useCallback(async (actionKey, action) => {
-    if (actionLockRef.current) {
-      return;
-    }
-
     actionLockRef.current = actionKey;
     setActiveActionKey(actionKey);
     const startedAt = Date.now();
@@ -653,7 +660,7 @@ const deliveryStepperStatuses = [
   };
 
   const openOrderDeclineModal = (order, action = 'decline') => {
-    if (actionLockRef.current || declineModalVisible) {
+    if (declineModalVisible) {
       return;
     }
 
@@ -904,7 +911,7 @@ const deliveryStepperStatuses = [
   }, [deliveryStopModalVisible, focusedEntityTarget, focusedOrder, openDeliveryStopModal]);
 
   const openStatusModal = (order) => {
-    if (actionLockRef.current || statusModalVisible || deliveryStopModalVisible) {
+    if (statusModalVisible || deliveryStopModalVisible) {
       return;
     }
 
@@ -956,7 +963,7 @@ const deliveryStepperStatuses = [
   };
 
   const confirmStatusChange = async () => {
-    if (!orderToUpdate || !selectedStatus || actionLockRef.current) return;
+    if (!orderToUpdate || !selectedStatus) return;
     const orderId = orderToUpdate.id;
 
     if (selectedStatus === 'cancelled') {
@@ -1089,7 +1096,7 @@ const deliveryStepperStatuses = [
   };
 
   const openPaymentModal = (order, editMode = false) => {
-    if (actionLockRef.current || paymentModalVisible) {
+    if (paymentModalVisible) {
       return;
     }
 
@@ -1120,7 +1127,7 @@ const deliveryStepperStatuses = [
       && item.payment_status !== 'paid'
     );
     const isStatusChangeDisabled = isAwaitingPaidGCash || requiresRiderBeforeStatusChange;
-    const isActionBusy = Boolean(activeActionKey);
+    const isActionBusy = isOrderActionBusyFor(item?.id);
 
     return (
       <View style={styles.eoCard}>
@@ -1509,7 +1516,7 @@ const deliveryStepperStatuses = [
   };
 
   const handleAssignRider = async (order) => {
-    if (actionLockRef.current || assignRiderModalVisible) {
+    if (assignRiderModalVisible) {
       return;
     }
 
@@ -1873,15 +1880,15 @@ const deliveryStepperStatuses = [
             && focusedOrder.refund_request.status === 'requested' ? (
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <TouchableOpacity
-                style={[styles.eoMainBtn, { backgroundColor: activeActionKey ? '#9CA3AF' : '#10B981', flex: 1 }]}
-                disabled={Boolean(activeActionKey)}
+                style={[styles.eoMainBtn, { backgroundColor: '#10B981', flex: 1 }]}
+                disabled={false}
                 onPress={() => handleApproveRefund(focusedOrder)}
               >
                 <Text style={styles.eoMainBtnText}>Approve Refund</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.eoMainBtn, { backgroundColor: activeActionKey ? '#9CA3AF' : '#EF4444', flex: 1 }]}
-                disabled={Boolean(activeActionKey)}
+                style={[styles.eoMainBtn, { backgroundColor: '#EF4444', flex: 1 }]}
+                disabled={false}
                 onPress={() => handleRejectRefund(focusedOrder)}
               >
                 <Text style={styles.eoMainBtnText}>Reject Refund</Text>
@@ -1951,14 +1958,14 @@ const deliveryStepperStatuses = [
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelButton]}
                 onPress={closeOrderDeclineModal}
-                disabled={isDecliningOrder || Boolean(activeActionKey)}
+                disabled={isDecliningOrder}
               >
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.deleteButton]}
                 onPress={confirmDecline}
-                disabled={isDecliningOrder || Boolean(activeActionKey)}
+                disabled={isDecliningOrder}
               >
                 <Text style={styles.buttonText}>
                   {isDecliningOrder
@@ -2105,14 +2112,14 @@ const deliveryStepperStatuses = [
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelButton]}
                 onPress={closeAssignRiderModal}
-                disabled={Boolean(activeActionKey)}
+                disabled={false}
               >
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.saveButton]}
                 onPress={handleConfirmAssignRider}
-                disabled={Boolean(activeActionKey) || (!selectedRider && !isStopAssignmentMode)}
+                disabled={!selectedRider && !isStopAssignmentMode}
               >
                 <Text style={styles.buttonText}>Confirm</Text>
               </TouchableOpacity>
@@ -2488,15 +2495,15 @@ const deliveryStepperStatuses = [
             <View style={styles.statusModalFooter}>
               <TouchableOpacity
                 onPress={confirmStatusChange}
-                style={[styles.statusConfirmButton, activeActionKey && { opacity: 0.6 }]}
-                disabled={Boolean(activeActionKey)}
+                style={styles.statusConfirmButton}
+                disabled={false}
               >
                 <Text style={styles.statusConfirmButtonText}>Proceed</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={closeStatusModal}
                 style={styles.statusCloseButton}
-                disabled={Boolean(activeActionKey)}
+                disabled={false}
               >
                 <Text style={styles.statusCloseButtonText}>Cancel</Text>
               </TouchableOpacity>
@@ -2530,14 +2537,14 @@ const deliveryStepperStatuses = [
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelButton]}
                 onPress={closePaymentModal}
-                disabled={Boolean(activeActionKey)}
+                disabled={false}
               >
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.saveButton]}
                 onPress={handleConfirmPayment}
-                disabled={Boolean(activeActionKey)}
+                disabled={false}
               >
                 <Text style={styles.buttonText}>Confirm</Text>
               </TouchableOpacity>

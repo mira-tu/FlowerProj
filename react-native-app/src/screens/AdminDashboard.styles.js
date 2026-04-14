@@ -1686,7 +1686,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   requestSummaryCard: {
-    minHeight: 430,
+    minHeight: 500,
   },
   requestHeader: {
     flexDirection: 'row',

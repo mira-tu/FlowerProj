@@ -2051,7 +2051,7 @@ const RequestSummaryCard = React.memo(({
   const paymentBadgeText = item.payment_status
     ? getPaymentStatusDisplay(item.payment_status, item.payment_method)
     : null;
-  const isActionBusy = Boolean(activeActionKey);
+  const isActionBusy = isRequestActionBusyFor(item?.id);
   const canChangeStatus = !['pending', 'completed', 'cancelled', 'declined'].includes(item.status);
   const isAwaitingPayment = (item.payment_method?.toLowerCase() === 'gcash' || !item.payment_method)
     && item.payment_status !== 'paid';
@@ -2667,6 +2667,14 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   const autoOpenedDeliveryProofTargetRef = useRef(null);
   const hydratedRefundTargetRef = useRef(null);
   const [selectedRequest, setSelectedRequest] = useState(null);
+
+  const isRequestActionBusyFor = React.useCallback((requestId) => {
+    if (!activeActionKey || !requestId) {
+      return false;
+    }
+
+    return String(activeActionKey).endsWith(`:${String(requestId)}`);
+  }, [activeActionKey]);
   const [selectedRequestLoading, setSelectedRequestLoading] = useState(false);
   const [selectedCustomizedItem, setSelectedCustomizedItem] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
@@ -2713,11 +2721,14 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     let result = [...riders];
     if (riderSearchQuery) {
       result = result.filter(rider =>
-        rider.name.toLowerCase().includes(riderSearchQuery.toLowerCase()) ||
-        (rider.email && rider.email.toLowerCase().includes(riderSearchQuery.toLowerCase()))
+        String(rider?.name || rider?.email || '')
+          .toLowerCase()
+          .includes(riderSearchQuery.toLowerCase())
       );
     }
-    result.sort((a, b) => a.name.localeCompare(b.name));
+    result.sort((a, b) => (
+      String(a?.name || a?.email || '').localeCompare(String(b?.name || b?.email || ''))
+    ));
     return result;
   }, [riders, riderSearchQuery]);
 
@@ -2727,10 +2738,6 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   );
 
   const runRequestAction = React.useCallback(async (actionKey, action) => {
-    if (actionLockRef.current) {
-      return;
-    }
-
     actionLockRef.current = actionKey;
     setActiveActionKey(actionKey);
     const startedAt = Date.now();
@@ -3576,7 +3583,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   }, []);
 
   const openRequestDeclineModal = React.useCallback((request, action = 'decline') => {
-    if (actionLockRef.current || declineModalVisible) {
+    if (declineModalVisible) {
       return;
     }
 
@@ -3840,7 +3847,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   }, [deliveryStopModalVisible, focusedEntityTarget, focusedRequest, openDeliveryStopModal]);
 
   const openRequestStatusModal = React.useCallback((request) => {
-    if (actionLockRef.current || requestStatusModalVisible || deliveryStopModalVisible) {
+    if (requestStatusModalVisible || deliveryStopModalVisible) {
       return;
     }
 
@@ -3899,7 +3906,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   }, [closeDetailsModal, loadRequests, runRequestAction]);
 
   const confirmRequestStatusChange = async () => {
-    if (!requestToUpdate || !selectedRequestStatus || actionLockRef.current) return;
+    if (!requestToUpdate || !selectedRequestStatus) return;
     const requestId = requestToUpdate.id;
 
     if (selectedRequestStatus === 'cancelled') {
@@ -4141,7 +4148,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   };
 
   const openQuoteModal = React.useCallback((request) => {
-    if (actionLockRef.current || quoteModalVisible) {
+    if (quoteModalVisible) {
       return;
     }
 
@@ -4361,7 +4368,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   }, []);
 
   const openPaymentModal = (request, editMode = false) => {
-    if (actionLockRef.current || paymentModalVisible) {
+    if (paymentModalVisible) {
       return;
     }
 
@@ -4398,7 +4405,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   };
 
   const handleAssignRider = React.useCallback(async (request) => {
-    if (actionLockRef.current || assignRiderModalVisible) {
+    if (assignRiderModalVisible) {
       return;
     }
 
@@ -4591,7 +4598,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     const groupedDestinations = item.delivery_method === 'delivery' ? getGroupedDestinations(item) : [];
     const normalizedStops = item.delivery_method === 'delivery' ? getNormalizedStopDestinations(item) : [];
     const stopCounts = getDeliveryStopCounts(normalizedStops);
-    const isActionBusy = Boolean(activeActionKey);
+    const isActionBusy = isRequestActionBusyFor(item?.id);
 
     return (
       <View style={styles.eoCard}>
@@ -5247,15 +5254,15 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
             && focusedRequest.refund_request.status === 'requested' ? (
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <TouchableOpacity
-                style={[styles.eoMainBtn, { backgroundColor: activeActionKey ? '#9CA3AF' : '#22C55E', flex: 1 }]}
-                disabled={Boolean(activeActionKey)}
+                style={[styles.eoMainBtn, { backgroundColor: '#22C55E', flex: 1 }]}
+                disabled={false}
                 onPress={() => handleApproveRefund(focusedRequest)}
               >
                 <Text style={styles.eoMainBtnText}>Approve Refund</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.eoMainBtn, { backgroundColor: activeActionKey ? '#9CA3AF' : '#EF4444', flex: 1 }]}
-                disabled={Boolean(activeActionKey)}
+                style={[styles.eoMainBtn, { backgroundColor: '#EF4444', flex: 1 }]}
+                disabled={false}
                 onPress={() => handleRejectRefund(focusedRequest)}
               >
                 <Text style={styles.eoMainBtnText}>Reject Refund</Text>
@@ -5306,7 +5313,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Request Details</Text>
-              <TouchableOpacity onPress={closeDetailsModal} disabled={Boolean(activeActionKey)}>
+              <TouchableOpacity onPress={closeDetailsModal} disabled={false}>
                 <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
@@ -5359,15 +5366,15 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                   {selectedRequest.status === 'pending' && selectedRequest.type === 'customized' && (
                     <>
                       <TouchableOpacity
-                        style={[styles.actionButton, styles.acceptButton, activeActionKey && { opacity: 0.6 }]}
-                        disabled={Boolean(activeActionKey)}
+                        style={[styles.actionButton, styles.acceptButton]}
+                        disabled={false}
                         onPress={() => handleAcceptPendingRequest(selectedRequest)}
                       >
                         <Text style={styles.buttonText}>Accept</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
-                        style={[styles.actionButton, styles.rejectButton, activeActionKey && { opacity: 0.6 }]}
-                        disabled={Boolean(activeActionKey)}
+                        style={[styles.actionButton, styles.rejectButton]}
+                        disabled={false}
                         onPress={() => handleDeclineRequest(selectedRequest)}
                       >
                         <Text style={styles.buttonText}>Decline</Text>
@@ -5820,12 +5827,12 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
             <View style={styles.statusModalFooter}>
               <TouchableOpacity
                 onPress={confirmRequestStatusChange}
-                style={[styles.statusConfirmButton, activeActionKey && { opacity: 0.6 }]}
-                disabled={Boolean(activeActionKey)}
+                style={styles.statusConfirmButton}
+                disabled={false}
               >
                 <Text style={styles.statusConfirmButtonText}>Proceed</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={closeRequestStatusModal} style={styles.statusCloseButton} disabled={Boolean(activeActionKey)}>
+              <TouchableOpacity onPress={closeRequestStatusModal} style={styles.statusCloseButton} disabled={false}>
                 <Text style={styles.statusCloseButtonText}>Cancel</Text>
               </TouchableOpacity>
             </View>
@@ -5882,7 +5889,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                   Request #{requestToQuote?.request_number}
                 </Text>
               </View>
-              <TouchableOpacity onPress={closeQuoteModal} disabled={Boolean(activeActionKey)} style={{ padding: 8 }}>
+              <TouchableOpacity onPress={closeQuoteModal} disabled={false} style={{ padding: 8 }}>
                 <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
@@ -6205,17 +6212,17 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
               }}
             >
               <View style={styles.modalButtons}>
-                <TouchableOpacity
+              <TouchableOpacity
                   style={[styles.modalButton, styles.cancelButton]}
                   onPress={closeQuoteModal}
-                  disabled={Boolean(activeActionKey)}
+                  disabled={false}
                 >
                   <Text style={styles.buttonText}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.modalButton, styles.saveButton]}
                   onPress={handleProvideQuote}
-                  disabled={Boolean(activeActionKey)}
+                  disabled={false}
                 >
                   <Text style={styles.buttonText}>Submit Price</Text>
                 </TouchableOpacity>
@@ -6231,7 +6238,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{declineAction === 'cancel' ? 'Cancel Request' : 'Decline Request'}</Text>
-              <TouchableOpacity disabled={isDeclining || Boolean(activeActionKey)} onPress={closeRequestDeclineModal}>
+              <TouchableOpacity disabled={isDeclining} onPress={closeRequestDeclineModal}>
                 <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
@@ -6253,14 +6260,14 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelButton]}
                 onPress={closeRequestDeclineModal}
-                disabled={isDeclining || Boolean(activeActionKey)}
+                disabled={isDeclining}
               >
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, { backgroundColor: '#EF4444' }]}
                 onPress={submitDeclineRequest}
-                disabled={isDeclining || Boolean(activeActionKey)}
+                disabled={isDeclining}
               >
                 <Text style={styles.buttonText}>
                   {isDeclining
@@ -6418,13 +6425,13 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
               />
             </View>
             <View style={[styles.modalButtons, styles.assignRiderFooter]}>
-              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={closeAssignRiderModal} disabled={Boolean(activeActionKey)}>
+              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={closeAssignRiderModal} disabled={false}>
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.saveButton]}
                 onPress={handleConfirmAssignRider}
-                disabled={Boolean(activeActionKey) || (!selectedRider && !isStopAssignmentMode)}
+                disabled={!selectedRider && !isStopAssignmentMode}
               >
                 <Text style={styles.buttonText}>Confirm</Text>
               </TouchableOpacity>
@@ -6456,10 +6463,10 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
               onChangeText={setPaymentAmount}
             />
             <View style={styles.modalButtons}>
-              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={closePaymentModal} disabled={Boolean(activeActionKey)}>
+              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={closePaymentModal} disabled={false}>
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalButton, styles.saveButton]} onPress={handleConfirmPayment} disabled={Boolean(activeActionKey)}>
+              <TouchableOpacity style={[styles.modalButton, styles.saveButton]} onPress={handleConfirmPayment} disabled={false}>
                 <Text style={styles.buttonText}>Confirm</Text>
               </TouchableOpacity>
             </View>

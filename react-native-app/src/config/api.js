@@ -228,6 +228,25 @@ const getDeliveryProofCompletionErrorMessage = (error) => {
     return 'The latest manage-admin-workflows function is not deployed yet. Please deploy it before riders can submit proof.';
 };
 
+const getDeliveryProofCompletionFallbackMessage = (primaryError, fallbackError) => {
+    const primaryMessage = String(primaryError?.message || '').trim();
+    const fallbackMessage = String(fallbackError?.message || '').trim();
+
+    if (primaryMessage && !isGenericAdminWorkflowTransportError(primaryError)) {
+        return primaryMessage;
+    }
+
+    if (fallbackMessage && !isGenericAdminWorkflowTransportError(fallbackError)) {
+        return fallbackMessage;
+    }
+
+    if (primaryMessage && primaryMessage !== fallbackMessage) {
+        return primaryMessage;
+    }
+
+    return 'The latest manage-admin-workflows function is not deployed yet. Please deploy it before riders can submit proof.';
+};
+
 const isTransientFetchError = (error) => {
     const message = String(error?.message || '').toLowerCase();
     const details = String(error?.details || '').toLowerCase();
@@ -4263,57 +4282,46 @@ export const adminAPI = {
         });
 
         try {
-            const data = await invokeAdminWorkflow('complete_order_delivery_stop', {
-                orderId,
-                unitKey,
+            const data = await completeOrderDeliveryStopDirect(orderId, unitKey, {
+                ...options,
                 proofFile: normalizedProofFile,
-                proofNote: options?.proofNote || '',
             });
 
             console.log('[admin-perf] order delivery stop completion success', {
                 orderId,
                 unitKey,
-                path: 'edge',
+                path: 'direct',
                 durationMs: Date.now() - startedAt,
             });
             return { data };
-        } catch (error) {
-            if (!shouldFallbackToDirectWorkflow(error)) {
-                console.log('[admin-perf] order delivery stop completion failed', {
+        } catch (directError) {
+            console.warn('Direct order delivery stop completion failed, trying manage-admin-workflows fallback:', directError.message);
+
+            try {
+                const data = await invokeAdminWorkflow('complete_order_delivery_stop', {
+                    orderId,
+                    unitKey,
+                    proofFile: normalizedProofFile,
+                    proofNote: options?.proofNote || '',
+                });
+
+                console.log('[admin-perf] order delivery stop completion success', {
                     orderId,
                     unitKey,
                     path: 'edge',
                     durationMs: Date.now() - startedAt,
-                    message: error?.message || String(error),
                 });
-                throw new Error(getDeliveryProofCompletionErrorMessage(error));
-            }
-
-            console.warn('Falling back to direct order delivery stop completion:', error.message);
-
-            try {
-                const response = {
-                    data: await completeOrderDeliveryStopDirect(orderId, unitKey, {
-                        ...options,
-                        proofFile: normalizedProofFile,
-                    }),
-                };
-                console.log('[admin-perf] order delivery stop completion success', {
-                    orderId,
-                    unitKey,
-                    path: 'direct',
-                    durationMs: Date.now() - startedAt,
-                });
-                return response;
-            } catch (directError) {
+                return { data };
+            } catch (edgeError) {
                 console.log('[admin-perf] order delivery stop completion failed', {
                     orderId,
                     unitKey,
-                    path: 'direct',
+                    path: 'direct+edge',
                     durationMs: Date.now() - startedAt,
-                    message: directError?.message || String(directError),
+                    directMessage: directError?.message || String(directError),
+                    edgeMessage: edgeError?.message || String(edgeError),
                 });
-                throw new Error(getDeliveryProofCompletionErrorMessage(directError));
+                throw new Error(getDeliveryProofCompletionFallbackMessage(directError, edgeError));
             }
         }
     },
@@ -5566,57 +5574,46 @@ export const adminAPI = {
         });
 
         try {
-            const data = await invokeAdminWorkflow('complete_request_delivery_stop', {
-                requestId,
-                unitKey,
+            const data = await completeRequestDeliveryStopDirect(requestId, unitKey, {
+                ...options,
                 proofFile: normalizedProofFile,
-                proofNote: options?.proofNote || '',
             });
 
             console.log('[admin-perf] request delivery stop completion success', {
                 requestId,
                 unitKey,
-                path: 'edge',
+                path: 'direct',
                 durationMs: Date.now() - startedAt,
             });
             return { data };
-        } catch (error) {
-            if (!shouldFallbackToDirectWorkflow(error)) {
-                console.log('[admin-perf] request delivery stop completion failed', {
+        } catch (directError) {
+            console.warn('Direct request delivery stop completion failed, trying manage-admin-workflows fallback:', directError.message);
+
+            try {
+                const data = await invokeAdminWorkflow('complete_request_delivery_stop', {
+                    requestId,
+                    unitKey,
+                    proofFile: normalizedProofFile,
+                    proofNote: options?.proofNote || '',
+                });
+
+                console.log('[admin-perf] request delivery stop completion success', {
                     requestId,
                     unitKey,
                     path: 'edge',
                     durationMs: Date.now() - startedAt,
-                    message: error?.message || String(error),
                 });
-                throw new Error(getDeliveryProofCompletionErrorMessage(error));
-            }
-
-            console.warn('Falling back to direct request delivery stop completion:', error.message);
-
-            try {
-                const response = {
-                    data: await completeRequestDeliveryStopDirect(requestId, unitKey, {
-                        ...options,
-                        proofFile: normalizedProofFile,
-                    }),
-                };
-                console.log('[admin-perf] request delivery stop completion success', {
-                    requestId,
-                    unitKey,
-                    path: 'direct',
-                    durationMs: Date.now() - startedAt,
-                });
-                return response;
-            } catch (directError) {
+                return { data };
+            } catch (edgeError) {
                 console.log('[admin-perf] request delivery stop completion failed', {
                     requestId,
                     unitKey,
-                    path: 'direct',
+                    path: 'direct+edge',
                     durationMs: Date.now() - startedAt,
-                    message: directError?.message || String(directError),
+                    directMessage: directError?.message || String(directError),
+                    edgeMessage: edgeError?.message || String(edgeError),
                 });
-                throw new Error(getDeliveryProofCompletionErrorMessage(directError));
+                throw new Error(getDeliveryProofCompletionFallbackMessage(directError, edgeError));
             }
         }
     },
