@@ -161,10 +161,12 @@ const isMissingStockReservationsTableError = (error) => {
   const details = String(error?.details || '').toLowerCase();
   const hint = String(error?.hint || '').toLowerCase();
   const code = String(error?.code || '').toLowerCase();
+  const status = String(error?.status || error?.statusCode || '').toLowerCase();
   const combined = `${message} ${details} ${hint}`;
 
   return code === 'pgrst205'
     || code === '42p01'
+    || status === '404'
     || (combined.includes('stock_reservations') && combined.includes('not found'))
     || (combined.includes('stock_reservations') && combined.includes('404'))
     || combined.includes("relation 'public.stock_reservations' does not exist")
@@ -286,6 +288,7 @@ export const reserveRequestStockAllocations = async ({
       skipped: false,
       usedFallback: true,
       viaFunction: false,
+      infrastructureUnavailable: true,
     };
   }
 

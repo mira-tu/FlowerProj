@@ -1625,6 +1625,28 @@ const ADMIN_REQUEST_QUERY_SESSION_CACHE = {
     userLookupOptionOverrides: {},
 };
 
+const ADMIN_ORDER_QUERY_SESSION_CACHE = {
+    orderOptionOverrides: {},
+    disableEmbeddedUsers: false,
+};
+
+const ORDER_QUERY_OPTION_FALLBACKS = [
+    ['notes', 'includeNotes', 'notes'],
+    ['cancellation_reason', 'includeCancellationReason', 'cancellation_reason'],
+    ['payment_status', 'includePaymentStatus', 'payment_status'],
+    ['payment_method', 'includePaymentMethod', 'payment_method'],
+    ['receipt_url', 'includeReceiptUrl', 'receipt_url'],
+    ['gcash_reference_number', 'includeGcashReferenceNumber', 'gcash_reference_number'],
+    ['amount_received', 'includeAmountReceived', 'amount_received'],
+    ['additional_receipts', 'includeAdditionalReceipts', 'additional_receipts'],
+    ['assigned_rider', 'includeAssignedRider', 'assigned_rider'],
+];
+
+const ORDER_EMBEDDED_USER_FALLBACKS = [
+    ['email', 'includeUserEmail', 'users.email'],
+    ['phone', 'includeUserPhone', 'users.phone'],
+];
+
 const REQUEST_QUERY_OPTION_FALLBACKS = [
     ['image_url', 'includeImageUrl', 'image_url'],
     ['notes', 'includeNotes', 'notes'],
@@ -4031,53 +4053,65 @@ export const adminAPI = {
         const buildOrdersQuery = ({
             includeNotes = true,
             includeCancellationReason = true,
+            includePaymentStatus = true,
+            includePaymentMethod = true,
+            includeReceiptUrl = true,
             includeGcashReferenceNumber = true,
+            includeAmountReceived = true,
+            includeAdditionalReceipts = true,
+            includeAssignedRider = true,
+            includeUsers = true,
+            includeUserEmail = true,
+            includeUserPhone = true,
         } = {}) => {
+            const userColumns = [
+                'id',
+                'name',
+                ...(includeUserEmail !== false ? ['email'] : []),
+                ...(includeUserPhone !== false ? ['phone'] : []),
+            ];
+            const columns = [
+                'id',
+                'user_id',
+                'created_at',
+                'order_number',
+                'status',
+                ...(includeAssignedRider ? ['assigned_rider'] : []),
+                ...(includePaymentStatus ? ['payment_status'] : []),
+                ...(includePaymentMethod ? ['payment_method'] : []),
+                ...(includeReceiptUrl ? ['receipt_url'] : []),
+                ...(includeGcashReferenceNumber ? ['gcash_reference_number'] : []),
+                ...(includeAdditionalReceipts ? ['additional_receipts'] : []),
+                'pickup_time',
+                'total',
+                'subtotal',
+                'shipping_fee',
+                ...(includeCancellationReason ? ['cancellation_reason'] : []),
+                'delivery_method',
+                ...(includeNotes ? ['notes'] : []),
+                'shipping_address: addresses!address_id(*)',
+                ...(includeUsers ? [`users (${userColumns.join(', ')})`] : []),
+                `order_items (
+                    id,
+                    product_id,
+                    quantity,
+                    cancelled_quantity,
+                    cancellation_history,
+                    price,
+                    name,
+                    image_url,
+                    products (
+                        name,
+                        image_url
+                    )
+                )`,
+                'third_party_rider_name',
+                'third_party_rider_info',
+                ...(includeAmountReceived ? ['amount_received'] : []),
+            ];
             let query = supabase
                 .from('orders')
-                .select(`
-                    id,
-                    created_at,
-                    order_number,
-                    status,
-                    assigned_rider,
-                    payment_status,
-                    payment_method,
-                    receipt_url,
-                    ${includeGcashReferenceNumber ? 'gcash_reference_number,' : ''}
-                    additional_receipts,
-                    pickup_time,
-                    total,
-                    subtotal,
-                    shipping_fee,
-                    ${includeCancellationReason ? 'cancellation_reason,' : ''}
-                    delivery_method,
-                    ${includeNotes ? 'notes,' : ''}
-                    shipping_address: addresses!address_id(*),
-                    users (
-                        id,
-                        name,
-                        email,
-                        phone
-                    ),
-                    order_items (
-                        id,
-                        product_id,
-                        quantity,
-                        cancelled_quantity,
-                        cancellation_history,
-                        price,
-                        name,
-                        image_url,
-                        products (
-                            name,
-                            image_url
-                        )
-                    ),
-                    third_party_rider_name,
-                    third_party_rider_info,
-                    amount_received
-                `)
+                .select(columns.join(', '))
                 .order('created_at', { ascending: false });
 
             if (params?.status) {
@@ -4087,27 +4121,85 @@ export const adminAPI = {
             return query;
         };
 
-        let queryOptions = { includeNotes: true, includeCancellationReason: true, includeGcashReferenceNumber: true };
+        let queryOptions = {
+            includeNotes: true,
+            includeCancellationReason: true,
+            includePaymentStatus: true,
+            includePaymentMethod: true,
+            includeReceiptUrl: true,
+            includeGcashReferenceNumber: true,
+            includeAmountReceived: true,
+            includeAdditionalReceipts: true,
+            includeAssignedRider: true,
+            includeUsers: true,
+            includeUserEmail: true,
+            includeUserPhone: true,
+            ...ADMIN_ORDER_QUERY_SESSION_CACHE.orderOptionOverrides,
+        };
+        const shouldIncludeUsers = ADMIN_ORDER_QUERY_SESSION_CACHE.disableEmbeddedUsers !== true;
+        if (!shouldIncludeUsers) {
+            queryOptions = {
+                ...queryOptions,
+                includeUsers: false,
+                includeUserEmail: false,
+                includeUserPhone: false,
+            };
+        }
+
         let { data: orders, error } = await buildOrdersQuery(queryOptions);
 
-        const missingColumnError = () => error?.code === '42703' ? String(error?.message || '') : '';
+        let shouldRetry = true;
+        while (error && shouldRetry) {
+            shouldRetry = false;
 
-        if (missingColumnError().includes('orders.notes')) {
-            console.warn('Orders table is missing the notes column; retrying admin order fetch without it.');
-            queryOptions = { ...queryOptions, includeNotes: false };
-            ({ data: orders, error } = await buildOrdersQuery(queryOptions));
-        }
+            const missingOrderColumn = getMissingTableColumnFallback(
+                error,
+                'orders',
+                ORDER_QUERY_OPTION_FALLBACKS,
+                queryOptions
+            );
 
-        if (missingColumnError().includes('orders.cancellation_reason')) {
-            console.warn('Orders table is missing the cancellation_reason column; retrying admin order fetch without it.');
-            queryOptions = { ...queryOptions, includeCancellationReason: false };
-            ({ data: orders, error } = await buildOrdersQuery(queryOptions));
-        }
+            if (missingOrderColumn) {
+                const [, optionKey, columnLabel] = missingOrderColumn;
+                console.warn(`Orders table is missing the ${columnLabel} column; retrying admin order fetch without it.`);
+                queryOptions = { ...queryOptions, [optionKey]: false };
+                ADMIN_ORDER_QUERY_SESSION_CACHE.orderOptionOverrides[optionKey] = false;
+                ({ data: orders, error } = await buildOrdersQuery(queryOptions));
+                shouldRetry = Boolean(error);
+                continue;
+            }
 
-        if (missingColumnError().includes('orders.gcash_reference_number')) {
-            console.warn('Orders table is missing the gcash_reference_number column; retrying admin order fetch without it.');
-            queryOptions = { ...queryOptions, includeGcashReferenceNumber: false };
-            ({ data: orders, error } = await buildOrdersQuery(queryOptions));
+            const missingEmbeddedUserColumn = queryOptions.includeUsers !== false
+                ? getMissingTableColumnFallback(
+                    error,
+                    'users',
+                    ORDER_EMBEDDED_USER_FALLBACKS,
+                    queryOptions
+                )
+                : null;
+
+            if (missingEmbeddedUserColumn) {
+                const [, optionKey, columnLabel] = missingEmbeddedUserColumn;
+                console.warn(`Orders user join is missing the ${columnLabel} column; retrying admin order fetch without it.`);
+                queryOptions = { ...queryOptions, [optionKey]: false };
+                ADMIN_ORDER_QUERY_SESSION_CACHE.orderOptionOverrides[optionKey] = false;
+                ({ data: orders, error } = await buildOrdersQuery(queryOptions));
+                shouldRetry = Boolean(error);
+                continue;
+            }
+
+            if (queryOptions.includeUsers !== false && shouldIncludeUsers && isUsersEmbedRelationshipError(error)) {
+                console.warn('Orders query cannot embed users in this schema; retrying admin order fetch with a secondary user lookup.');
+                queryOptions = {
+                    ...queryOptions,
+                    includeUsers: false,
+                    includeUserEmail: false,
+                    includeUserPhone: false,
+                };
+                ADMIN_ORDER_QUERY_SESSION_CACHE.disableEmbeddedUsers = true;
+                ({ data: orders, error } = await buildOrdersQuery(queryOptions));
+                shouldRetry = Boolean(error);
+            }
         }
 
         if (error) {
@@ -4115,12 +4207,19 @@ export const adminAPI = {
             throw error;
         }
 
+        let fallbackUserMap = new Map();
+        if (shouldIncludeUsers && queryOptions.includeUsers === false) {
+            fallbackUserMap = await fetchAdminRequestUsersByIds((orders || []).map((order) => order?.user_id));
+        }
+
         const formattedOrders = orders.map(order => {
             const parsedNotes = parseMultiDeliveryNotes(order.notes);
             const orderNotesPaymentMetadata = getOrderPaymentMetadataFromNotes(order.notes);
-            const customerName = order.users ? order.users.name : 'N/A';
-            const customerEmail = order.users ? order.users.email : 'N/A';
-            const customerPhone = order.users ? order.users.phone : 'N/A';
+            const embeddedUser = Array.isArray(order.users) ? order.users[0] || {} : (order.users || {});
+            const fallbackUser = fallbackUserMap.get(String(order.user_id)) || {};
+            const customerName = embeddedUser?.name || fallbackUser?.name || 'N/A';
+            const customerEmail = embeddedUser?.email || fallbackUser?.email || 'N/A';
+            const customerPhone = embeddedUser?.phone || fallbackUser?.phone || 'N/A';
 
             const items = order.order_items.map(item => {
                 const originalQuantity = Number(item.quantity || 0);
