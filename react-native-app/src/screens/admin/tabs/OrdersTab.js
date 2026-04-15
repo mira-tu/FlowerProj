@@ -1302,6 +1302,12 @@ const deliveryStepperStatuses = [
                       Cancelled: {orderItem.cancelled_quantity}
                     </Text>
                   )}
+                  {Number(orderItem.cancelled_quantity || 0) > 0 && orderItem.latest_cancellation_reason ? (
+                    <View style={{ marginTop: 6 }}>
+                      <Text style={[styles.eoInfoLabel, { color: '#EF4444' }]}>Cancel Reason</Text>
+                      <Text style={styles.eoInstructionsText}>{orderItem.latest_cancellation_reason}</Text>
+                    </View>
+                  ) : null}
                   <Text style={styles.eoItemPrice}>PHP {formatOrderItemPrice(orderItem?.price)}</Text>
                 </View>
               </View>
@@ -1329,7 +1335,7 @@ const deliveryStepperStatuses = [
           </View>
         ) : null}
 
-        {item.status === 'cancelled' && item.cancellation_reason ? (
+        {item.status === 'cancelled' && item.cancellation_reason && (!Array.isArray(item.items) || item.items.length <= 1) ? (
           <View style={styles.eoSection}>
             <View style={styles.eoSectionHeader}>
               <Ionicons name="alert-circle-outline" size={16} color="#EF4444" />

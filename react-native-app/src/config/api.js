@@ -312,6 +312,25 @@ const parseJsonObject = (value) => {
     return typeof value === 'object' ? value : {};
 };
 
+const getLatestCancellationEntry = (history = []) => {
+    if (!Array.isArray(history) || history.length === 0) {
+        return null;
+    }
+
+    return history
+        .filter((entry) => entry && typeof entry === 'object')
+        .reduce((latestEntry, entry) => {
+            if (!latestEntry) {
+                return entry;
+            }
+
+            const latestTimestamp = new Date(latestEntry.cancelled_at || 0).getTime();
+            const entryTimestamp = new Date(entry.cancelled_at || 0).getTime();
+
+            return entryTimestamp >= latestTimestamp ? entry : latestEntry;
+        }, null);
+};
+
 const getOrderStopSourceItems = (order = {}) => {
     const requestData = parseJsonObject(order?.request_data);
     const orderItems = Array.isArray(order?.order_items)
@@ -4225,6 +4244,8 @@ export const adminAPI = {
                 const originalQuantity = Number(item.quantity || 0);
                 const cancelledQuantity = Number(item.cancelled_quantity || 0);
                 const remainingQuantity = Math.max(0, originalQuantity - cancelledQuantity);
+                const cancellationHistory = Array.isArray(item.cancellation_history) ? item.cancellation_history : [];
+                const latestCancellationEntry = getLatestCancellationEntry(cancellationHistory);
 
                 return {
                     id: item.id,
@@ -4233,7 +4254,9 @@ export const adminAPI = {
                     original_quantity: originalQuantity,
                     cancelled_quantity: cancelledQuantity,
                     remaining_quantity: remainingQuantity,
-                    cancellation_history: Array.isArray(item.cancellation_history) ? item.cancellation_history : [],
+                    cancellation_history: cancellationHistory,
+                    latest_cancellation_reason: String(latestCancellationEntry?.reason || '').trim() || null,
+                    latest_cancelled_at: latestCancellationEntry?.cancelled_at || null,
                     price: item.price,
                     name: item.name || (item.products ? item.products.name : 'Unknown Product'),
                     image_url: item.image_url || (item.products ? item.products.image_url : null),
