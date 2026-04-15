@@ -118,6 +118,8 @@ const Signup = () => {
     const [error, setError] = useState('');
     const [notice, setNotice] = useState({ type: '', message: '' });
     const [loading, setLoading] = useState(false);
+    const [showPassword, setShowPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [currentCalendarYear, setCurrentCalendarYear] = useState(() => new Date().getFullYear());
     const signupGenderOptions = useMemo(
         () => GENDER_OPTIONS.filter((option) => option.value !== 'Non-binary'),
@@ -648,7 +650,7 @@ const Signup = () => {
                             <div className="col-md-6">
                                 <div className="form-floating">
                                     <input
-                                        type="password"
+                                        type={showPassword ? 'text' : 'password'}
                                         className={`form-control ${fieldErrors.password ? 'is-invalid' : ''}`}
                                         id="floatingPassword"
                                         name="password"
@@ -659,13 +661,22 @@ const Signup = () => {
                                         disabled={loading}
                                     />
                                     <label htmlFor="floatingPassword">Password</label>
+                                    <button
+                                        type="button"
+                                        className="btn btn-link position-absolute top-50 end-0 translate-middle-y me-3 p-0 text-secondary"
+                                        style={{ zIndex: 4 }}
+                                        onClick={() => setShowPassword((previous) => !previous)}
+                                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                                    >
+                                        <i className={`fa-regular ${showPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                                    </button>
                                     {fieldErrors.password && <div className="invalid-feedback">{fieldErrors.password}</div>}
                                 </div>
                             </div>
                             <div className="col-md-6">
                                 <div className="form-floating">
                                     <input
-                                        type="password"
+                                        type={showConfirmPassword ? 'text' : 'password'}
                                         className={`form-control ${fieldErrors.confirmPassword ? 'is-invalid' : ''}`}
                                         id="floatingConfirmPassword"
                                         name="confirmPassword"
@@ -676,6 +687,15 @@ const Signup = () => {
                                         disabled={loading}
                                     />
                                     <label htmlFor="floatingConfirmPassword">Confirm Password</label>
+                                    <button
+                                        type="button"
+                                        className="btn btn-link position-absolute top-50 end-0 translate-middle-y me-3 p-0 text-secondary"
+                                        style={{ zIndex: 4 }}
+                                        onClick={() => setShowConfirmPassword((previous) => !previous)}
+                                        aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                                    >
+                                        <i className={`fa-regular ${showConfirmPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                                    </button>
                                     {fieldErrors.confirmPassword && <div className="invalid-feedback">{fieldErrors.confirmPassword}</div>}
                                 </div>
                             </div>

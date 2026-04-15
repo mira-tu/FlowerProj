@@ -2789,6 +2789,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   const [hasMoreRequests, setHasMoreRequests] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [statusFilter, setStatusFilter] = useState('All');
+  const [searchQuery, setSearchQuery] = useState('');
   const [activeActionKey, setActiveActionKey] = useState(null);
   const actionLockRef = useRef(null);
   const requestsLoadInProgressRef = useRef(false);
@@ -3245,8 +3246,38 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
         }
       });
     }
+
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+    if (normalizedSearch) {
+      result = result.filter((request) => {
+        const requestData = normalizeRequestData(request);
+        return [
+          request?.request_number,
+          request?.type,
+          request?.status,
+          request?.users?.name,
+          request?.users?.email,
+          request?.contact_number,
+          requestData?.occasion,
+          requestData?.otherOccasion,
+          requestData?.recipientName,
+          requestData?.recipient_name,
+          requestData?.venue,
+          requestData?.message,
+          requestData?.delivery_address,
+          requestData?.deliveryAddress,
+          JSON.stringify(requestData?.items || []),
+          JSON.stringify(requestData?.arrangementSelections || []),
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(normalizedSearch);
+      });
+    }
+
     return result;
-  }, [riderScopedRequests, statusFilter]);
+  }, [riderScopedRequests, searchQuery, statusFilter]);
 
   const focusedRequest = React.useMemo(() => {
     if (focusedEntityTarget?.entityType !== 'request' || !focusedEntityTarget?.entityId) {
@@ -5451,6 +5482,22 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
             </TouchableOpacity>
           ))}
         </ScrollView>
+      </View>
+
+      <View style={[styles.riderSearchContainer, { marginHorizontal: 16, marginTop: -4, marginBottom: 12 }]}>
+        <Ionicons name="search" size={20} color="#999" style={styles.riderSearchIcon} />
+        <TextInput
+          style={styles.riderSearchInput}
+          placeholder="Search requests..."
+          placeholderTextColor="#9ca3af"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+        {searchQuery ? (
+          <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <Ionicons name="close-circle" size={18} color="#9ca3af" />
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       {listErrorMessage ? (

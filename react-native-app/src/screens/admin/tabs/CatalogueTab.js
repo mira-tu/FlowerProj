@@ -59,6 +59,7 @@ const CatalogueTab = () => {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -180,9 +181,28 @@ const CatalogueTab = () => {
     }
   };
 
-  const filteredProducts = selectedCategory === 'All'
-    ? products
-    : products.filter(p => p.category_name === selectedCategory);
+  const filteredProducts = products.filter((product) => {
+    if (selectedCategory !== 'All' && product.category_name !== selectedCategory) {
+      return false;
+    }
+
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+    if (!normalizedSearch) {
+      return true;
+    }
+
+    return [
+      product.name,
+      product.category_name,
+      product.description,
+      product.price,
+      product.stock_quantity,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+      .includes(normalizedSearch);
+  });
 
   const handleNumericInput = (field, text) => {
     const numericText = text.replace(/[^0-9.]/g, '');
@@ -459,6 +479,22 @@ const CatalogueTab = () => {
             </TouchableOpacity>
           ))}
         </ScrollView>
+      </View>
+
+      <View style={styles.riderSearchContainer}>
+        <Ionicons name="search" size={20} color="#999" style={styles.riderSearchIcon} />
+        <TextInput
+          style={styles.riderSearchInput}
+          placeholder="Search catalogue..."
+          placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+        {searchQuery ? (
+          <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <Ionicons name="close-circle" size={18} color="#9ca3af" />
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       <FlatList

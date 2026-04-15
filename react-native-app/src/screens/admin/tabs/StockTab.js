@@ -195,6 +195,7 @@ const withStockRetry = async (task) => {
 const StockTab = () => {
   const [activeStockTab, setActiveStockTab] = useState('Ribbons');
   const [ribbonScopeFilter, setRibbonScopeFilter] = useState('classic_bouquet');
+  const [searchQuery, setSearchQuery] = useState('');
   const [stockItems, setStockItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -648,15 +649,26 @@ const StockTab = () => {
 
   const filteredStock = useMemo(() => {
     const items = stockItems.filter((item) => normalizeStockCategory(item.category) === activeStockTab);
+    const scopedItems = activeStockTab !== 'Ribbons'
+      ? items
+      : items.filter((item) => resolveRibbonScopeForStockItem(item) === ribbonScopeFilter);
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+    const searchedItems = normalizedSearch
+      ? scopedItems.filter((item) => [
+        getStockDisplayName(item),
+        getStockMetadataDescription(item),
+        item?.unit,
+        item?.quantity,
+        item?.price,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(normalizedSearch))
+      : scopedItems;
 
-    if (activeStockTab !== 'Ribbons') {
-      return items;
-    }
-
-    return items
-      .filter((item) => resolveRibbonScopeForStockItem(item) === ribbonScopeFilter)
-      .sort((left, right) => getStockDisplayName(left).localeCompare(getStockDisplayName(right)));
-  }, [activeStockTab, ribbonScopeFilter, stockItems]);
+    return searchedItems.sort((left, right) => getStockDisplayName(left).localeCompare(getStockDisplayName(right)));
+  }, [activeStockTab, ribbonScopeFilter, searchQuery, stockItems]);
   const modalStockCategory = normalizeStockCategory(editingStock?.category || activeStockTab);
   const isWrapperForm = modalStockCategory === 'Wrappers';
   const isRibbonForm = modalStockCategory === 'Ribbons';
@@ -820,6 +832,22 @@ const StockTab = () => {
           </View>
         </View>
       ) : null}
+
+      <View style={[styles.riderSearchContainer, { marginTop: 6, marginBottom: 10 }]}>
+        <Ionicons name="search" size={20} color="#999" style={styles.riderSearchIcon} />
+        <TextInput
+          style={styles.riderSearchInput}
+          placeholder={`Search ${activeStockTab.toLowerCase()}...`}
+          placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+        {searchQuery ? (
+          <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <Ionicons name="close-circle" size={18} color="#9ca3af" />
+          </TouchableOpacity>
+        ) : null}
+      </View>
     </>
   );
 

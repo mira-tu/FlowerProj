@@ -275,6 +275,8 @@ const Profile = ({ user, logout }) => {
     const [refundTargetOrder, setRefundTargetOrder] = useState(null);
     const [refundReason, setRefundReason] = useState('');
     const [submittingRefundRequest, setSubmittingRefundRequest] = useState(false);
+    const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+    const [showNewPassword, setShowNewPassword] = useState(false);
     const fallbackProfileName = getUserFullName(profileData || {}, user) || user?.email || '';
     const fallbackProfilePhone = getUserContactNumber(profileData || {}, user);
 
@@ -2044,24 +2046,42 @@ const Profile = ({ user, logout }) => {
                     <div className="col-md-6 mb-3">
                         <label className="form-label">Current Password</label>
                         <input
-                            type="password"
+                            type={showCurrentPassword ? 'text' : 'password'}
                             className="form-control"
                             name="currentPassword"
                             value={profileForm.currentPassword}
                             onChange={handleProfileFormChange}
                             placeholder="Leave blank to keep current"
                         />
+                        <button
+                            type="button"
+                            className="btn btn-link position-absolute translate-middle-y p-0 text-secondary"
+                            style={{ top: '74%', right: '14px', zIndex: 2 }}
+                            onClick={() => setShowCurrentPassword((previous) => !previous)}
+                            aria-label={showCurrentPassword ? 'Hide current password' : 'Show current password'}
+                        >
+                            <i className={`fa-regular ${showCurrentPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                        </button>
                     </div>
                     <div className="col-md-6 mb-3">
                         <label className="form-label">New Password</label>
                         <input
-                            type="password"
+                            type={showNewPassword ? 'text' : 'password'}
                             className="form-control"
                             name="newPassword"
                             value={profileForm.newPassword}
                             onChange={handleProfileFormChange}
                             placeholder="Enter new password"
                         />
+                        <button
+                            type="button"
+                            className="btn btn-link position-absolute translate-middle-y p-0 text-secondary"
+                            style={{ top: '74%', right: '14px', zIndex: 2 }}
+                            onClick={() => setShowNewPassword((previous) => !previous)}
+                            aria-label={showNewPassword ? 'Hide new password' : 'Show new password'}
+                        >
+                            <i className={`fa-regular ${showNewPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                        </button>
                     </div>
                 </div>
 

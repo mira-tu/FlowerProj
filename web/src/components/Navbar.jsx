@@ -113,6 +113,7 @@ const Navbar = ({ cartCount, user, logout }) => {
                             <li className="nav-item"><Link className="nav-link active" to="/">Home</Link></li>
                             <li className="nav-item"><Link className="nav-link" to="/about">About</Link></li>
                             <li className="nav-item"><Link className="nav-link" to="/contact">Contact</Link></li>
+                            <li className="nav-item"><Link className="nav-link" to="/faq">FAQ</Link></li>
                             <li className="nav-item dropdown">
                                 <a className="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                                     Services
@@ -160,6 +161,7 @@ const Navbar = ({ cartCount, user, logout }) => {
                                     </a>
                                     <ul className="dropdown-menu dropdown-menu-end border-0 shadow-sm">
                                         <li><Link className="dropdown-item" to="/profile">My Profile</Link></li>
+                                        <li><Link className="dropdown-item" to="/faq">FAQs</Link></li>
                                         <li><hr className="dropdown-divider" /></li>
                                         <li><button className="dropdown-item text-danger" onClick={logout}>Logout</button></li>
                                     </ul>
@@ -189,6 +191,7 @@ const Navbar = ({ cartCount, user, logout }) => {
                         <li><Link to="/" onClick={closeMenu}><i className="fa-solid fa-house"></i> Home</Link></li>
                         <li><Link to="/about" onClick={closeMenu}><i className="fa-solid fa-circle-info"></i> About</Link></li>
                         <li><Link to="/contact" onClick={closeMenu}><i className="fa-solid fa-envelope"></i> Contact</Link></li>
+                        <li><Link to="/faq" onClick={closeMenu}><i className="fa-solid fa-circle-question"></i> FAQ</Link></li>
                         <li><Link to="/custom-order" onClick={closeMenu}><i className="fa-solid fa-calendar-check"></i> Custom Order</Link></li>
               <li><Link to="/customized" onClick={closeMenu}><i className="fa-solid fa-wand-magic-sparkles"></i> Customizer Studio</Link></li>
                     </ul>
@@ -224,6 +227,10 @@ const Navbar = ({ cartCount, user, logout }) => {
                             <Link to="/profile" className="mobile-profile-link" onClick={closeMenu}>
                                 <i className="fa-regular fa-user"></i>
                                 <span>{user.name || 'My Profile'}</span>
+                            </Link>
+                            <Link to="/faq" className="mobile-profile-link" onClick={closeMenu}>
+                                <i className="fa-solid fa-circle-question"></i>
+                                <span>FAQs</span>
                             </Link>
                             <button className="mobile-logout-btn" onClick={() => { logout(); closeMenu(); }}>
                                 <i className="fa-solid fa-right-from-bracket"></i>

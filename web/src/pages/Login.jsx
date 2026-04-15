@@ -73,6 +73,7 @@ const Login = ({ onLogin }) => {
     const navigate = useNavigate();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
     const [loginRetryAfter, setLoginRetryAfter] = useState(0);
     const [loading, setLoading] = useState(false);
@@ -530,7 +531,7 @@ const Login = ({ onLogin }) => {
                                 </div>
                                 <div className="form-floating mb-3">
                                     <input
-                                        type="password"
+                                        type={showPassword ? 'text' : 'password'}
                                         className="form-control"
                                         id="floatingPassword"
                                         placeholder="Password"
@@ -540,6 +541,15 @@ const Login = ({ onLogin }) => {
                                         disabled={loading}
                                     />
                                     <label htmlFor="floatingPassword">Password</label>
+                                    <button
+                                        type="button"
+                                        className="btn btn-link position-absolute top-50 end-0 translate-middle-y me-3 p-0 text-secondary"
+                                        style={{ zIndex: 4 }}
+                                        onClick={() => setShowPassword((previous) => !previous)}
+                                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                                    >
+                                        <i className={`fa-regular ${showPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                                    </button>
                                 </div>
 
                                 <div className="d-flex justify-content-end align-items-center mb-4">

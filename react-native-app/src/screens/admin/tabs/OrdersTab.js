@@ -131,6 +131,7 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [statusFilter, setStatusFilter] = useState('All');
+  const [searchQuery, setSearchQuery] = useState('');
   const [activeActionKey, setActiveActionKey] = useState(null);
   const actionLockRef = useRef(null);
   const ordersLoadInProgressRef = useRef(false);
@@ -450,8 +451,30 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
         }
       });
     }
+
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+    if (normalizedSearch) {
+      result = result.filter((order) => {
+        const orderItems = Array.isArray(order?.order_items) ? order.order_items : [];
+        return [
+          order?.order_number,
+          order?.status,
+          order?.users?.name,
+          order?.users?.email,
+          order?.users?.phone,
+          order?.shipping_address?.street,
+          order?.shipping_address?.barangay,
+          order?.shipping_address?.city,
+          ...orderItems.map((item) => item?.products?.name || item?.name),
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(normalizedSearch);
+      });
+    }
     return result;
-  }, [riderScopedOrders, statusFilter]);
+  }, [riderScopedOrders, searchQuery, statusFilter]);
 
   const focusedOrder = React.useMemo(() => {
     if (focusedEntityTarget?.entityType !== 'order' || !focusedEntityTarget?.entityId) {
@@ -1860,6 +1883,22 @@ const deliveryStepperStatuses = [
             </TouchableOpacity>
           ))}
         </ScrollView>
+      </View>
+
+      <View style={[styles.riderSearchContainer, { marginHorizontal: 16, marginTop: -4, marginBottom: 12 }]}>
+        <Ionicons name="search" size={20} color="#999" style={styles.riderSearchIcon} />
+        <TextInput
+          style={styles.riderSearchInput}
+          placeholder="Search orders..."
+          placeholderTextColor="#9ca3af"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+        {searchQuery ? (
+          <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <Ionicons name="close-circle" size={18} color="#9ca3af" />
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       {focusedEntityTarget?.entityType === 'order' ? (

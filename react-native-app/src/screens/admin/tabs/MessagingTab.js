@@ -31,6 +31,7 @@ const MessagingTab = ({ currentUser, customerToMessage, setCustomerToMessage, se
     const [selectedConversation, setSelectedConversation] = useState(null);
     const [messages, setMessages] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
     const [newMessage, setNewMessage] = useState('');
     const flatListRef = React.useRef(null);
     const navigation = useNavigation();
@@ -245,6 +246,25 @@ const MessagingTab = ({ currentUser, customerToMessage, setCustomerToMessage, se
         );
     };
 
+    const filteredConversations = React.useMemo(() => {
+        const normalizedSearch = searchQuery.trim().toLowerCase();
+        if (!normalizedSearch) {
+            return conversations;
+        }
+
+        return conversations.filter((conversation) => (
+            [
+                conversation?.user?.name,
+                conversation?.user?.email,
+                conversation?.lastMessage,
+            ]
+                .filter(Boolean)
+                .join(' ')
+                .toLowerCase()
+                .includes(normalizedSearch)
+        ));
+    }, [conversations, searchQuery]);
+
     if (selectedConversation) {
         return (
             <View style={styles.tabContent}>
@@ -279,6 +299,21 @@ const MessagingTab = ({ currentUser, customerToMessage, setCustomerToMessage, se
     return (
         <View style={styles.tabContent}>
             <Text style={styles.tabTitle}>Conversations</Text>
+            <View style={[styles.riderSearchContainer, { marginHorizontal: 16, marginTop: 8, marginBottom: 12 }]}>
+                <Ionicons name="search" size={20} color="#999" style={styles.riderSearchIcon} />
+                <TextInput
+                    style={styles.riderSearchInput}
+                    placeholder="Search conversations..."
+                    placeholderTextColor="#9ca3af"
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                />
+                {searchQuery ? (
+                    <TouchableOpacity onPress={() => setSearchQuery('')}>
+                        <Ionicons name="close-circle" size={18} color="#9ca3af" />
+                    </TouchableOpacity>
+                ) : null}
+            </View>
             {loading && !conversations.length ? (
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color="#ec4899" />
@@ -286,7 +321,7 @@ const MessagingTab = ({ currentUser, customerToMessage, setCustomerToMessage, se
                 </View>
             ) : (
                 <FlatList
-                    data={conversations} renderItem={renderConversationItem} keyExtractor={(item) => item.user?.id?.toString()}
+                    data={filteredConversations} renderItem={renderConversationItem} keyExtractor={(item) => item.user?.id?.toString()}
                     onRefresh={() => fetchConversations(currentUser)} refreshing={loading}
                     ListEmptyComponent={<Text style={styles.emptyText}>No conversations found.</Text>}
                 />

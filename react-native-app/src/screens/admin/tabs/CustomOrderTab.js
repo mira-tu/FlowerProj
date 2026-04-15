@@ -207,6 +207,7 @@ const CustomOrderTab = () => {
   const [catalog, setCatalog] = useState(() => normalizeCustomOrderAdminCatalog(DEFAULT_CUSTOM_ORDER_ADMIN_CATALOG));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [editorVisible, setEditorVisible] = useState(false);
   const [editorType, setEditorType] = useState('arrangement');
   const [editorMode, setEditorMode] = useState('create');
@@ -553,6 +554,26 @@ const CustomOrderTab = () => {
     return item.value || '';
   };
 
+  const getFilteredSectionItems = (section) => {
+    const sectionItems = Array.isArray(catalog[section.key]) ? catalog[section.key] : [];
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+    if (!normalizedSearch) {
+      return sectionItems;
+    }
+
+    return sectionItems.filter((item) => [
+      item?.label,
+      item?.value,
+      item?.groupLabel,
+      item?.description,
+      renderSectionMeta(section.type, item),
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+      .includes(normalizedSearch));
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -584,12 +605,28 @@ const CustomOrderTab = () => {
         </View>
       </View>
 
+      <View style={[styles.riderSearchContainer, { marginHorizontal: 4, marginBottom: 14 }]}>
+        <Ionicons name="search" size={20} color="#999" style={styles.riderSearchIcon} />
+        <TextInput
+          style={styles.riderSearchInput}
+          placeholder="Search custom order settings..."
+          placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+        {searchQuery ? (
+          <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <Ionicons name="close-circle" size={18} color="#9ca3af" />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
       {SECTION_CONFIG.map((section) => (
         <View key={section.key} style={styles.customOrderAdminSection}>
           <View style={styles.customOrderAdminSectionHeader}>
             <View style={{ flex: 1 }}>
               <Text style={styles.customOrderAdminSectionTitle}>{section.title}</Text>
-              <Text style={styles.customOrderAdminSectionCount}>{catalog[section.key]?.length || 0} item(s)</Text>
+              <Text style={styles.customOrderAdminSectionCount}>{getFilteredSectionItems(section).length} item(s)</Text>
             </View>
             <TouchableOpacity
               style={styles.customOrderAdminAddButton}
@@ -600,12 +637,14 @@ const CustomOrderTab = () => {
             </TouchableOpacity>
           </View>
 
-          {(catalog[section.key] || []).length === 0 ? (
+          {getFilteredSectionItems(section).length === 0 ? (
             <View style={styles.customOrderAdminEmptyState}>
-              <Text style={styles.customOrderAdminEmptyStateText}>{section.emptyText}</Text>
+              <Text style={styles.customOrderAdminEmptyStateText}>
+                {searchQuery ? 'No matching items found.' : section.emptyText}
+              </Text>
             </View>
           ) : (
-            (catalog[section.key] || []).map((item) => (
+            getFilteredSectionItems(section).map((item) => (
               <View key={item.id} style={styles.customOrderAdminItemCard}>
                 <View style={styles.customOrderAdminItemRow}>
                   <View style={styles.customOrderAdminItemPreview}>

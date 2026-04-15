@@ -66,6 +66,7 @@ import OrderTracking from './pages/OrderTracking';
 import CustomizedCheckout from './pages/CustomizedCheckout';
 import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
+import FAQ from './pages/FAQ';
 import InfoModal from './components/InfoModal';
 import { fetchCustomOrderCatalog } from './utils/customOrderCatalog';
 import { normalizeProductPricing } from './utils/productPricing';
@@ -448,6 +449,7 @@ function AppContent() {
         <Route path="/" element={<Home addToCart={addToCart} products={products} categories={categories} user={user} />} />
         <Route path="/about" element={<About />} />
         <Route path="/contact" element={<Contact />} />
+        <Route path="/faq" element={<FAQ />} />
         <Route path="/wishlist" element={<Wishlist cart={cart} addToCart={addToCart} products={products} />} />
         <Route path="/cart" element={<Cart cart={cart} updateCartItem={updateCartItem} removeFromCart={removeFromCart} user={user} />} />
         <Route path="/customized-checkout" element={<CustomizedCheckout user={user} />} />

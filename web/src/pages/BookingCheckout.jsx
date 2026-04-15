@@ -15,7 +15,7 @@ import {
 import { uploadBookingRequestImages } from '../utils/requestImageUploads';
 import { insertUserNotification } from '../utils/notificationApi';
 import { reserveRequestStockAllocations, resolveBookingRequestStockReservations } from '../utils/requestSubmission';
-import { PICKUP_TIME_OPTIONS } from '../utils/businessHours';
+import { PICKUP_TIME_OPTIONS, getEarliestPickupDate, isPickupDateSelectable } from '../utils/businessHours';
 import { buildTentativePricingSummary, getTentativeBreakdownFromItem } from '../utils/customOrderTentativePricing';
 import { fetchCustomOrderCatalog } from '../utils/customOrderCatalog';
 
@@ -376,6 +376,11 @@ const BookingCheckout = ({ user }) => {
             return;
         }
 
+        if (deliveryMethod === 'pickup' && !isPickupDateSelectable(selectedPickupDate)) {
+            showInfoModal('Invalid Pickup Date', 'Pickup must be scheduled on a weekday starting tomorrow.');
+            return;
+        }
+
         if (deliveryMethod === 'delivery' && !selectedAddressId) {
             showInfoModal('Missing Address', 'Please select a saved address before submitting your custom order.');
             return;
@@ -641,14 +646,12 @@ const BookingCheckout = ({ user }) => {
                                         type="date"
                                         className="form-control mb-3"
                                         value={selectedPickupDate}
-                                        min={new Date().toISOString().split('T')[0]}
+                                        min={getEarliestPickupDate()}
                                         onKeyDown={(event) => event.preventDefault()}
                                         onChange={(event) => {
                                             const selected = event.target.value;
-                                            const date = new Date(selected);
-                                            const day = date.getUTCDay();
-                                            if (day === 0 || day === 6) {
-                                                showInfoModal('Invalid Date', 'Pickup is only available on weekdays (Monday to Friday).');
+                                            if (!isPickupDateSelectable(selected)) {
+                                                showInfoModal('Invalid Date', 'Pickup is only available on weekdays starting tomorrow.');
                                                 setSelectedPickupDate('');
                                             } else {
                                                 setSelectedPickupDate(selected);
