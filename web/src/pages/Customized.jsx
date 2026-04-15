@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { FaChevronLeft, FaArrowRotateLeft, FaScroll, FaRibbon, FaSeedling } from 'react-icons/fa6';
 import html2canvas from 'html2canvas';
@@ -650,6 +650,7 @@ const Customized = ({ addToCart }) => {
   const previewRef = useRef(null);
   const wrapperLayerRef = useRef(null);
   const ribbonLayerRef = useRef(null);
+  const isCustomizationMountedRef = useRef(false);
   const dragStateRef = useRef(null);
   const stemIdRef = useRef(0);
 
@@ -701,10 +702,11 @@ const Customized = ({ addToCart }) => {
     };
   }, []);
 
-  useEffect(() => {
-    let isMounted = true;
+  const fetchCustomizationData = useCallback(async ({ suppressModal = false, showLoading = false } = {}) => {
+      if (showLoading && isCustomizationMountedRef.current) {
+        setLoadingCustomizationData(true);
+      }
 
-    const fetchCustomizationData = async () => {
       try {
         const response = await stockAPI.getAll();
         const allStockItems = response.data || [];
@@ -756,7 +758,7 @@ const Customized = ({ addToCart }) => {
           buildWrapperGroups(processedWrappers)
         );
 
-        if (!isMounted) {
+        if (!isCustomizationMountedRef.current) {
           return;
         }
 
@@ -766,17 +768,20 @@ const Customized = ({ addToCart }) => {
 
       } catch (error) {
         console.error('Error fetching customization data:', error.message || error);
-        if (isMounted) {
+        if (isCustomizationMountedRef.current && !suppressModal) {
           setInfoModal({ show: true, title: 'Error', message: 'Failed to load customization options. Please try again.' });
         }
       } finally {
-        if (isMounted) {
+        if (isCustomizationMountedRef.current) {
           setLoadingCustomizationData(false);
         }
       }
-    };
+    }, []);
 
-    fetchCustomizationData();
+  useEffect(() => {
+    isCustomizationMountedRef.current = true;
+
+    fetchCustomizationData({ showLoading: true });
 
     const channel = supabase
       .channel('public:stock_products:customizer-studio')
@@ -784,16 +789,49 @@ const Customized = ({ addToCart }) => {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'stock_products' },
         () => {
-          fetchCustomizationData();
+          fetchCustomizationData({ suppressModal: true });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'stock_reservations' },
+        () => {
+          fetchCustomizationData({ suppressModal: true });
         }
       )
       .subscribe();
 
-    return () => {
-      isMounted = false;
-      supabase.removeChannel(channel);
+    const refreshCustomizationData = () => {
+      fetchCustomizationData({ suppressModal: true });
     };
-  }, []);
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        refreshCustomizationData();
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', refreshCustomizationData);
+    }
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+
+    return () => {
+      isCustomizationMountedRef.current = false;
+      supabase.removeChannel(channel);
+
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', refreshCustomizationData);
+      }
+
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
+    };
+  }, [fetchCustomizationData]);
 
   const ribbonMode = useMemo(() => getWrapperRibbonMode(selection.wrapper), [selection.wrapper]);
   const classicRibbonOptions = useMemo(() => (

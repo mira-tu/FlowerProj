@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   Modal,
+  Platform,
   ScrollView,
   Text,
   TextInput,
@@ -75,7 +76,11 @@ const getNormalizedSelectedProof = (asset = {}) => {
   const normalizedUri = String(asset?.uri || '').trim();
   const uriFileName = normalizedUri.split(/[\\/]/).pop()?.split('?')[0] || '';
   const fileName = String(asset?.fileName || asset?.name || uriFileName || `delivery-proof-${Date.now()}.jpg`).trim();
-  const mimeType = String(asset?.mimeType || asset?.type || '').trim().toLowerCase() || 'image/jpeg';
+  const extension = fileName.split('.').pop()?.trim().toLowerCase();
+  const fallbackMimeType = extension && extension !== fileName.toLowerCase()
+    ? `image/${extension === 'jpg' ? 'jpeg' : extension}`
+    : 'image/jpeg';
+  const mimeType = String(asset?.mimeType || asset?.type || '').trim().toLowerCase() || fallbackMimeType;
   const base64 = String(asset?.base64 || '').trim();
 
   return {
@@ -87,6 +92,56 @@ const getNormalizedSelectedProof = (asset = {}) => {
     type: mimeType,
     base64,
   };
+};
+
+const launchDeliveryProofPickerAsync = async () => {
+  const baseOptions = {
+    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    quality: 0.8,
+    base64: false,
+  };
+
+  const pickerAttempts = Platform.OS === 'android'
+    ? [
+        {
+          ...baseOptions,
+          allowsEditing: false,
+          aspect: undefined,
+        },
+        {
+          ...baseOptions,
+          allowsEditing: false,
+          quality: 1,
+          legacy: true,
+        },
+      ]
+    : [
+        {
+          ...baseOptions,
+          allowsEditing: true,
+        },
+      ];
+
+  let lastError = null;
+
+  for (let attemptIndex = 0; attemptIndex < pickerAttempts.length; attemptIndex += 1) {
+    const pickerOptions = pickerAttempts[attemptIndex];
+
+    try {
+      return await ImagePicker.launchImageLibraryAsync(pickerOptions);
+    } catch (error) {
+      lastError = error;
+      console.warn('[admin-perf] delivery proof picker attempt failed', {
+        attempt: attemptIndex + 1,
+        platform: Platform.OS,
+        allowsEditing: pickerOptions.allowsEditing,
+        legacy: Boolean(pickerOptions.legacy),
+        message: error?.message || String(error),
+      });
+    }
+  }
+
+  throw lastError || new Error('Could not open the photo library.');
 };
 
 const DeliveryProofModal = ({
@@ -179,18 +234,16 @@ const DeliveryProofModal = ({
         return;
       }
 
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 0.8,
-        base64: true,
-      });
+      const result = await launchDeliveryProofPickerAsync();
 
       if (result.canceled || !result.assets?.[0]) {
         return;
       }
 
       const normalizedProof = getNormalizedSelectedProof(result.assets[0]);
+      if (!normalizedProof.uri && !normalizedProof.base64) {
+        throw new Error('Selected proof photo is missing a readable URI.');
+      }
       console.log('[admin-perf] delivery proof picker selected', {
         uriScheme: normalizedProof.uri?.split(':')[0] || 'unknown',
         hasBase64: Boolean(normalizedProof.base64),

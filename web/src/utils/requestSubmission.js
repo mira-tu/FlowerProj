@@ -180,8 +180,14 @@ export const reserveRequestStockAllocations = async ({
   }
 
   if (isMissingRequestStockAllocationRpcError(error)) {
-    console.warn('Request stock allocation RPC is unavailable. Falling back to trigger-based reservation handling.');
-    return { success: true, skipped: false, usedFallback: true, viaFunction: false };
+    console.error('Request stock allocation RPC is unavailable, so reservation could not be completed.', error);
+    return {
+      success: false,
+      error: new Error('Live stock reservation is not available right now. Please try again in a moment.'),
+      skipped: false,
+      usedFallback: true,
+      viaFunction: false,
+    };
   }
 
   return { success: false, error, skipped: false, usedFallback: false };

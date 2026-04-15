@@ -1785,6 +1785,10 @@ const deliveryStepperStatuses = [
     ),
     [getDeliveryProofStops, orderToCompleteStops]
   );
+  const selectedDeliveryStop = React.useMemo(
+    () => deliveryStopModalStops.find((stop) => stop.unit_key === selectedDeliveryStopKey) || null,
+    [deliveryStopModalStops, selectedDeliveryStopKey]
+  );
   const isCompactDeliveryProofLayout = screenWidth <= 480;
   const deliveryProofPreviewUri = selectedDeliveryProof?.uri || selectedDeliveryStop?.proof_image_url || null;
 

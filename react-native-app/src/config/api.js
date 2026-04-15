@@ -547,13 +547,27 @@ const getDeliveryProofFileName = (file = {}) => {
 };
 
 const getDeliveryProofMimeType = (file = {}) => {
-    const mimeType = String(file?.mimeType || file?.type || '').trim().toLowerCase();
-    if (mimeType) {
-        return mimeType;
+    const extension = getImageFileExtension(file);
+    const normalizedFromExtension = `image/${extension === 'jpg' ? 'jpeg' : extension}`;
+    const rawMimeType = String(file?.mimeType || file?.type || '').trim().toLowerCase();
+    const sanitizedMimeType = rawMimeType
+        .split(';')[0]
+        .trim()
+        .replace(/[^a-z0-9!#$&^_.+-/]+/gi, '');
+
+    if (!sanitizedMimeType || !/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(sanitizedMimeType)) {
+        return normalizedFromExtension;
     }
 
-    const extension = getImageFileExtension(file);
-    return `image/${extension === 'jpg' ? 'jpeg' : extension}`;
+    if (!sanitizedMimeType.startsWith('image/')) {
+        return normalizedFromExtension;
+    }
+
+    if (sanitizedMimeType === 'image/jpg') {
+        return 'image/jpeg';
+    }
+
+    return sanitizedMimeType;
 };
 
 const getNormalizedImageFileName = (file = {}, prefix = 'image') => {
@@ -587,20 +601,8 @@ const readImageBase64FromUri = async (file = {}, { label = 'image', tempPrefix =
 
     let workingUri = sourceUri;
     let tempUri = '';
-
-    try {
-        if (sourceUri.startsWith('content://')) {
-            const cacheBase = FileSystem.cacheDirectory || FileSystem.documentDirectory;
-            if (!cacheBase) {
-                throw new Error(`No readable cache directory is available for the ${label}.`);
-            }
-
-            tempUri = `${cacheBase}${tempPrefix}-${Date.now()}.${getImageFileExtension(file)}`;
-            await FileSystem.copyAsync({ from: sourceUri, to: tempUri });
-            workingUri = tempUri;
-        }
-
-        const base64 = await FileSystem.readAsStringAsync(workingUri, {
+    const readBase64 = async (targetUri) => {
+        const base64 = await FileSystem.readAsStringAsync(targetUri, {
             encoding: FileSystem.EncodingType.Base64,
         });
 
@@ -609,6 +611,28 @@ const readImageBase64FromUri = async (file = {}, { label = 'image', tempPrefix =
         }
 
         return String(base64).trim();
+    };
+
+    try {
+        try {
+            return await readBase64(sourceUri);
+        } catch (directReadError) {
+            if (!sourceUri.startsWith('content://')) {
+                throw directReadError;
+            }
+
+            const cacheBase = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+            if (!cacheBase) {
+                throw new Error(`No readable cache directory is available for the ${label}.`);
+            }
+
+            tempUri = `${cacheBase}${tempPrefix}-${Date.now()}.${getImageFileExtension(file)}`;
+            await FileSystem.copyAsync({ from: sourceUri, to: tempUri });
+            workingUri = tempUri;
+            console.warn(`[upload] direct ${label} read failed, retrying from copied cache file.`, directReadError?.message || directReadError);
+        }
+
+        return await readBase64(workingUri);
     } catch (error) {
         console.error(`Error reading ${label}:`, error);
         throw new Error(`Could not read the selected ${label}. Please choose it again.`);
