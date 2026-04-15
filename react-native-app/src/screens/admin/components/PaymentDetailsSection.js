@@ -18,7 +18,8 @@ import { getStatusLabel, getPaymentStatusDisplay } from '../adminHelpers';
 const PaymentDetailsSection = ({ item, styles, onRecordPay, onEditAmount, onViewReceipt, requireReceipt = false }) => {
     const { width } = useWindowDimensions();
     const isCompactHeader = width <= 420;
-    const isGCash = item.payment_method?.toLowerCase() === 'gcash' || !item.payment_method;
+    const normalizedPaymentMethod = String(item.payment_method || item.data?.payment_method || '').trim().toLowerCase();
+    const isGCash = normalizedPaymentMethod === 'gcash' || !normalizedPaymentMethod;
     const isPaid = item.payment_status === 'paid';
     const isTerminal = ['pending', 'cancelled', 'declined'].includes(item.status);
     const hasReceipt = !!(item.receipt_url);
@@ -29,8 +30,8 @@ const PaymentDetailsSection = ({ item, styles, onRecordPay, onEditAmount, onView
 
     const showRecordPay = isGCash && !isPaid && !isTerminal && (requireReceipt ? hasReceipt : true);
 
-    const methodLabel = item.payment_method
-        ? (item.payment_method.toLowerCase() === 'cod' ? 'Cash On Delivery' : getStatusLabel(item.payment_method))
+    const methodLabel = normalizedPaymentMethod
+        ? (normalizedPaymentMethod === 'cod' ? 'Cash On Delivery' : getStatusLabel(normalizedPaymentMethod))
         : 'Not specified';
 
     const statusColor = isPaid ? '#22C55E' : '#FFA726';
@@ -76,7 +77,7 @@ const PaymentDetailsSection = ({ item, styles, onRecordPay, onEditAmount, onView
             <View style={{ gap: 8 }}>
                 {/* Payment Method + Status badges */}
                 <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    {item.payment_method && (
+                    {normalizedPaymentMethod && (
                         <View style={[styles.eoPaymentStatus, { backgroundColor: '#3B82F6' }]}>
                             <Text style={styles.eoPaymentStatusText}>{methodLabel}</Text>
                         </View>
@@ -91,9 +92,9 @@ const PaymentDetailsSection = ({ item, styles, onRecordPay, onEditAmount, onView
                 </View>
 
                 {/* All receipts section — main receipt first, followed by additionals */}
-                {((isGCash && item.payment_method && item.receipt_url) || normalizedAdditionalReceipts.length > 0) && (
+                {((isGCash && item.receipt_url) || normalizedAdditionalReceipts.length > 0) && (
                     <View style={{ gap: 8, marginTop: 8 }}>
-                        {isGCash && item.payment_method && item.receipt_url && (
+                        {isGCash && item.receipt_url && (
                             <View style={{ padding: 10, borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 8, backgroundColor: '#FFFFFF' }}>
                                 <TouchableOpacity onPress={() => onViewReceipt(item.receipt_url)}>
                                     <Text style={styles.eoViewReceipt}>Main Receipt</Text>

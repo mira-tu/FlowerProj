@@ -2055,6 +2055,7 @@ const RequestSummaryCard = React.memo(({
   const canChangeStatus = !['pending', 'completed', 'cancelled', 'declined'].includes(item.status);
   const isAwaitingPayment = (item.payment_method?.toLowerCase() === 'gcash' || !item.payment_method)
     && item.payment_status !== 'paid';
+  const shouldShowPaymentReview = shouldShowRequestPaymentDetails(item, groupedDestinations);
 
   return (
     <View style={[styles.eoCard, styles.requestSummaryCard]}>
@@ -2606,6 +2607,58 @@ const getNormalizedRequestPaymentMethod = (request) => {
   return String(paymentMethod).trim().toLowerCase();
 };
 
+const getRequestPaymentEvidence = (request) => {
+  if (!request) {
+    return {
+      hasPaymentContext: false,
+      hasReceiptEvidence: false,
+    };
+  }
+
+  const requestData = normalizeRequestData(request);
+  const additionalReceipts = Array.isArray(request?.additional_receipts)
+    ? request.additional_receipts
+    : (Array.isArray(requestData?.additional_receipts) ? requestData.additional_receipts : []);
+  const hasReceiptEvidence = Boolean(
+    request?.receipt_url
+    || additionalReceipts.length > 0
+    || firstNonEmpty(request?.gcash_reference_number, requestData?.gcash_reference_number)
+  );
+  const hasPaymentContext = Boolean(
+    request?.payment_status
+    || request?.final_price
+    || request?.amount_received
+    || hasReceiptEvidence
+  );
+
+  return {
+    hasPaymentContext,
+    hasReceiptEvidence,
+  };
+};
+
+const shouldShowImmediateRequestPaymentReview = (request, groupedDestinations = []) => {
+  if (!request) return false;
+
+  const paymentMethod = getNormalizedRequestPaymentMethod(request);
+  const isGcashReview = paymentMethod === 'gcash' || !paymentMethod;
+  const isSupportedType = ['customized', 'special_order'].includes(String(request?.type || '').trim().toLowerCase());
+  const isSingleAddressFlow = !Array.isArray(groupedDestinations) || groupedDestinations.length <= 1;
+  const { hasReceiptEvidence, hasPaymentContext } = getRequestPaymentEvidence(request);
+
+  return isSupportedType && isSingleAddressFlow && isGcashReview && (hasReceiptEvidence || hasPaymentContext);
+};
+
+const shouldShowRequestPaymentDetails = (request, groupedDestinations = []) => {
+  if (!request) return false;
+
+  const { hasPaymentContext } = getRequestPaymentEvidence(request);
+  return hasPaymentContext && (
+    request.status !== 'pending'
+    || shouldShowImmediateRequestPaymentReview(request, groupedDestinations)
+  );
+};
+
 const getRequestActionKey = (action, requestId) => `${action}:${requestId || 'unknown'}`;
 
 const resolveAcceptedRequestStatus = (request) => {
@@ -3027,6 +3080,18 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
         : []
     ),
     [getDeliveryProofStops, requestToCompleteStops]
+  );
+  const selectedRequestGroupedDestinations = React.useMemo(
+    () => (
+      selectedRequest?.delivery_method === 'delivery'
+        ? getGroupedDestinations(selectedRequest)
+        : []
+    ),
+    [getGroupedDestinations, selectedRequest]
+  );
+  const selectedRequestShouldShowPaymentReview = React.useMemo(
+    () => shouldShowRequestPaymentDetails(selectedRequest, selectedRequestGroupedDestinations),
+    [selectedRequest, selectedRequestGroupedDestinations]
   );
   const selectedDeliveryStop = React.useMemo(
     () => deliveryStopModalStops.find((stop) => stop.unit_key === selectedDeliveryStopKey) || null,
@@ -4923,8 +4988,8 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
           </View>
         ) : null}
 
-        {/* Payment Details - Only shown after customer accepted (i.e. status != pending) */}
-        {item.status !== 'pending' && (item.payment_status || item.final_price) && (
+        {/* Show payment review immediately for single-address GCash customized/custom orders. */}
+        {shouldShowPaymentReview && (
           <PaymentDetailsSection
             item={item}
             styles={styles}
@@ -5357,6 +5422,16 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                   </View >
                 )}
 
+                {selectedRequestShouldShowPaymentReview && (
+                  <PaymentDetailsSection
+                    item={selectedRequest}
+                    styles={styles}
+                    onRecordPay={() => openPaymentModal(selectedRequest)}
+                    onEditAmount={() => openPaymentModal(selectedRequest, true)}
+                    onViewReceipt={(url) => openReceiptModal(url)}
+                    requireReceipt={true}
+                  />
+                )}
 
 
                 <View style={styles.actionButtons}>
