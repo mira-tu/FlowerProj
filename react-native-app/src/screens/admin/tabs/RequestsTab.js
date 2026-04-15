@@ -436,6 +436,35 @@ const getBookingItemsFromData = (requestData = {}) => {
   return items.filter((item) => item && typeof item === 'object' && Object.keys(item).length);
 };
 
+const partitionBookingItemsByCancellation = (items = []) => {
+  const sourceItems = Array.isArray(items) ? items : [];
+  const activeItems = [];
+  const cancelledItems = [];
+
+  sourceItems.forEach((item) => {
+    const remainingQuantity = getRemainingRequestItemQuantity(item);
+    const cancelledQuantity = getCancelledRequestItemQuantity(item);
+
+    if (remainingQuantity > 0) {
+      activeItems.push(item);
+      return;
+    }
+
+    if (cancelledQuantity > 0) {
+      cancelledItems.push(item);
+      return;
+    }
+
+    activeItems.push(item);
+  });
+
+  return {
+    activeItems,
+    cancelledItems,
+    hasActiveItems: activeItems.length > 0,
+  };
+};
+
 const mergeArrangementSelections = (selections = []) => {
   const merged = new Map();
 
@@ -541,7 +570,7 @@ const buildBookingUnitSelectionMetadata = (item = {}, itemIndex = 0, selectionIn
   };
 };
 
-const buildFlowerPricingContext = (request) => {
+const buildFlowerPricingContext = (request, options = {}) => {
   let requestData = request?.data || {};
   if (typeof requestData === 'string') {
     try {
@@ -551,7 +580,9 @@ const buildFlowerPricingContext = (request) => {
     }
   }
 
-  const bookingItems = getBookingItemsFromData(requestData);
+  const bookingItems = Array.isArray(options.bookingItems)
+    ? options.bookingItems.filter(Boolean)
+    : getBookingItemsFromData(requestData);
   const pricingSources = bookingItems.length ? bookingItems : [requestData];
   const rawArrangementSelections = pricingSources.flatMap((item, itemIndex) => (
     normalizeArrangementSelections(item).map((selection, selectionIndex) => {
@@ -2042,6 +2073,8 @@ const RequestSummaryCard = React.memo(({
   onAcceptPendingCustomized,
 }) => {
   const isCustomizedRequest = item.type === 'customized';
+  const bookingItems = item.type === 'booking' ? getBookingRequestItems(item) : [];
+  const { hasActiveItems: hasActiveBookingItems } = partitionBookingItemsByCancellation(bookingItems);
   const groupedDestinations = item.delivery_method === 'delivery'
     ? getGroupedDestinationsForRequest(item)
     : [];
@@ -2174,13 +2207,24 @@ const RequestSummaryCard = React.memo(({
 
         {item.type === 'booking' && !['completed', 'cancelled', 'declined', 'ready_for_delivery', 'out_for_delivery', 'ready_for_pickup', 'ready_for_pick_up', 'claimed'].includes(item.status) ? (
           <>
-            <TouchableOpacity
-              style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#F59E0B', marginTop: 10 }]}
-              disabled={isActionBusy}
-              onPress={() => onProvidePrice(item)}
-            >
-              <Text style={styles.eoMainBtnText}>{item.status === 'pending' ? 'Provide Price' : 'Edit Breakdown'}</Text>
-            </TouchableOpacity>
+            {hasActiveBookingItems ? (
+              <TouchableOpacity
+                style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#F59E0B', marginTop: 10 }]}
+                disabled={isActionBusy}
+                onPress={() => onProvidePrice(item)}
+              >
+                <Text style={styles.eoMainBtnText}>{item.status === 'pending' ? 'Provide Price' : 'Edit Breakdown'}</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={[styles.eoMainBtn, { backgroundColor: '#E5E7EB', marginTop: 10 }]}>
+                <Text style={[styles.eoMainBtnText, { color: '#6B7280' }]}>All custom order items were cancelled</Text>
+              </View>
+            )}
+            {!hasActiveBookingItems ? (
+              <Text style={styles.eoActionHint}>
+                This request has no remaining active custom order items to quote.
+              </Text>
+            ) : null}
             {item.status === 'pending' ? (
               <TouchableOpacity
                 style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#EF4444', marginTop: 10 }]}
@@ -2408,7 +2452,7 @@ const getBookingRequestItems = (request) => {
   const sharedEventDateText = getBookingEventDateText(requestData);
   const sharedEventTimeText = getBookingEventTimeText(requestData);
 
-  return sourceItems.map((item, index) => {
+  const mappedItems = sourceItems.map((item, index) => {
     const itemDestinations = normalizedStops.filter(
       (destination) => String(destination?.item_index ?? destination?.itemIndex ?? '') === String(index)
     );
@@ -2442,6 +2486,7 @@ const getBookingRequestItems = (request) => {
     return {
       ...item,
       key: String(item?.id || `${request?.id || 'booking'}-${index}`),
+      sourceIndex: index,
       itemIndex: index,
       label: String(item?.unit_label || item?.unitLabel || '').trim()
         ? (firstNonEmpty(item?.name, item?.title) || `Custom Order ${index + 1}`)
@@ -2456,7 +2501,17 @@ const getBookingRequestItems = (request) => {
       venueText: getBookingVenueText(item, sharedAddressText),
       destinationSummary,
       assignedRiderIds,
+      isFullyCancelled: getRemainingRequestItemQuantity(item) === 0 && getCancelledRequestItemQuantity(item) > 0,
     };
+  });
+
+  return mappedItems.sort((left, right) => {
+    const leftActive = getRemainingRequestItemQuantity(left) > 0;
+    const rightActive = getRemainingRequestItemQuantity(right) > 0;
+    if (leftActive !== rightActive) {
+      return leftActive ? -1 : 1;
+    }
+    return (left.sourceIndex ?? 0) - (right.sourceIndex ?? 0);
   });
 };
 
@@ -4124,13 +4179,19 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     () => requestToQuote?.type === 'booking' ? getBookingRequestItems(requestToQuote) : [],
     [requestToQuote]
   );
+  const quoteBookingItemPartitions = React.useMemo(
+    () => partitionBookingItemsByCancellation(quoteCustomOrderItems),
+    [quoteCustomOrderItems]
+  );
+  const quoteActiveCustomOrderItems = quoteBookingItemPartitions.activeItems;
+  const quoteCancelledCustomOrderItems = quoteBookingItemPartitions.cancelledItems;
   const quoteArrangementBreakdownItems = React.useMemo(
     () => buildQuoteArrangementBreakdownItems({
       arrangementSelections: quoteArrangementSelections,
-      customOrderItems: quoteCustomOrderItems,
+      customOrderItems: quoteActiveCustomOrderItems,
       flowerTypes: quoteFlowerTypes,
     }),
-    [quoteArrangementSelections, quoteCustomOrderItems, quoteFlowerTypes]
+    [quoteActiveCustomOrderItems, quoteArrangementSelections, quoteFlowerTypes]
   );
 
   const quoteBreakdownRows = React.useMemo(() => {
@@ -4269,15 +4330,22 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     setRequestToQuote(request);
 
     const requestData = normalizeRequestData(request);
-    const bookingItems = getBookingItemsFromData(requestData);
-    const storedQuoteBreakdown = requestData?.quote_breakdown;
-    const nextFlowerContext = buildFlowerPricingContext(request);
+    const rawBookingItems = getBookingItemsFromData(requestData);
+    const { activeItems: activeRawBookingItems, cancelledItems: cancelledRawBookingItems } = partitionBookingItemsByCancellation(rawBookingItems);
     const nextBookingItems = getBookingRequestItems(request);
+    const { activeItems: activeNextBookingItems } = partitionBookingItemsByCancellation(nextBookingItems);
+    const storedQuoteBreakdown = requestData?.quote_breakdown;
+    const nextFlowerContext = buildFlowerPricingContext(request, { bookingItems: activeRawBookingItems });
     const nextArrangementBreakdownItems = buildQuoteArrangementBreakdownItems({
       arrangementSelections: nextFlowerContext?.arrangementSelections || [],
-      customOrderItems: nextBookingItems,
+      customOrderItems: activeNextBookingItems,
       flowerTypes: nextFlowerContext?.flowerTypes || [],
     });
+
+    if (!activeRawBookingItems.length && cancelledRawBookingItems.length) {
+      Alert.alert('No Active Items', 'All custom order items were cancelled, so there is nothing left to quote.');
+      return;
+    }
 
     const hasStoredQuoteShipping = storedQuoteBreakdown?.shipping_fee !== null && storedQuoteBreakdown?.shipping_fee !== undefined;
     const isPendingCustomOrderQuote = request?.type === 'booking' && String(request?.status || '').toLowerCase() === 'pending';
@@ -4297,7 +4365,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     setQuoteShippingFee(initialShipping > 0 ? String(initialShipping) : '');
     setQuoteFlowerContext(nextFlowerContext);
     setQuoteManualRows(buildQuoteChargeRows({
-      bookingItems: nextBookingItems.length ? nextBookingItems : bookingItems,
+      bookingItems: activeNextBookingItems.length ? activeNextBookingItems : activeRawBookingItems,
       arrangementBreakdownItems: nextArrangementBreakdownItems,
       storedQuoteBreakdown,
     }));
@@ -4313,6 +4381,11 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     let quoteBreakdownPayload = null;
 
     if (isCustomOrderQuote) {
+      if (!quoteActiveCustomOrderItems.length && quoteCancelledCustomOrderItems.length) {
+        Alert.alert('No Active Items', 'All custom order items were cancelled, so there is nothing left to quote.');
+        return;
+      }
+
       const filledQuoteRows = quoteManualRows.filter(rowHasQuoteContent);
 
       if (!filledQuoteRows.length) {
@@ -4708,16 +4781,23 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     const isCustomizedRequest = item.type === 'customized';
     const isBookingRequest = item.type === 'booking';
     const customizedItems = isCustomizedRequest ? getCustomizedRequestItems(item) : [];
-  const bookingItems = isBookingRequest ? getBookingRequestItems(item) : [];
-  const groupedDestinations = item.delivery_method === 'delivery' ? getGroupedDestinations(item) : [];
-  const normalizedStops = item.delivery_method === 'delivery' ? getNormalizedStopDestinations(item) : [];
-  const stopCounts = getDeliveryStopCounts(normalizedStops);
-  const isActionBusy = isRequestActionBusyFor(item?.id);
-  const shouldShowPaymentReview = shouldShowRequestPaymentDetails(item, groupedDestinations);
-  const nextStatus = getNextRequestStatus(item.status, item.delivery_method, item.type);
-  const requiresRiderBeforeNextStatus = nextStatus === 'out_for_delivery' && !hasRequiredRiderAssignments(item);
+    const bookingItems = isBookingRequest ? getBookingRequestItems(item) : [];
+    const {
+      activeItems: activeBookingItems,
+      cancelledItems: cancelledBookingItems,
+      hasActiveItems: hasActiveBookingItems,
+    } = isBookingRequest
+      ? partitionBookingItemsByCancellation(bookingItems)
+      : { activeItems: [], cancelledItems: [], hasActiveItems: false };
+    const groupedDestinations = item.delivery_method === 'delivery' ? getGroupedDestinations(item) : [];
+    const normalizedStops = item.delivery_method === 'delivery' ? getNormalizedStopDestinations(item) : [];
+    const stopCounts = getDeliveryStopCounts(normalizedStops);
+    const isActionBusy = isRequestActionBusyFor(item?.id);
+    const shouldShowPaymentReview = shouldShowRequestPaymentDetails(item, groupedDestinations);
+    const nextStatus = getNextRequestStatus(item.status, item.delivery_method, item.type);
+    const requiresRiderBeforeNextStatus = nextStatus === 'out_for_delivery' && !hasRequiredRiderAssignments(item);
 
-  return (
+    return (
       <View style={styles.eoCard}>
         {/* Header */}
         <View style={styles.eoCardHeader}>
@@ -4940,6 +5020,8 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
               </Text>
             </View>
             {bookingItems.map((bookingItem, index) => {
+              const bookingItemIsFullyCancelled = getRemainingRequestItemQuantity(bookingItem) === 0
+                && getCancelledRequestItemQuantity(bookingItem) > 0;
               const assignedRiderNames = bookingItem.assignedRiderIds
                 .map((riderId) => riderLookup[String(riderId)]?.name)
                 .filter(Boolean);
@@ -4974,6 +5056,11 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                   <View style={{ flex: 1 }}>
                     <Text style={styles.customizedRequestItemMeta}>{bookingItem.label}</Text>
                     <Text style={styles.eoItemName}>{bookingItem.title}</Text>
+                    {bookingItemIsFullyCancelled ? (
+                      <View style={[styles.eoDeliveryTypeBadge, { backgroundColor: '#FEE2E2', alignSelf: 'flex-start', marginTop: 4 }]}>
+                        <Text style={[styles.eoDeliveryTypeBadgeText, { color: '#B91C1C' }]}>Cancelled</Text>
+                      </View>
+                    ) : null}
                     <Text style={styles.eoItemQuantity}>
                       Quantity: {getRemainingRequestItemQuantity(bookingItem)}
                     </Text>
@@ -5007,7 +5094,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                         Delivery: {bookingItem.destinationSummary}
                       </Text>
                     ) : null}
-                    {displayAssignedRiderNames.length ? (
+                    {!bookingItemIsFullyCancelled && displayAssignedRiderNames.length ? (
                       <Text style={styles.customizedRequestAssignedRider} numberOfLines={1}>
                         Rider: {displayAssignedRiderNames.join(', ')}
                       </Text>
@@ -5198,13 +5285,24 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
 
           {item.type === 'booking' && !['completed', 'cancelled', 'declined', 'ready_for_delivery', 'out_for_delivery', 'ready_for_pickup', 'ready_for_pick_up', 'claimed'].includes(item.status) && (
             <>
-              <TouchableOpacity
-                style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#F59E0B', marginTop: 10 }]}
-                disabled={isActionBusy}
-                onPress={() => onProvidePrice(item)}
-              >
-                <Text style={styles.eoMainBtnText}>{item.status === 'pending' ? 'Provide Price' : 'Edit Breakdown'}</Text>
-              </TouchableOpacity>
+              {hasActiveBookingItems ? (
+                <TouchableOpacity
+                  style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#F59E0B', marginTop: 10 }]}
+                  disabled={isActionBusy}
+                  onPress={() => onProvidePrice(item)}
+                >
+                  <Text style={styles.eoMainBtnText}>{item.status === 'pending' ? 'Provide Price' : 'Edit Breakdown'}</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={[styles.eoMainBtn, { backgroundColor: '#E5E7EB', marginTop: 10 }]}>
+                  <Text style={[styles.eoMainBtnText, { color: '#6B7280' }]}>All custom order items were cancelled</Text>
+                </View>
+              )}
+              {!hasActiveBookingItems && cancelledBookingItems.length ? (
+                <Text style={styles.eoActionHint}>
+                  This request has no remaining active custom order items to quote.
+                </Text>
+              ) : null}
               {item.status === 'pending' && (
                 <TouchableOpacity
                   style={[styles.eoMainBtn, { backgroundColor: isActionBusy ? '#9CA3AF' : '#EF4444', marginTop: 10 }]}
@@ -6090,10 +6188,18 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                       </View>
                     ) : null}
 
+                    {quoteCancelledCustomOrderItems.length ? (
+                      <View style={quoteStyles.quoteWarningBox}>
+                        <Text style={quoteStyles.quoteWarningText}>
+                          {quoteCancelledCustomOrderItems.length} custom order unit{quoteCancelledCustomOrderItems.length === 1 ? ' was' : 's were'} cancelled. This quote covers only the remaining active items.
+                        </Text>
+                      </View>
+                    ) : null}
+
                     <View style={quoteStyles.quoteSummaryTagRow}>
                       <View style={quoteStyles.quoteSummaryTag}>
                         <Text style={quoteStyles.quoteSummaryTagText}>
-                          {quoteCustomOrderItems.length || quoteFlowerContext?.itemCount || 1} item{(quoteCustomOrderItems.length || quoteFlowerContext?.itemCount || 1) > 1 ? 's' : ''}
+                          {quoteActiveCustomOrderItems.length || quoteFlowerContext?.itemCount || 1} item{(quoteActiveCustomOrderItems.length || quoteFlowerContext?.itemCount || 1) > 1 ? 's' : ''}
                         </Text>
                       </View>
                       <View style={quoteStyles.quoteSummaryTag}>
@@ -6114,7 +6220,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                       </Text>
                     ) : null}
 
-                    {quoteCustomOrderItems.slice(0, 3).map((customOrderItem) => (
+                    {quoteActiveCustomOrderItems.slice(0, 3).map((customOrderItem) => (
                       <Text key={customOrderItem.key} style={quoteStyles.quoteSummaryMeta}>
                         - {customOrderItem.title}
                         {customOrderItem.arrangementText ? ` | ${customOrderItem.arrangementText}` : ''}

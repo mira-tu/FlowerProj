@@ -8,6 +8,7 @@ import {
     getDeliveryStopDisplayLabel,
     groupDeliveryDestinations,
     hasStopConfirmationFlow,
+    isDeliveryStopCancelled,
     normalizeDeliveryDestinations,
     parseMultiDeliveryNotes,
     reconcileDeliveryDestinationsWithItems,
@@ -493,13 +494,16 @@ const getUniqueAssignedRiderIds = (destinations = []) => Array.from(
     )
 );
 
-const getMissingAssignedStopLabels = (destinations = [], fallbackAssignedRiderId = null) => {
-    const normalizedStops = normalizeDeliveryDestinations(destinations);
+const getMissingAssignedStopLabels = (destinations = [], fallbackAssignedRiderId = null, items = []) => {
+    const normalizedStops = Array.isArray(items) && items.length
+        ? reconcileDeliveryDestinationsWithItems(destinations, items)
+        : normalizeDeliveryDestinations(destinations);
     const normalizedFallbackAssignedRiderId = normalizedStops.length <= 1
         ? String(fallbackAssignedRiderId || '').trim()
         : '';
 
     return normalizedStops
+        .filter((destination) => !isDeliveryStopCancelled(destination))
         .map((destination, index) => {
             const assignedRiderId = String(destination?.assigned_rider_id || normalizedFallbackAssignedRiderId || '').trim();
             return assignedRiderId ? null : getDeliveryStopDisplayLabel(destination, index);
@@ -511,8 +515,9 @@ const getOutForDeliveryAssignmentError = ({
     recordType = 'order',
     destinations = [],
     fallbackAssignedRiderId = null,
+    items = [],
 }) => {
-    const missingStopLabels = getMissingAssignedStopLabels(destinations, fallbackAssignedRiderId);
+    const missingStopLabels = getMissingAssignedStopLabels(destinations, fallbackAssignedRiderId, items);
     if (!missingStopLabels.length) {
         return '';
     }
@@ -2890,6 +2895,7 @@ const updateRequestStatusDirect = async (id, status, options = {}) => {
             recordType: 'request',
             destinations: currentData?.multi_delivery_destinations || [],
             fallbackAssignedRiderId: current?.assigned_rider,
+            items: Array.isArray(currentData?.items) ? currentData.items : [],
         });
 
         if (assignmentError) {
