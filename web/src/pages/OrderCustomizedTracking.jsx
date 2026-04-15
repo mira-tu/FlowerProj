@@ -706,7 +706,7 @@ const OrderCustomizedTracking = ({ user }) => {
                 message: trimmedMessage,
                 timestamp: new Date().toISOString(),
                 readByAdmin: false,
-                context: 'custom_order_feedback',
+                context: 'customized_order_feedback',
             };
 
             const allMessages = JSON.parse(localStorage.getItem('messages') || '[]');
@@ -715,22 +715,22 @@ const OrderCustomizedTracking = ({ user }) => {
 
             insertStaffNotifications({
                 type: 'message',
-                title: 'New Custom Order Feedback',
-                message: `A customer sent feedback for custom order #${request.request_number || request.id}.`,
+                title: 'New Customized Studio Feedback',
+                message: `A customer sent feedback for Customized Studio request #${request.request_number || request.id}.`,
                 icon: 'fa-comments',
                 link: '/admin/dashboard',
             }).catch((notificationError) => {
-                console.error('Error notifying staff about custom order feedback:', notificationError);
+                console.error('Error notifying staff about customized request feedback:', notificationError);
             });
 
             setFeedbackMessage('');
             setInfoModal({
                 show: true,
                 title: 'Feedback Sent',
-                message: 'Your feedback was sent successfully. Our team can review it from the existing order conversation.',
+                message: 'Your feedback was sent successfully. The admin can now review it from the existing request conversation.',
             });
         } catch (error) {
-            console.error('Error sending custom order feedback:', error);
+            console.error('Error sending customized request feedback:', error);
             setInfoModal({
                 show: true,
                 title: 'Feedback Not Sent',
