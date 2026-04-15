@@ -156,6 +156,15 @@ const pickFirstValue = (...values) => {
   return null;
 };
 
+const firstNonEmpty = (...values) => {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return null;
+};
+
 const compactRows = (rows) =>
   rows.filter((row) => row.value !== null && row.value !== undefined && row.value !== '');
 
@@ -326,6 +335,63 @@ const buildRequestPreview = (request, currentUserId = null) => {
     request?.status,
     request?.assigned_rider
   );
+  const bookingItems = Array.isArray(requestData.items)
+    ? requestData.items
+        .map((item, index) => {
+          if (!item || typeof item !== 'object') return null;
+
+          const arrangementSelections = Array.isArray(item?.arrangementSelections)
+            ? item.arrangementSelections
+            : [];
+          const arrangementLabel = firstNonEmpty(
+            item?.name,
+            arrangementSelections
+              .map((selection) => firstNonEmpty(
+                selection?.arrangement_label,
+                selection?.arrangementLabel,
+                selection?.arrangement_type,
+                selection?.arrangementType,
+              ))
+              .filter(Boolean)
+              .join(', '),
+            item?.arrangement_type,
+            item?.arrangementType,
+            item?.occasion
+          ) || `Custom Order ${index + 1}`;
+          const quantity = Number(item?.quantity || item?.qty || item?.original_quantity || 1) || 1;
+          const flowers = arrangementSelections.length
+            ? arrangementSelections
+                .flatMap((selection) => (
+                  Array.isArray(selection?.flowers)
+                    ? selection.flowers
+                    : Array.isArray(selection?.preferredFlowerNames)
+                      ? selection.preferredFlowerNames
+                      : []
+                ))
+                .map((flower) => firstNonEmpty(flower?.name, flower?.label, flower?.value, flower))
+                .filter(Boolean)
+            : [];
+          const secondary = [
+            item?.arrangement_type || item?.arrangementType
+              ? `Arrangement: ${firstNonEmpty(item?.arrangement_type, item?.arrangementType)}`
+              : null,
+            flowers.length ? `Flowers: ${Array.from(new Set(flowers)).join(', ')}` : null,
+          ].filter(Boolean).join(' | ');
+
+          return {
+            label: `${quantity} x ${arrangementLabel}`,
+            secondary: secondary || 'Arrangement',
+            imageUri: toAbsoluteImageUrl(
+              item?.image_url
+              || item?.image
+              || item?.photo
+              || requestData?.image_url
+              || request?.image_url
+            ),
+          };
+        })
+        .filter(Boolean)
+    : [];
   const arrangements = Array.isArray(requestData.arrangementSelections)
     ? requestData.arrangementSelections
         .map((selection) => {
@@ -339,7 +405,13 @@ const buildRequestPreview = (request, currentUserId = null) => {
           return {
             label: `${quantity} x ${label}`,
             secondary: 'Arrangement',
-            imageUri: null,
+            imageUri: toAbsoluteImageUrl(
+              selection?.image_url
+              || selection?.image
+              || selection?.photo
+              || requestData?.image_url
+              || request?.image_url
+            ),
           };
         })
         .filter(Boolean)
@@ -422,7 +494,7 @@ const buildRequestPreview = (request, currentUserId = null) => {
   const previewItems =
     request.type === 'customized'
       ? customizedItems
-      : arrangements;
+      : (request.type === 'booking' && bookingItems.length ? bookingItems : arrangements);
 
   return {
     eyebrow: 'Assigned request',

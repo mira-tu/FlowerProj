@@ -65,17 +65,34 @@ export const aggregateAssignedOrderItems = (items = [], assignedDestinations = [
       aggregated.set(key, {
         product_id: sourceItem?.product_id ?? sourceItem?.productId ?? destination?.product_id ?? null,
         name: sourceItem?.name || destination?.item_name || 'Item',
-        image_url: sourceItem?.image_url || sourceItem?.image || sourceItem?.photo || null,
+        image_url:
+          sourceItem?.image_url
+          || sourceItem?.products?.image_url
+          || sourceItem?.image
+          || sourceItem?.photo
+          || null,
         price: Number(sourceItem?.price || 0),
         quantity: 0,
+        products: sourceItem?.products || null,
       });
     }
 
     const current = aggregated.get(key);
     current.quantity += toPositiveInt(destination?.quantity, 1);
 
-    if (!current.image_url && (sourceItem?.image_url || sourceItem?.image || sourceItem?.photo)) {
-      current.image_url = sourceItem.image_url || sourceItem.image || sourceItem.photo;
+    if (
+      !current.image_url
+      && (sourceItem?.image_url || sourceItem?.products?.image_url || sourceItem?.image || sourceItem?.photo)
+    ) {
+      current.image_url =
+        sourceItem.image_url
+        || sourceItem.products?.image_url
+        || sourceItem.image
+        || sourceItem.photo;
+    }
+
+    if (!current.products && sourceItem?.products) {
+      current.products = sourceItem.products;
     }
 
     if (!current.price && Number(sourceItem?.price || 0) > 0) {
