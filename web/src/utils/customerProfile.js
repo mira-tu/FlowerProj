@@ -1,9 +1,9 @@
 import { formatPhoneNumber } from './format';
+import { sanitizeNameInput } from './signupValidation';
 
 export const GENDER_OPTIONS = [
     { value: 'Female', label: 'Female' },
     { value: 'Male', label: 'Male' },
-    { value: 'Non-binary', label: 'Non-binary' },
     { value: 'Prefer not to say', label: 'Prefer not to say' },
 ];
 
@@ -14,6 +14,7 @@ export const DEFAULT_SIGNUP_ADDRESS = {
 };
 
 const toTrimmedString = (value) => String(value || '').trim();
+const ALLOWED_GENDER_VALUES = new Set(GENDER_OPTIONS.map((option) => option.value));
 
 const getSourceMetadata = (source) => (
     source?.user_metadata && typeof source.user_metadata === 'object'
@@ -113,13 +114,15 @@ export const buildCustomerProfilePayload = ({
     birthday = '',
     gender = '',
 } = {}) => {
-    const normalizedFirstName = toTrimmedString(firstName);
-    const normalizedMiddleName = toTrimmedString(middleName);
-    const normalizedLastName = toTrimmedString(lastName);
+    const normalizedFirstName = toTrimmedString(sanitizeNameInput(firstName));
+    const normalizedMiddleName = toTrimmedString(sanitizeNameInput(middleName));
+    const normalizedLastName = toTrimmedString(sanitizeNameInput(lastName));
     const normalizedEmail = toTrimmedString(email).toLowerCase();
     const normalizedContactNumber = formatPhoneNumber(contactNumber);
     const normalizedBirthday = toTrimmedString(birthday);
-    const normalizedGender = toTrimmedString(gender);
+    const normalizedGender = ALLOWED_GENDER_VALUES.has(toTrimmedString(gender))
+        ? toTrimmedString(gender)
+        : '';
 
     return {
         name: buildFullName({
@@ -163,14 +166,15 @@ export const buildDefaultAddressMetadata = (address = {}) => ({
 export const buildCustomerProfileFormState = (profile = {}, authUser = null) => {
     const nameParts = getUserNameParts(profile, authUser);
     const metadata = getSourceMetadata(authUser);
+    const normalizedGender = toTrimmedString(profile?.gender || metadata?.gender);
 
     return {
-        firstName: nameParts.firstName,
-        middleName: nameParts.middleName,
-        lastName: nameParts.lastName,
+        firstName: toTrimmedString(sanitizeNameInput(nameParts.firstName)),
+        middleName: toTrimmedString(sanitizeNameInput(nameParts.middleName)),
+        lastName: toTrimmedString(sanitizeNameInput(nameParts.lastName)),
         phone: getUserContactNumber(profile, authUser),
         dateOfBirth: toTrimmedString(profile?.birthdate || metadata?.birthdate),
-        gender: toTrimmedString(profile?.gender || metadata?.gender),
+        gender: ALLOWED_GENDER_VALUES.has(normalizedGender) ? normalizedGender : '',
         currentPassword: '',
         newPassword: '',
     };

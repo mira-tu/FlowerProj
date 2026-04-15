@@ -8,6 +8,7 @@ import {
     buildCustomerMetadata,
     buildCustomerProfileFormState,
     buildCustomerProfilePayload,
+    buildFullName,
     GENDER_OPTIONS,
     getUserContactNumber,
     getUserFullName,
@@ -39,6 +40,7 @@ import {
     getCancellationRefundContext,
     hasActiveRefundRequest,
 } from '../utils/customerRefunds';
+import { sanitizeNameInput, validateNameField } from '../utils/signupValidation';
 
 const parseJsonObject = (value) => {
     if (!value) return {};
@@ -1769,8 +1771,20 @@ const Profile = ({ user, logout }) => {
             return;
         }
 
+        const normalizedFirstName = sanitizeNameInput(profileForm.firstName);
+        const normalizedMiddleName = sanitizeNameInput(profileForm.middleName);
+        const normalizedLastName = sanitizeNameInput(profileForm.lastName);
+        const firstNameError = validateNameField(normalizedFirstName, 'First name', { required: true });
+        const middleNameError = validateNameField(normalizedMiddleName, 'Middle name');
+        const lastNameError = validateNameField(normalizedLastName, 'Last name', { required: true });
         const today = new Date().toISOString().split('T')[0];
-        if (!profileForm.firstName.trim() || !profileForm.lastName.trim() || !profileForm.phone.trim() || !profileForm.dateOfBirth || !profileForm.gender) {
+
+        if (firstNameError || middleNameError || lastNameError) {
+            setStatus({ type: 'error', message: firstNameError || middleNameError || lastNameError });
+            return;
+        }
+
+        if (!normalizedFirstName.trim() || !normalizedLastName.trim() || !profileForm.phone.trim() || !profileForm.dateOfBirth || !profileForm.gender) {
             setStatus({ type: 'error', message: 'First name, last name, contact number, birthday, and gender are required.' });
             return;
         }
@@ -1786,15 +1800,27 @@ const Profile = ({ user, logout }) => {
         }
 
         const profilePayload = buildCustomerProfilePayload({
-            firstName: profileForm.firstName,
-            middleName: profileForm.middleName,
-            lastName: profileForm.lastName,
+            firstName: normalizedFirstName,
+            middleName: normalizedMiddleName,
+            lastName: normalizedLastName,
             email: user.email,
             contactNumber: profileForm.phone,
             birthday: profileForm.dateOfBirth,
             gender: profileForm.gender,
         });
         delete profilePayload.role;
+        const previousFullName = buildFullName({
+            firstName: profileData?.first_name,
+            middleName: profileData?.middle_name,
+            lastName: profileData?.last_name,
+        });
+        const nextFullName = buildFullName({
+            firstName: normalizedFirstName,
+            middleName: normalizedMiddleName,
+            lastName: normalizedLastName,
+        });
+        const previousPhone = formatPhoneNumber(profileData?.phone || user?.user_metadata?.phone || '');
+        const nextPhone = formatPhoneNumber(profileForm.phone);
 
         try {
             const { error: profileError } = await supabase
@@ -1808,9 +1834,9 @@ const Profile = ({ user, logout }) => {
 
             const { error: authError } = await supabase.auth.updateUser({
                 data: buildCustomerMetadata({
-                    firstName: profileForm.firstName,
-                    middleName: profileForm.middleName,
-                    lastName: profileForm.lastName,
+                    firstName: normalizedFirstName,
+                    middleName: normalizedMiddleName,
+                    lastName: normalizedLastName,
                     contactNumber: profileForm.phone,
                     birthday: profileForm.dateOfBirth,
                     gender: profileForm.gender,
@@ -1837,9 +1863,56 @@ const Profile = ({ user, logout }) => {
                 }));
             }
 
+            const addressesToUpdate = (addresses || []).filter((address) => {
+                const addressName = String(address?.name || '').trim();
+                const addressPhone = formatPhoneNumber(address?.phone || '');
+                const sameOldName = previousFullName && addressName === previousFullName;
+                const sameOldPhone = previousPhone && addressPhone === previousPhone;
+                const emptyContact = !addressName && !addressPhone;
+
+                return sameOldName || sameOldPhone || emptyContact;
+            });
+
+            if (addressesToUpdate.length > 0) {
+                await Promise.all(
+                    addressesToUpdate.map((address) => supabase
+                        .from('addresses')
+                        .update({
+                            name: nextFullName,
+                            phone: nextPhone,
+                        })
+                        .eq('id', address.id)
+                        .eq('user_id', user.id))
+                );
+            }
+
             setProfileData((prev) => ({
                 ...(prev || {}),
                 ...profilePayload,
+            }));
+            setProfileForm(prev => ({
+                ...prev,
+                firstName: normalizedFirstName,
+                middleName: normalizedMiddleName,
+                lastName: normalizedLastName,
+                phone: nextPhone,
+            }));
+            setAddresses((prev) => prev.map((address) => {
+                const addressName = String(address?.name || '').trim();
+                const addressPhone = formatPhoneNumber(address?.phone || '');
+                const sameOldName = previousFullName && addressName === previousFullName;
+                const sameOldPhone = previousPhone && addressPhone === previousPhone;
+                const emptyContact = !addressName && !addressPhone;
+
+                if (!(sameOldName || sameOldPhone || emptyContact)) {
+                    return address;
+                }
+
+                return {
+                    ...address,
+                    name: nextFullName,
+                    phone: nextPhone,
+                };
             }));
             setStatus({ type: 'success', message: 'Profile updated successfully!' });
 
@@ -1852,6 +1925,8 @@ const Profile = ({ user, logout }) => {
         const { name, value } = e.target;
         if (name === 'phone') {
             setProfileForm(prev => ({ ...prev, [name]: formatPhoneNumber(value) }));
+        } else if (['firstName', 'middleName', 'lastName'].includes(name)) {
+            setProfileForm(prev => ({ ...prev, [name]: sanitizeNameInput(value) }));
         } else {
             setProfileForm(prev => ({ ...prev, [name]: value }));
         }
