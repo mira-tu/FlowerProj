@@ -2399,26 +2399,38 @@ const getBookingColorText = (item = {}) => {
 const getBookingRequestItems = (request) => {
   const requestData = normalizeRequestData(request);
   const sourceItems = getBookingItemsFromData(requestData);
-  const multiDeliveryDestinations = Array.isArray(requestData.multi_delivery_destinations)
-    ? requestData.multi_delivery_destinations
-    : [];
+  const normalizedStops = reconcileDeliveryDestinationsWithItems(
+    Array.isArray(requestData.multi_delivery_destinations) ? requestData.multi_delivery_destinations : [],
+    sourceItems
+  );
   const sharedRecipientText = getBookingRecipientText(requestData);
   const sharedAddressText = formatAddressParts(requestData.address || {});
   const sharedEventDateText = getBookingEventDateText(requestData);
   const sharedEventTimeText = getBookingEventTimeText(requestData);
 
   return sourceItems.map((item, index) => {
-    const itemDestinations = multiDeliveryDestinations.filter(
-      (destination) => String(destination?.item_index ?? '') === String(index)
+    const itemDestinations = normalizedStops.filter(
+      (destination) => String(destination?.item_index ?? destination?.itemIndex ?? '') === String(index)
     );
-    const primaryDestination = itemDestinations[0] || null;
-    const assignedRiderIds = Array.from(
+    const fallbackSingleStop = !itemDestinations.length && normalizedStops.length === 1
+      ? normalizedStops[0]
+      : null;
+    const relevantDestinations = itemDestinations.length ? itemDestinations : (fallbackSingleStop ? [fallbackSingleStop] : []);
+    const primaryDestination = relevantDestinations[0] || null;
+    const fallbackAssignedRiderId = relevantDestinations.length <= 1
+      ? String(request?.assigned_rider || '').trim()
+      : '';
+    const explicitAssignedRiderIds = Array.from(
       new Set(
-        itemDestinations
-          .map((destination) => String(destination?.assigned_rider_id || '').trim())
+        relevantDestinations
+          .map((destination) => getDeliveryStopAssignedRiderId(destination, fallbackAssignedRiderId || null))
+          .map((riderId) => String(riderId || '').trim())
           .filter(Boolean)
       )
     );
+    const assignedRiderIds = explicitAssignedRiderIds.length
+      ? explicitAssignedRiderIds
+      : (fallbackAssignedRiderId ? [fallbackAssignedRiderId] : []);
 
     const destinationSummary = primaryDestination
       ? [
@@ -2481,9 +2493,10 @@ const getCustomizedRequestItems = (request) => {
       }]
       : [];
 
-  const multiDeliveryDestinations = Array.isArray(requestData.multi_delivery_destinations)
-    ? requestData.multi_delivery_destinations
-    : [];
+  const normalizedStops = reconcileDeliveryDestinationsWithItems(
+    Array.isArray(requestData.multi_delivery_destinations) ? requestData.multi_delivery_destinations : [],
+    sourceItems
+  );
   const sharedRecipientName = firstNonEmpty(
     requestData.address?.name,
     requestData.recipient_name,
@@ -2501,17 +2514,28 @@ const getCustomizedRequestItems = (request) => {
     const wrapperName = getNamedValue(item?.wrapper) || getNamedValue(requestData.wrapper);
     const ribbonName = getNamedValue(item?.ribbon) || getNamedValue(requestData.ribbon);
     const bundleSize = toPositiveInt(item?.bundleSize, 0) || toPositiveInt(requestData.bundleSize, 0);
-    const itemDestinations = multiDeliveryDestinations.filter(
-      (destination) => String(destination?.item_index ?? '') === String(index)
+    const itemDestinations = normalizedStops.filter(
+      (destination) => String(destination?.item_index ?? destination?.itemIndex ?? '') === String(index)
     );
-    const primaryDestination = itemDestinations[0] || null;
-    const assignedRiderIds = Array.from(
+    const fallbackSingleStop = !itemDestinations.length && normalizedStops.length === 1
+      ? normalizedStops[0]
+      : null;
+    const relevantDestinations = itemDestinations.length ? itemDestinations : (fallbackSingleStop ? [fallbackSingleStop] : []);
+    const primaryDestination = relevantDestinations[0] || null;
+    const fallbackAssignedRiderId = relevantDestinations.length <= 1
+      ? String(request?.assigned_rider || '').trim()
+      : '';
+    const explicitAssignedRiderIds = Array.from(
       new Set(
-        itemDestinations
-          .map((destination) => String(destination?.assigned_rider_id || '').trim())
+        relevantDestinations
+          .map((destination) => getDeliveryStopAssignedRiderId(destination, fallbackAssignedRiderId || null))
+          .map((riderId) => String(riderId || '').trim())
           .filter(Boolean)
       )
     );
+    const assignedRiderIds = explicitAssignedRiderIds.length
+      ? explicitAssignedRiderIds
+      : (fallbackAssignedRiderId ? [fallbackAssignedRiderId] : []);
     const recipientName = primaryDestination
       ? firstNonEmpty(primaryDestination.recipient_name, primaryDestination.address_label)
       : sharedRecipientName;
@@ -3041,6 +3065,31 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
       })
       .filter(Boolean);
   }, [getNormalizedStopDestinations]);
+
+  React.useEffect(() => {
+    if (riders.length) {
+      return;
+    }
+
+    const hasPersistedAssignedRiders = requests.some((request) => {
+      if (String(request?.assigned_rider || '').trim()) {
+        return true;
+      }
+
+      const normalizedStops = getNormalizedStopDestinations(request);
+      const fallbackAssignedRiderId = normalizedStops.filter((stop) => !isDeliveryStopCancelled(stop)).length <= 1
+        ? String(request?.assigned_rider || '').trim()
+        : '';
+
+      return normalizedStops.some((stop) => Boolean(
+        getDeliveryStopAssignedRiderId(stop, fallbackAssignedRiderId || null)
+      ));
+    });
+
+    if (hasPersistedAssignedRiders) {
+      void loadRiders();
+    }
+  }, [getNormalizedStopDestinations, loadRiders, requests, riders.length]);
 
   const requestsWithRiderDetails = React.useMemo(() => {
     if (!requests.length || !riders.length) return requests;
@@ -4659,13 +4708,16 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     const isCustomizedRequest = item.type === 'customized';
     const isBookingRequest = item.type === 'booking';
     const customizedItems = isCustomizedRequest ? getCustomizedRequestItems(item) : [];
-    const bookingItems = isBookingRequest ? getBookingRequestItems(item) : [];
-    const groupedDestinations = item.delivery_method === 'delivery' ? getGroupedDestinations(item) : [];
-    const normalizedStops = item.delivery_method === 'delivery' ? getNormalizedStopDestinations(item) : [];
-    const stopCounts = getDeliveryStopCounts(normalizedStops);
-    const isActionBusy = isRequestActionBusyFor(item?.id);
+  const bookingItems = isBookingRequest ? getBookingRequestItems(item) : [];
+  const groupedDestinations = item.delivery_method === 'delivery' ? getGroupedDestinations(item) : [];
+  const normalizedStops = item.delivery_method === 'delivery' ? getNormalizedStopDestinations(item) : [];
+  const stopCounts = getDeliveryStopCounts(normalizedStops);
+  const isActionBusy = isRequestActionBusyFor(item?.id);
+  const shouldShowPaymentReview = shouldShowRequestPaymentDetails(item, groupedDestinations);
+  const nextStatus = getNextRequestStatus(item.status, item.delivery_method, item.type);
+  const requiresRiderBeforeNextStatus = nextStatus === 'out_for_delivery' && !hasRequiredRiderAssignments(item);
 
-    return (
+  return (
       <View style={styles.eoCard}>
         {/* Header */}
         <View style={styles.eoCardHeader}>
@@ -4825,16 +4877,25 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                     const assignedRiderNames = customizedItem.assignedRiderIds
                       .map((riderId) => riderLookup[String(riderId)]?.name)
                       .filter(Boolean);
+                    const displayAssignedRiderNames = assignedRiderNames.length
+                      ? assignedRiderNames
+                      : (
+                        item?.rider?.name
+                        && customizedItem.assignedRiderIds.length <= 1
+                        && customizedItem.destinationSummary
+                          ? [item.rider.name]
+                          : []
+                      );
 
                     return customizedItem.destinationSummary ? (
                       <Text
                         style={[
                           styles.customizedRequestAssignedRider,
-                          !assignedRiderNames.length && styles.customizedRequestAssignedRiderPending,
+                          !displayAssignedRiderNames.length && styles.customizedRequestAssignedRiderPending,
                         ]}
                         numberOfLines={1}
                       >
-                        Rider: {assignedRiderNames.length ? assignedRiderNames.join(', ') : 'Not assigned'}
+                        Rider: {displayAssignedRiderNames.length ? displayAssignedRiderNames.join(', ') : 'Not assigned'}
                       </Text>
                     ) : null;
                   })()}
@@ -4882,6 +4943,15 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
               const assignedRiderNames = bookingItem.assignedRiderIds
                 .map((riderId) => riderLookup[String(riderId)]?.name)
                 .filter(Boolean);
+              const displayAssignedRiderNames = assignedRiderNames.length
+                ? assignedRiderNames
+                : (
+                  item?.rider?.name
+                  && bookingItem.assignedRiderIds.length <= 1
+                  && bookingItem.destinationSummary
+                    ? [item.rider.name]
+                    : []
+                );
 
               return (
                 <TouchableOpacity
@@ -4937,9 +5007,9 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                         Delivery: {bookingItem.destinationSummary}
                       </Text>
                     ) : null}
-                    {assignedRiderNames.length ? (
+                    {displayAssignedRiderNames.length ? (
                       <Text style={styles.customizedRequestAssignedRider} numberOfLines={1}>
-                        Rider: {assignedRiderNames.join(', ')}
+                        Rider: {displayAssignedRiderNames.join(', ')}
                       </Text>
                     ) : null}
                     <Text style={styles.customizedRequestTapHint}>Tap to view full custom order details</Text>
@@ -5174,15 +5244,30 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
             <TouchableOpacity
               style={[
                 styles.eoMainBtn,
-                { marginTop: 10, backgroundColor: isActionBusy ? '#9CA3AF' : ((item.payment_method?.toLowerCase() === 'gcash' || !item.payment_method) && item.payment_status !== 'paid' ? '#9CA3AF' : '#3B82F6') }
+                {
+                  marginTop: 10,
+                  backgroundColor: (isActionBusy || requiresRiderBeforeNextStatus)
+                    ? '#9CA3AF'
+                    : ((item.payment_method?.toLowerCase() === 'gcash' || !item.payment_method) && item.payment_status !== 'paid' ? '#9CA3AF' : '#3B82F6'),
+                }
               ]}
-              disabled={isActionBusy || ((item.payment_method?.toLowerCase() === 'gcash' || !item.payment_method) && item.payment_status !== 'paid')}
+              disabled={
+                isActionBusy
+                || requiresRiderBeforeNextStatus
+                || ((item.payment_method?.toLowerCase() === 'gcash' || !item.payment_method) && item.payment_status !== 'paid')
+              }
               onPress={() => onUpdateStatus(item)}
             >
               <Ionicons name="git-network-outline" size={18} color="#fff" />
               <Text style={styles.eoMainBtnText}>Change Status</Text>
             </TouchableOpacity>
           )}
+
+          {requiresRiderBeforeNextStatus ? (
+            <Text style={styles.eoActionHint}>
+              Assign a rider first before moving this customized delivery request to out for delivery.
+            </Text>
+          ) : null}
 
           {/* Assign Rider: only when processing + delivery */}
           {item.delivery_method === 'delivery' && item.status === 'processing' && (
