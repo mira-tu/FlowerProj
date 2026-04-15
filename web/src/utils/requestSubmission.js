@@ -269,15 +269,13 @@ export const reserveRequestStockAllocations = async ({
     }
 
     if (alreadyReserved === null) {
-      console.warn(
-        'Request stock reservation infrastructure is unavailable. Proceeding in legacy pending mode for this request.'
-      );
       return {
-        success: true,
+        success: false,
+        error: new Error('Live stock reservation is not available right now. Please try again in a moment.'),
         skipped: false,
         usedFallback: true,
         viaFunction: false,
-        viaLegacyPendingMode: true,
+        infrastructureUnavailable: true,
       };
     }
 

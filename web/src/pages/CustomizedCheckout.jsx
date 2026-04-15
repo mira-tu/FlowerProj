@@ -626,6 +626,11 @@ const CustomizedCheckout = ({ user }) => {
             });
 
             if (!reservationResult.success) {
+                if (reservationResult.infrastructureUnavailable) {
+                    console.warn(
+                        'Customizer Studio stock reservation infrastructure is unavailable. Keeping the request in pending/manual-review mode.'
+                    );
+                } else {
                 console.error('Error reserving customized request stock:', reservationResult.error);
                 await supabase.from('requests').delete().eq('id', data.id);
                 setInfoModal({
@@ -635,6 +640,7 @@ const CustomizedCheckout = ({ user }) => {
                 });
                 setIsProcessing(false);
                 return;
+                }
             }
         }
 
