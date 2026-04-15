@@ -80,6 +80,7 @@ const sanitizePriceInput = (value) => (
     .replace(/[^0-9.]/g, '')
     .replace(/(\..*)\./g, '$1')
 );
+const ADMIN_PLACEHOLDER_TEXT_COLOR = '#9ca3af';
 
 const normalizeFileExtension = (value) => {
   const sanitized = trimText(value).toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -699,14 +700,7 @@ const CustomOrderTab = () => {
                 value={editorForm.label}
                 onChangeText={(text) => setEditorForm((currentForm) => ({ ...currentForm, label: text }))}
                 placeholder="Customer-facing label"
-              />
-
-              <Text style={styles.inputLabel}>Internal Value</Text>
-              <TextInput
-                style={styles.input}
-                value={editorForm.value}
-                onChangeText={(text) => setEditorForm((currentForm) => ({ ...currentForm, value: text }))}
-                placeholder="Optional. Auto-generated if blank."
+                placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
               />
 
               {editorType === 'arrangement' ? (
@@ -717,6 +711,7 @@ const CustomOrderTab = () => {
                     value={editorForm.groupLabel}
                     onChangeText={(text) => setEditorForm((currentForm) => ({ ...currentForm, groupLabel: text }))}
                     placeholder="Example: Funeral"
+                    placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                   />
 
                   <Text style={styles.inputLabel}>Description</Text>
@@ -725,6 +720,7 @@ const CustomOrderTab = () => {
                     value={editorForm.description}
                     onChangeText={(text) => setEditorForm((currentForm) => ({ ...currentForm, description: text }))}
                     placeholder="Short arrangement description"
+                    placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                     multiline
                   />
 
@@ -738,6 +734,7 @@ const CustomOrderTab = () => {
                     }))}
                     keyboardType="number-pad"
                     placeholder="0 for customer-specified"
+                    placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                   />
 
                   <Text style={styles.inputLabel}>Estimated Price Range</Text>
@@ -753,6 +750,7 @@ const CustomOrderTab = () => {
                         }))}
                         keyboardType="decimal-pad"
                         placeholder="5000"
+                        placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                       />
                     </View>
                     <View style={styles.customOrderAdminPriceField}>
@@ -766,6 +764,7 @@ const CustomOrderTab = () => {
                         }))}
                         keyboardType="decimal-pad"
                         placeholder="10000"
+                        placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                       />
                     </View>
                   </View>
@@ -776,6 +775,7 @@ const CustomOrderTab = () => {
                     value={editorForm.estimatedPriceNote}
                     onChangeText={(text) => setEditorForm((currentForm) => ({ ...currentForm, estimatedPriceNote: text }))}
                     placeholder="Optional, e.g. per piece"
+                    placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                   />
                   <Text style={styles.customOrderAdminHelperText}>
                     Leave blank if the range is a standard total price.
@@ -791,6 +791,7 @@ const CustomOrderTab = () => {
                     value={editorForm.colorsText}
                     onChangeText={(text) => setEditorForm((currentForm) => ({ ...currentForm, colorsText: text }))}
                     placeholder="#ffc0cb, #ffffff"
+                    placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                   />
                   <Text style={styles.customOrderAdminHelperText}>
                     Separate each color with a comma. This can stay blank for the custom "other color" option.

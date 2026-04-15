@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { supabase } from '../../../config/supabase';
 import styles from '../../AdminDashboard.styles';
+const ADMIN_PLACEHOLDER_TEXT_COLOR = '#9ca3af';
 
 const ContactTab = () => {
     const [contactInfo, setContactInfo] = useState({
@@ -113,6 +114,7 @@ const ContactTab = () => {
                 value={contactInfo.address}
                 onChangeText={text => setContactInfo(prev => ({ ...prev, address: text }))}
                 placeholder="Shop Address"
+                placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
             />
 
             <Text style={styles.inputLabel}>Phone Number</Text>
@@ -121,6 +123,7 @@ const ContactTab = () => {
                 value={contactInfo.phone}
                 onChangeText={text => setContactInfo(prev => ({ ...prev, phone: text }))}
                 placeholder="Contact Phone"
+                placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                 keyboardType="phone-pad"
             />
 
@@ -130,6 +133,7 @@ const ContactTab = () => {
                 value={contactInfo.email}
                 onChangeText={text => setContactInfo(prev => ({ ...prev, email: text }))}
                 placeholder="Contact Email"
+                placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                 keyboardType="email-address"
                 autoCapitalize="none"
             />
@@ -140,6 +144,7 @@ const ContactTab = () => {
                 value={contactInfo.mapUrl}
                 onChangeText={text => setContactInfo(prev => ({ ...prev, mapUrl: text }))}
                 placeholder="Google Maps Embed URL"
+                placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                 multiline
             />
 

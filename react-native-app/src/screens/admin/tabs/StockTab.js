@@ -52,6 +52,7 @@ const normalizeRibbonScope = (value) => {
 
   return normalized;
 };
+const ADMIN_PLACEHOLDER_TEXT_COLOR = '#9ca3af';
 const getRibbonScopeLabel = (value) => (
   normalizeRibbonScope(value) === 'palm_halo_wrap'
     ? 'Palm Halo Wrap'
@@ -749,6 +750,7 @@ const StockTab = () => {
             <TextInput
               style={styles.input}
               placeholder="Enter minimum order amount"
+              placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
               keyboardType="numeric"
               value={customizedPromo.minimumOrderAmount}
               onChangeText={(text) => setCustomizedPromo((previous) => ({
@@ -888,11 +890,9 @@ const StockTab = () => {
               <Text style={styles.inputLabel}>{isWrapperForm ? 'Wrapper Design Name *' : 'Item Name *'}</Text>
 
               <TextInput
-
                 style={styles.input}
-
                 placeholder={isWrapperForm ? 'e.g. Classic Wrap' : 'Enter item name'}
-
+                placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                 value={stockFormData.name}
 
                 onChangeText={(text) => setStockFormData((prev) => ({ ...prev, name: text }))}
@@ -952,11 +952,9 @@ const StockTab = () => {
                   <Text style={styles.inputLabel}>Price</Text>
 
                   <TextInput
-
                     style={styles.input}
-
                     placeholder="0.00"
-
+                    placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                     keyboardType="numeric"
 
                     value={stockFormData.price}
@@ -972,11 +970,9 @@ const StockTab = () => {
                   <Text style={styles.inputLabel}>Quantity *</Text>
 
                   <TextInput
-
                     style={styles.input}
-
                     placeholder="0"
-
+                    placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                     keyboardType="numeric"
 
                     value={stockFormData.quantity}
@@ -996,11 +992,9 @@ const StockTab = () => {
                   <Text style={styles.inputLabel}>Unit</Text>
 
                   <TextInput
-
                     style={styles.input}
-
                     placeholder="e.g. meters"
-
+                    placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                     value={stockFormData.unit}
 
                     onChangeText={(text) => setStockFormData((prev) => ({ ...prev, unit: text }))}
@@ -1016,11 +1010,9 @@ const StockTab = () => {
                   <Text style={styles.inputLabel}>Color Variation</Text>
 
                   <TextInput
-
                     style={styles.input}
-
                     placeholder="e.g. Dark Blue"
-
+                    placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                     value={stockFormData.wrapper_color}
 
                     onChangeText={(text) => setStockFormData((prev) => ({ ...prev, wrapper_color: text }))}

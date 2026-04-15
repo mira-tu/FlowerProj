@@ -20,6 +20,7 @@ import { productAPI, categoryAPI, BASE_URL } from '../../../config/api';
 import styles from '../../AdminDashboard.styles';
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal';
 import ProductCard from '../components/ProductCard';
+const ADMIN_PLACEHOLDER_TEXT_COLOR = '#9ca3af';
 
 const clampDiscountPercentage = (value) => {
   const numericValue = parseFloat(value);
@@ -491,6 +492,7 @@ const CatalogueTab = () => {
               <TextInput
                 style={styles.input}
                 placeholder="Enter product name"
+                placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                 value={formData.name}
                 onChangeText={(text) => setFormData({ ...formData, name: text })}
               />
@@ -499,6 +501,7 @@ const CatalogueTab = () => {
               <TextInput
                 style={styles.input}
                 placeholder="Enter price"
+                placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                 keyboardType="numeric"
                 value={formData.price}
                 onChangeText={(text) => handleNumericInput('price', text)}
@@ -509,6 +512,7 @@ const CatalogueTab = () => {
               <TextInput
                 style={styles.input}
                 placeholder="Enter discount percentage"
+                placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                 keyboardType="numeric"
                 value={formData.discount_percentage}
                 onChangeText={(text) => handleNumericInput('discount_percentage', text)}
@@ -531,6 +535,7 @@ const CatalogueTab = () => {
               <TextInput
                 style={styles.input}
                 placeholder="Enter quantity"
+                placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                 keyboardType="numeric"
                 value={formData.stock_quantity}
                 onChangeText={(text) => handleIntegerInput('stock_quantity', text)}
@@ -580,6 +585,7 @@ const CatalogueTab = () => {
                   <TextInput
                     style={styles.input}
                     placeholder="Enter minimum order amount"
+                    placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                     keyboardType="numeric"
                     value={formData.free_shipping_min_order_amount}
                     onChangeText={(text) => handleNumericInput('free_shipping_min_order_amount', text)}
@@ -603,6 +609,7 @@ const CatalogueTab = () => {
               <TextInput
                 style={[styles.input, { height: 100, textAlignVertical: 'top' }]}
                 placeholder="Enter product description"
+                placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                 value={formData.description}
                 onChangeText={(text) => setFormData({ ...formData, description: text })}
                 multiline
@@ -698,6 +705,7 @@ const CatalogueTab = () => {
               <TextInput
                 style={[styles.input, { flex: 1, marginBottom: 0 }]}
                 placeholder={editingCategoryId ? "Update name" : "New category"}
+                placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
                 value={newCategoryName}
                 onChangeText={setNewCategoryName}
               />

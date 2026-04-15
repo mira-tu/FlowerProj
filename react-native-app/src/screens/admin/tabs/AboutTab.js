@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../../../config/supabase';
 import styles from '../../AdminDashboard.styles';
+const ADMIN_PLACEHOLDER_TEXT_COLOR = '#9ca3af';
 
 const ABOUT_CONTENT_KEYS = [
   'about_story', 'about_description', 'about_promise', 'about_owner_quote', 'about_owner_image', 'about_our_shop_img',
@@ -233,6 +234,7 @@ const AboutTab = () => {
         value={aboutData.story}
         onChangeText={text => setAboutData(prev => ({ ...prev, story: text }))}
         placeholder="The story of the shop..."
+        placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
         multiline
       />
 
@@ -242,6 +244,7 @@ const AboutTab = () => {
         value={aboutData.about_description}
         onChangeText={text => setAboutData(prev => ({ ...prev, about_description: text }))}
         placeholder="A short description for the about page..."
+        placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
         multiline
       />
 
@@ -263,6 +266,7 @@ const AboutTab = () => {
         value={aboutData.promise}
         onChangeText={text => setAboutData(prev => ({ ...prev, promise: text }))}
         placeholder="The shop's promise to customers..."
+        placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
         multiline
       />
 
@@ -272,6 +276,7 @@ const AboutTab = () => {
         value={aboutData.ownerQuote}
         onChangeText={text => setAboutData(prev => ({ ...prev, ownerQuote: text }))}
         placeholder="A quote from the owner..."
+        placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
         multiline
       />
 
@@ -296,6 +301,7 @@ const AboutTab = () => {
         value={aboutData.customBouquetsDescription}
         onChangeText={text => setAboutData(prev => ({ ...prev, customBouquetsDescription: text }))}
         placeholder="Description for custom bouquets service..."
+        placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
         multiline
       />
       <Text style={styles.inputLabel}>Custom Bouquets Image</Text>
@@ -318,6 +324,7 @@ const AboutTab = () => {
         value={aboutData.eventDecorationsDescription}
         onChangeText={text => setAboutData(prev => ({ ...prev, eventDecorationsDescription: text }))}
         placeholder="Description for custom order service..."
+        placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
         multiline
       />
       <Text style={styles.inputLabel}>Custom Order Image</Text>
@@ -341,6 +348,7 @@ const AboutTab = () => {
         value={aboutData.promises_responsibly_sourced_description}
         onChangeText={text => setAboutData(prev => ({ ...prev, promises_responsibly_sourced_description: text }))}
         placeholder="Description for responsibly sourced..."
+        placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
         multiline
       />
       <Text style={styles.inputLabel}>Responsibly Sourced Image</Text>
@@ -361,6 +369,7 @@ const AboutTab = () => {
         value={aboutData.promises_crafted_by_experts_description}
         onChangeText={text => setAboutData(prev => ({ ...prev, promises_crafted_by_experts_description: text }))}
         placeholder="Description for crafted by experts..."
+        placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
         multiline
       />
       <Text style={styles.inputLabel}>Crafted by Experts Image</Text>
@@ -381,6 +390,7 @@ const AboutTab = () => {
         value={aboutData.promises_caring_for_moments_description}
         onChangeText={text => setAboutData(prev => ({ ...prev, promises_caring_for_moments_description: text }))}
         placeholder="Description for caring for moments..."
+        placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
         multiline
       />
       <Text style={styles.inputLabel}>Caring for Moments Image</Text>
