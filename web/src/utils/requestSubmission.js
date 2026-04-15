@@ -156,6 +156,22 @@ const parseJsonObject = (value) => {
   return typeof value === 'object' ? value : {};
 };
 
+const isMissingStockReservationsTableError = (error) => {
+  const message = String(error?.message || '').toLowerCase();
+  const details = String(error?.details || '').toLowerCase();
+  const hint = String(error?.hint || '').toLowerCase();
+  const code = String(error?.code || '').toLowerCase();
+  const combined = `${message} ${details} ${hint}`;
+
+  return code === 'pgrst205'
+    || code === '42p01'
+    || (combined.includes('stock_reservations') && combined.includes('not found'))
+    || (combined.includes('stock_reservations') && combined.includes('404'))
+    || combined.includes("relation 'public.stock_reservations' does not exist")
+    || combined.includes('could not find the table')
+    || combined.includes('schema cache');
+};
+
 const confirmExistingRequestStockReservation = async ({
   supabase,
   requestId,
@@ -183,9 +199,18 @@ const confirmExistingRequestStockReservation = async ({
 
     const requestData = parseJsonObject(requestResult?.data?.data);
     const requestStatus = String(requestData?.stock_allocation_status || '').trim().toLowerCase();
+    const reservationsUnavailable = isMissingStockReservationsTableError(reservationsResult?.error);
     const reservedCount = Number(reservationsResult?.count || 0);
 
-    return requestStatus === 'reserved' || reservedCount > 0;
+    if (requestStatus === 'reserved' || reservedCount > 0) {
+      return true;
+    }
+
+    if (reservationsUnavailable) {
+      return null;
+    }
+
+    return false;
   } catch (error) {
     console.warn('Could not confirm existing request stock reservation fallback state.', error);
     return false;
@@ -240,6 +265,19 @@ export const reserveRequestStockAllocations = async ({
         usedFallback: true,
         viaFunction: false,
         viaExistingReservation: true,
+      };
+    }
+
+    if (alreadyReserved === null) {
+      console.warn(
+        'Request stock reservation infrastructure is unavailable. Proceeding in legacy pending mode for this request.'
+      );
+      return {
+        success: true,
+        skipped: false,
+        usedFallback: true,
+        viaFunction: false,
+        viaLegacyPendingMode: true,
       };
     }
 
