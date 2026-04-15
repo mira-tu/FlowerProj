@@ -144,6 +144,54 @@ const isMissingManageAdminWorkflowsError = (error) => {
     || combined.includes('404');
 };
 
+const parseJsonObject = (value) => {
+  if (!value) return {};
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      return {};
+    }
+  }
+  return typeof value === 'object' ? value : {};
+};
+
+const confirmExistingRequestStockReservation = async ({
+  supabase,
+  requestId,
+}) => {
+  if (!supabase || !requestId) {
+    return false;
+  }
+
+  try {
+    const [
+      requestResult,
+      reservationsResult,
+    ] = await Promise.all([
+      supabase
+        .from('requests')
+        .select('data')
+        .eq('id', requestId)
+        .maybeSingle(),
+      supabase
+        .from('stock_reservations')
+        .select('id', { count: 'exact', head: true })
+        .eq('request_id', requestId)
+        .eq('status', 'reserved'),
+    ]);
+
+    const requestData = parseJsonObject(requestResult?.data?.data);
+    const requestStatus = String(requestData?.stock_allocation_status || '').trim().toLowerCase();
+    const reservedCount = Number(reservationsResult?.count || 0);
+
+    return requestStatus === 'reserved' || reservedCount > 0;
+  } catch (error) {
+    console.warn('Could not confirm existing request stock reservation fallback state.', error);
+    return false;
+  }
+};
+
 export const reserveRequestStockAllocations = async ({
   supabase,
   requestId,
@@ -180,6 +228,21 @@ export const reserveRequestStockAllocations = async ({
   }
 
   if (isMissingRequestStockAllocationRpcError(error)) {
+    const alreadyReserved = await confirmExistingRequestStockReservation({
+      supabase,
+      requestId,
+    });
+
+    if (alreadyReserved) {
+      return {
+        success: true,
+        skipped: false,
+        usedFallback: true,
+        viaFunction: false,
+        viaExistingReservation: true,
+      };
+    }
+
     console.error('Request stock allocation RPC is unavailable, so reservation could not be completed.', error);
     return {
       success: false,
