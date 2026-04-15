@@ -219,6 +219,163 @@ const confirmExistingRequestStockReservation = async ({
   }
 };
 
+const normalizeStockAllocations = (allocations = []) => {
+  const totals = new Map();
+
+  (Array.isArray(allocations) ? allocations : []).forEach((allocation) => {
+    const stockProductId = Number.parseInt(String(allocation?.stock_product_id ?? ''), 10);
+    const quantity = Number.parseInt(String(allocation?.quantity ?? ''), 10);
+    const scope = String(allocation?.scope || 'other').trim().toLowerCase() || 'other';
+
+    if (!Number.isFinite(stockProductId) || stockProductId <= 0 || !Number.isFinite(quantity) || quantity <= 0) {
+      return;
+    }
+
+    const existing = totals.get(stockProductId) || { stock_product_id: stockProductId, quantity: 0, scope };
+    existing.quantity += quantity;
+    if (!existing.scope || existing.scope === 'other') {
+      existing.scope = scope;
+    }
+    totals.set(stockProductId, existing);
+  });
+
+  return Array.from(totals.values());
+};
+
+const buildStockConflictError = () => new Error(
+  'Some wrapper, ribbon, or flower stock changed while you were checking out. Please review your Customizer Studio cart and try again.'
+);
+
+export const reserveRequestStockAllocationsDirect = async ({
+  supabase,
+  requestId,
+  allocations = [],
+}) => {
+  if (!supabase || !requestId) {
+    return { success: false, error: new Error('Request stock reservation could not be completed.') };
+  }
+
+  const normalizedAllocations = normalizeStockAllocations(allocations);
+  if (!normalizedAllocations.length) {
+    return { success: true, skipped: true, viaDirectDeduction: true };
+  }
+
+  const { data: requestRow, error: requestError } = await supabase
+    .from('requests')
+    .select('id, data')
+    .eq('id', requestId)
+    .maybeSingle();
+
+  if (requestError || !requestRow) {
+    return {
+      success: false,
+      error: requestError || new Error('The customized request could not be found after it was created.'),
+      viaDirectDeduction: true,
+    };
+  }
+
+  const requestData = parseJsonObject(requestRow.data);
+  const allocationStatus = String(requestData?.stock_allocation_status || '').trim().toLowerCase();
+  if (allocationStatus === 'reserved') {
+    return {
+      success: true,
+      skipped: false,
+      viaDirectDeduction: true,
+      viaExistingReservation: true,
+    };
+  }
+
+  const allocationIds = normalizedAllocations.map((allocation) => allocation.stock_product_id);
+  const { data: stockRows, error: stockError } = await supabase
+    .from('stock_products')
+    .select('id, quantity')
+    .in('id', allocationIds);
+
+  if (stockError) {
+    return { success: false, error: stockError, viaDirectDeduction: true };
+  }
+
+  const stockById = new Map((stockRows || []).map((row) => [Number(row.id), row]));
+  const hasConflict = normalizedAllocations.some((allocation) => {
+    const row = stockById.get(allocation.stock_product_id);
+    return !row || Number(row.quantity || 0) < allocation.quantity;
+  });
+
+  if (hasConflict) {
+    return {
+      success: false,
+      error: buildStockConflictError(),
+      viaDirectDeduction: true,
+      stockConflict: true,
+    };
+  }
+
+  const appliedUpdates = [];
+  for (const allocation of normalizedAllocations) {
+    const currentRow = stockById.get(allocation.stock_product_id);
+    const currentQuantity = Number(currentRow?.quantity || 0);
+    const nextQuantity = Math.max(0, currentQuantity - allocation.quantity);
+
+    const { data: updatedRows, error: updateError } = await supabase
+      .from('stock_products')
+      .update({ quantity: nextQuantity })
+      .eq('id', allocation.stock_product_id)
+      .eq('quantity', currentQuantity)
+      .select('id, quantity');
+
+    if (updateError || !Array.isArray(updatedRows) || updatedRows.length === 0) {
+      for (const appliedUpdate of appliedUpdates.reverse()) {
+        try {
+          await supabase
+            .from('stock_products')
+            .update({ quantity: appliedUpdate.previousQuantity })
+            .eq('id', appliedUpdate.stock_product_id);
+        } catch (rollbackError) {
+          console.error('Failed to roll back customized stock deduction after a partial update.', rollbackError);
+        }
+      }
+
+      return {
+        success: false,
+        error: updateError || buildStockConflictError(),
+        viaDirectDeduction: true,
+        stockConflict: !updateError,
+      };
+    }
+
+    appliedUpdates.push({
+      stock_product_id: allocation.stock_product_id,
+      previousQuantity: currentQuantity,
+    });
+  }
+
+  const nextRequestData = {
+    ...requestData,
+    stock_allocations: Array.isArray(requestData?.stock_allocations) && requestData.stock_allocations.length > 0
+      ? requestData.stock_allocations
+      : normalizedAllocations,
+    stock_allocation_status: 'reserved',
+    stock_allocation_mode: 'legacy_direct',
+    stock_allocation_reserved_at: new Date().toISOString(),
+  };
+
+  const { error: requestUpdateError } = await supabase
+    .from('requests')
+    .update({ data: nextRequestData })
+    .eq('id', requestId);
+
+  if (requestUpdateError) {
+    console.error('Customized request stock was deducted, but the request allocation marker could not be updated.', requestUpdateError);
+  }
+
+  return {
+    success: true,
+    skipped: false,
+    usedFallback: true,
+    viaDirectDeduction: true,
+  };
+};
+
 export const reserveRequestStockAllocations = async ({
   supabase,
   requestId,

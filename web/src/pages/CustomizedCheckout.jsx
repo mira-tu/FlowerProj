@@ -23,7 +23,7 @@ import {
 } from '../utils/freeShipping';
 import { PICKUP_TIME_OPTIONS } from '../utils/businessHours';
 import { hydrateCustomizedBouquetItems } from '../utils/customizedBouquetPreview';
-import { reserveRequestStockAllocations } from '../utils/requestSubmission';
+import { reserveRequestStockAllocations, reserveRequestStockAllocationsDirect } from '../utils/requestSubmission';
 
 const paymentMethods = [
     { id: 'gcash', name: 'GCash', description: 'Pay via GCash e-wallet', icon: 'fa-wallet' },
@@ -619,7 +619,7 @@ const CustomizedCheckout = ({ user }) => {
         }
 
         if (stockAllocations.length > 0) {
-            const reservationResult = await reserveRequestStockAllocations({
+            let reservationResult = await reserveRequestStockAllocations({
                 supabase,
                 requestId: data.id,
                 allocations: stockAllocations,
@@ -628,18 +628,27 @@ const CustomizedCheckout = ({ user }) => {
             if (!reservationResult.success) {
                 if (reservationResult.infrastructureUnavailable) {
                     console.warn(
-                        'Customizer Studio stock reservation infrastructure is unavailable. Keeping the request in pending/manual-review mode.'
+                        'Customizer Studio stock reservation infrastructure is unavailable. Falling back to direct stock deduction.'
                     );
+                    reservationResult = await reserveRequestStockAllocationsDirect({
+                        supabase,
+                        requestId: data.id,
+                        allocations: stockAllocations,
+                    });
+                }
+
+                if (!reservationResult.success) {
+                    console.error('Error reserving customized request stock:', reservationResult.error);
+                    await supabase.from('requests').delete().eq('id', data.id);
+                    setInfoModal({
+                        show: true,
+                        title: 'Stock Changed',
+                        message: 'Some wrapper, ribbon, or flower stock changed while you were checking out. Please review your Customizer Studio cart and try again.',
+                    });
+                    setIsProcessing(false);
+                    return;
                 } else {
-                console.error('Error reserving customized request stock:', reservationResult.error);
-                await supabase.from('requests').delete().eq('id', data.id);
-                setInfoModal({
-                    show: true,
-                    title: 'Stock Changed',
-                    message: 'Some wrapper, ribbon, or flower stock changed while you were checking out. Please review your Customizer Studio cart and try again.',
-                });
-                setIsProcessing(false);
-                return;
+                    console.info('Customizer Studio stock was deducted using the direct stock fallback.', reservationResult);
                 }
             }
         }
