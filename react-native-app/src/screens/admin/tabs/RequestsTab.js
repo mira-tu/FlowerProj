@@ -2721,11 +2721,18 @@ const shouldShowImmediateRequestPaymentReview = (request, groupedDestinations = 
 
   const paymentMethod = getNormalizedRequestPaymentMethod(request);
   const isGcashReview = paymentMethod === 'gcash' || !paymentMethod;
-  const isSupportedType = ['customized', 'special_order'].includes(String(request?.type || '').trim().toLowerCase());
+  const normalizedRequestType = String(request?.type || '').trim().toLowerCase();
+  const isSupportedType = ['customized', 'special_order'].includes(normalizedRequestType);
   const isSingleAddressFlow = !Array.isArray(groupedDestinations) || groupedDestinations.length <= 1;
+  const shouldAllowMultipleAddressImmediateReview = normalizedRequestType === 'customized';
   const { hasReceiptEvidence, hasPaymentContext } = getRequestPaymentEvidence(request);
 
-  return isSupportedType && isSingleAddressFlow && isGcashReview && (hasReceiptEvidence || hasPaymentContext);
+  return (
+    isSupportedType
+    && (isSingleAddressFlow || shouldAllowMultipleAddressImmediateReview)
+    && isGcashReview
+    && (hasReceiptEvidence || hasPaymentContext)
+  );
 };
 
 const shouldShowRequestPaymentDetails = (request, groupedDestinations = []) => {
@@ -3328,6 +3335,25 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   }, [focusedEntityTarget, focusedRequest, mergeRequestIntoState]);
 
   const displayedRequests = focusedRequest ? [focusedRequest] : filteredRequests;
+  const requestListExtraData = React.useMemo(() => ({
+    activeActionKey,
+    riderCount: riders.length,
+    displayedCount: displayedRequests.length,
+    selectedRequestId: selectedRequest?.id || null,
+    requestToUpdateId: requestToUpdate?.id || null,
+    requestToAssignRiderId: requestToAssignRider?.id || null,
+    requestToRecordPaymentId: requestToRecordPayment?.id || null,
+    requestToCompleteStopsId: requestToCompleteStops?.id || null,
+  }), [
+    activeActionKey,
+    displayedRequests.length,
+    requestToAssignRider?.id,
+    requestToCompleteStops?.id,
+    requestToRecordPayment?.id,
+    requestToUpdate?.id,
+    riders.length,
+    selectedRequest?.id,
+  ]);
   const focusedRequestBannerTitle = focusedEntityTarget?.source === 'rider_assignment'
     ? 'Showing the rider assignment request only'
     : 'Showing the refund target request only';
@@ -5582,6 +5608,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
       <FlatList
         data={displayedRequests}
         renderItem={renderRequestCard}
+        extraData={requestListExtraData}
         keyExtractor={item => item.id.toString()}
         contentContainerStyle={{ paddingBottom: 20, paddingHorizontal: 16 }}
         initialNumToRender={6}

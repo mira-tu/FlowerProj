@@ -487,6 +487,23 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
   }, [focusedEntityTarget, riderScopedOrders]);
 
   const displayedOrders = focusedOrder ? [focusedOrder] : filteredOrders;
+  const orderListExtraData = React.useMemo(() => ({
+    activeActionKey,
+    riderCount: riders.length,
+    displayedCount: displayedOrders.length,
+    orderToUpdateId: orderToUpdate?.id || null,
+    orderToAssignRiderId: orderToAssignRider?.id || null,
+    orderToRecordPaymentId: orderToRecordPayment?.id || null,
+    orderToCompleteStopsId: orderToCompleteStops?.id || null,
+  }), [
+    activeActionKey,
+    displayedOrders.length,
+    orderToAssignRider?.id,
+    orderToCompleteStops?.id,
+    orderToRecordPayment?.id,
+    orderToUpdate?.id,
+    riders.length,
+  ]);
   const focusedOrderBannerTitle = focusedEntityTarget?.source === 'rider_assignment'
     ? 'Showing the rider assignment order only'
     : 'Showing the refund target order only';
@@ -1969,6 +1986,7 @@ const deliveryStepperStatuses = [
           onUpdateStatus={openStatusModal}
           openReceiptModal={(url) => { setSelectedReceiptUrl(url); setReceiptModalVisible(true); }}
         />}
+        extraData={orderListExtraData}
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={{ paddingBottom: 20, paddingHorizontal: 16 }}
         refreshControl={
