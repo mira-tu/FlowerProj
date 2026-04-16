@@ -408,20 +408,45 @@ export const getDeliveryStopAssignedRiderId = (destination = {}, fallbackAssigne
     return assignedRiderId || null;
 };
 
-export const canCurrentUserCompleteRiderStop = (
-    destination = {},
-    currentUserId = null,
-    currentRecordStatus = '',
+export const getSharedAssignedRiderIdForActiveStops = (
+    destinations = [],
     fallbackAssignedRiderId = null
+) => {
+    const normalizedStops = normalizeDeliveryDestinations(destinations);
+    const activeStops = normalizedStops.filter((destination) => !isDeliveryStopCancelled(destination));
+
+    if (normalizedStops.length <= 1 || activeStops.length <= 1) {
+        return null;
+    }
+
+    const assignedRiderIds = Array.from(
+        new Set(
+            activeStops
+                .map((destination) => getDeliveryStopAssignedRiderId(destination, fallbackAssignedRiderId))
+                .filter(Boolean)
+        )
+    );
+
+    if (assignedRiderIds.length !== 1) {
+        return null;
+    }
+
+    const [sharedAssignedRiderId] = assignedRiderIds;
+    const allActiveStopsAssigned = activeStops.every((destination) => (
+        getDeliveryStopAssignedRiderId(destination, fallbackAssignedRiderId) === sharedAssignedRiderId
+    ));
+
+    return allActiveStopsAssigned ? sharedAssignedRiderId : null;
+};
+
+export const canAssignedRiderCompleteStop = (
+    destination = {},
+    currentRecordStatus = '',
+    fallbackAssignedRiderId = null,
+    allDestinations = []
 ) => {
     const normalizedDestination = normalizeDeliveryDestination(destination);
     const normalizedRecordStatus = String(currentRecordStatus || '').trim().toLowerCase();
-    const assignedRiderId = getDeliveryStopAssignedRiderId(normalizedDestination, fallbackAssignedRiderId);
-    const normalizedCurrentUserId = String(currentUserId || '').trim();
-
-    if (normalizedDestination.confirmation_owner !== DELIVERY_CONFIRMATION_OWNER.RIDER) {
-        return false;
-    }
 
     if (isDeliveryStopCancelled(normalizedDestination)) {
         return false;
@@ -432,6 +457,47 @@ export const canCurrentUserCompleteRiderStop = (
     }
 
     if (normalizedRecordStatus !== 'out_for_delivery') {
+        return false;
+    }
+
+    const assignedRiderId = getDeliveryStopAssignedRiderId(normalizedDestination, fallbackAssignedRiderId);
+    if (!assignedRiderId) {
+        return false;
+    }
+
+    if (normalizedDestination.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.RIDER) {
+        return true;
+    }
+
+    if (normalizedDestination.confirmation_owner !== DELIVERY_CONFIRMATION_OWNER.CUSTOMER) {
+        return false;
+    }
+
+    const sharedAssignedRiderId = getSharedAssignedRiderIdForActiveStops(
+        allDestinations,
+        fallbackAssignedRiderId
+    );
+
+    return Boolean(sharedAssignedRiderId && sharedAssignedRiderId === assignedRiderId);
+};
+
+export const canCurrentUserCompleteRiderStop = (
+    destination = {},
+    currentUserId = null,
+    currentRecordStatus = '',
+    fallbackAssignedRiderId = null,
+    allDestinations = []
+) => {
+    const normalizedDestination = normalizeDeliveryDestination(destination);
+    const assignedRiderId = getDeliveryStopAssignedRiderId(normalizedDestination, fallbackAssignedRiderId);
+    const normalizedCurrentUserId = String(currentUserId || '').trim();
+
+    if (!canAssignedRiderCompleteStop(
+        normalizedDestination,
+        currentRecordStatus,
+        fallbackAssignedRiderId,
+        allDestinations
+    )) {
         return false;
     }
 

@@ -24,6 +24,7 @@ import { formatTimestamp, getPaymentStatusDisplay, getStatusLabel } from '../adm
 import DeliveryProofModal from '../components/DeliveryProofModal';
 import PaymentDetailsSection from '../components/PaymentDetailsSection';
 import {
+  canAssignedRiderCompleteStop,
   canCurrentUserCompleteRiderStop,
   DELIVERY_CONFIRMATION_OWNER,
   DELIVERY_CONFIRMATION_STATUS,
@@ -310,7 +311,7 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
 
     const fallbackAssignedRiderId = getStopFallbackAssignedRiderId(order);
     return normalizedStops.filter((stop) => (
-      canCurrentUserCompleteRiderStop(stop, currentUser?.id, order?.status, fallbackAssignedRiderId)
+      canCurrentUserCompleteRiderStop(stop, currentUser?.id, order?.status, fallbackAssignedRiderId, normalizedStops)
     ));
   }, [currentUser?.id, currentUser?.role, getNormalizedStopDestinations, getStopFallbackAssignedRiderId]);
 
@@ -407,6 +408,28 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
       })
       .filter(Boolean);
   }, [getNormalizedStopDestinations]);
+
+  React.useEffect(() => {
+    if (riders.length) {
+      return;
+    }
+
+    const hasPersistedAssignedRiders = orders.some((order) => {
+      const normalizedStops = getNormalizedStopDestinations(order);
+      const activeStops = normalizedStops.filter((stop) => !isDeliveryStopCancelled(stop));
+      const fallbackAssignedRiderId = activeStops.length <= 1
+        ? String(order?.assigned_rider || '').trim()
+        : '';
+
+      return normalizedStops.some((stop) => Boolean(
+        getDeliveryStopAssignedRiderId(stop, fallbackAssignedRiderId || null)
+      ));
+    });
+
+    if (hasPersistedAssignedRiders) {
+      void loadRiders();
+    }
+  }, [getNormalizedStopDestinations, loadRiders, orders, riders.length]);
 
   const ordersWithRiderDetails = React.useMemo(() => {
     if (!orders.length || !riders.length) {
@@ -780,11 +803,10 @@ const deliveryStepperStatuses = [
       : null;
     const normalizedStops = Array.isArray(stops) ? stops : [];
     const assignedStop = normalizedStops.find((stop) => (
-      canCurrentUserCompleteRiderStop(stop, currentUser?.id, order?.status, fallbackAssignedRiderId)
+      canCurrentUserCompleteRiderStop(stop, currentUser?.id, order?.status, fallbackAssignedRiderId, normalizedStops)
     ));
     const firstPendingRiderStop = normalizedStops.find((stop) => (
-      stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.RIDER
-      && stop.confirmation_status !== DELIVERY_CONFIRMATION_STATUS.CONFIRMED
+      canAssignedRiderCompleteStop(stop, order?.status, fallbackAssignedRiderId, normalizedStops)
     ));
 
     return assignedStop?.unit_key || firstPendingRiderStop?.unit_key || normalizedStops[0]?.unit_key || null;
@@ -828,7 +850,15 @@ const deliveryStepperStatuses = [
       return;
     }
 
-    if (selectedStop.confirmation_owner !== DELIVERY_CONFIRMATION_OWNER.RIDER) {
+    const fallbackAssignedRiderId = getStopFallbackAssignedRiderId(orderToCompleteStops);
+    const riderCanCompleteSelectedStop = canAssignedRiderCompleteStop(
+      selectedStop,
+      orderToCompleteStops?.status,
+      fallbackAssignedRiderId,
+      stops
+    );
+
+    if (!riderCanCompleteSelectedStop) {
       Alert.alert('Customer Confirmation Needed', 'This stop must be confirmed by the ordering customer.');
       return;
     }
@@ -843,13 +873,13 @@ const deliveryStepperStatuses = [
       return;
     }
 
-    const assignedRiderId = getDeliveryStopAssignedRiderId(selectedStop, getStopFallbackAssignedRiderId(orderToCompleteStops));
+    const assignedRiderId = getDeliveryStopAssignedRiderId(selectedStop, fallbackAssignedRiderId);
     if (!assignedRiderId) {
       Alert.alert('Assign Rider First', 'Please assign an employee rider to this delivery stop first.');
       return;
     }
 
-    if (!canCurrentUserCompleteRiderStop(selectedStop, currentUser?.id, orderToCompleteStops?.status, getStopFallbackAssignedRiderId(orderToCompleteStops))) {
+    if (!canCurrentUserCompleteRiderStop(selectedStop, currentUser?.id, orderToCompleteStops?.status, fallbackAssignedRiderId, stops)) {
       const assignedRiderName = riderLookup[String(assignedRiderId)]?.name;
       Alert.alert(
         'Assigned Rider Required',
@@ -2245,13 +2275,22 @@ const deliveryStepperStatuses = [
                 {deliveryStopModalStops.map((stop, index) => {
                   const isSelected = selectedDeliveryStopKey === stop.unit_key;
                   const isConfirmed = stop.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED;
+                  const fallbackAssignedRiderId = orderToCompleteStops
+                    ? getStopFallbackAssignedRiderId(orderToCompleteStops)
+                    : null;
+                  const canAssignedRiderConfirmStop = canAssignedRiderCompleteStop(
+                    stop,
+                    orderToCompleteStops?.status,
+                    fallbackAssignedRiderId,
+                    deliveryStopModalStops
+                  );
                   const isCustomerOwned = stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER;
 
                   return (
                     <TouchableOpacity
                       key={stop.unit_key || `order-stop-${index + 1}`}
                       activeOpacity={0.88}
-                      disabled={isCustomerOwned || isConfirmed}
+                      disabled={!canAssignedRiderConfirmStop || isConfirmed}
                       onPress={() => {
                         setSelectedDeliveryStopKey(stop.unit_key);
                         setSelectedDeliveryProof(null);
@@ -2293,7 +2332,7 @@ const deliveryStepperStatuses = [
                               fontWeight: '700',
                               color: isCustomerOwned ? '#BE185D' : '#6D28D9',
                             }}>
-                              {isCustomerOwned ? 'Customer confirms' : 'Rider proof'}
+                              {isCustomerOwned && canAssignedRiderConfirmStop ? 'Customer or rider' : (isCustomerOwned ? 'Customer confirms' : 'Rider proof')}
                             </Text>
                           </View>
                           <View style={{
@@ -2307,7 +2346,9 @@ const deliveryStepperStatuses = [
                               fontWeight: '700',
                               color: isConfirmed ? '#166534' : '#92400E',
                             }}>
-                              {isConfirmed ? 'Confirmed' : (isCustomerOwned ? 'Awaiting customer' : 'Pending proof')}
+                              {isConfirmed ? 'Confirmed' : (isCustomerOwned
+                                ? (canAssignedRiderConfirmStop ? 'Awaiting customer or rider' : 'Awaiting customer')
+                                : 'Pending proof')}
                             </Text>
                           </View>
                         </View>
@@ -2323,7 +2364,12 @@ const deliveryStepperStatuses = [
                 })}
               </ScrollView>
 
-              {selectedDeliveryStop && selectedDeliveryStop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.RIDER && selectedDeliveryStop.confirmation_status !== DELIVERY_CONFIRMATION_STATUS.CONFIRMED ? (
+              {selectedDeliveryStop && canAssignedRiderCompleteStop(
+                selectedDeliveryStop,
+                orderToCompleteStops?.status,
+                orderToCompleteStops ? getStopFallbackAssignedRiderId(orderToCompleteStops) : null,
+                deliveryStopModalStops
+              ) && selectedDeliveryStop.confirmation_status !== DELIVERY_CONFIRMATION_STATUS.CONFIRMED ? (
                 <View style={{ gap: 12 }}>
                   <Text style={{ fontSize: 14, fontWeight: '700', color: '#374151' }}>
                     Proof for {getDeliveryStopDisplayLabel(selectedDeliveryStop)}
@@ -2381,7 +2427,7 @@ const deliveryStepperStatuses = [
                 }}>
                   <Text style={{ fontSize: 13, lineHeight: 20, color: '#6B7280' }}>
                     {selectedDeliveryStop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER
-                      ? 'This stop will stay open until the ordering customer confirms it on tracking.'
+                      ? 'This stop will stay open until the ordering customer confirms it on tracking, unless the same assigned rider covers every active address and uploads proof here.'
                       : 'This stop is already confirmed.'}
                   </Text>
                 </View>
@@ -2425,7 +2471,12 @@ const deliveryStepperStatuses = [
                   disabled={
                     isCompletingDeliveryStop
                     || !selectedDeliveryStop
-                    || selectedDeliveryStop.confirmation_owner !== DELIVERY_CONFIRMATION_OWNER.RIDER
+                    || !canAssignedRiderCompleteStop(
+                      selectedDeliveryStop,
+                      orderToCompleteStops?.status,
+                      orderToCompleteStops ? getStopFallbackAssignedRiderId(orderToCompleteStops) : null,
+                      deliveryStopModalStops
+                    )
                     || selectedDeliveryStop.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED
                     || (!selectedDeliveryProof?.base64 && !selectedDeliveryProof?.uri)
                   }

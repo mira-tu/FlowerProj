@@ -178,6 +178,22 @@ const formatShortDateLabel = (date) => date.toLocaleDateString('en-PH', {
   day: 'numeric',
 });
 
+const createSparseChartLabels = (labels = [], maxVisibleLabels = 6) => {
+  const safeLabels = Array.isArray(labels) ? labels : [];
+  if (safeLabels.length <= maxVisibleLabels) {
+    return safeLabels;
+  }
+
+  const step = Math.max(1, Math.ceil((safeLabels.length - 1) / Math.max(1, maxVisibleLabels - 1)));
+
+  return safeLabels.map((label, index) => {
+    const isFirst = index === 0;
+    const isLast = index === safeLabels.length - 1;
+    const isStepPoint = index % step === 0;
+    return (isFirst || isLast || isStepPoint) ? label : '';
+  });
+};
+
 const getSaleAmountValue = (sale) => {
   const parsed = Number.parseFloat(sale?.total_amount);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -415,6 +431,25 @@ const SalesTab = () => {
   const selectedMonthRange = selectedPeriod === 'month' ? getMonthRange(selectedMonthKey) : null;
   const activeFilterKey = `${selectedPeriod}|${activeMonthKey || ''}|${activeRangeStartKey || ''}|${activeRangeEndKey || ''}`;
   const chartWidth = Math.max(Math.min(width - 30, 720), 280);
+  const chartLabelCount = Array.isArray(chartData?.labels) ? chartData.labels.length : 0;
+  const maxVisibleChartLabels = selectedPeriod === 'range'
+    ? (isWeb ? 8 : 5)
+    : (isWeb ? 10 : 6);
+  const displayedChartLabels = React.useMemo(
+    () => createSparseChartLabels(chartData?.labels || [], maxVisibleChartLabels),
+    [chartData?.labels, maxVisibleChartLabels]
+  );
+  const displayedChartData = React.useMemo(
+    () => ({
+      ...chartData,
+      labels: displayedChartLabels,
+    }),
+    [chartData, displayedChartLabels]
+  );
+  const chartNeedsHorizontalScroll = chartLabelCount > maxVisibleChartLabels;
+  const effectiveChartWidth = chartNeedsHorizontalScroll
+    ? Math.max(chartWidth, chartLabelCount * (isWeb ? 68 : 58))
+    : chartWidth;
   const overviewLoaded = sectionLoadKey.overview === activeFilterKey;
   const historyLoaded = sectionLoadKey.history === activeFilterKey;
   const productsLoaded = sectionLoadKey.products === activeFilterKey;
@@ -1165,27 +1200,39 @@ const SalesTab = () => {
     <View>
       <View style={{ backgroundColor: '#fff', borderRadius: 16, paddingTop: 10, paddingBottom: 12, borderWidth: 1, borderColor: '#eee', marginBottom: 12 }}>
         <Text style={{ fontSize: 17, fontWeight: '700', color: '#333', paddingHorizontal: 14, marginBottom: 6 }}>Sales Trend</Text>
-        <LineChart
-          data={chartData}
-          width={chartWidth}
-          height={180}
-          yAxisLabel={'\u20b1'}
-          chartConfig={{
-            backgroundColor: '#fff',
-            backgroundGradientFrom: '#fff',
-            backgroundGradientTo: '#fff',
-            decimalPlaces: 0,
-            color: (opacity = 1) => `rgba(236, 72, 153, ${opacity})`,
-            labelColor: (opacity = 1) => `rgba(55, 65, 81, ${opacity})`,
-            propsForDots: { r: '5', strokeWidth: '2', stroke: '#ec4899' },
-            formatYLabel: (yLabel) => `${Math.round(parseFloat(yLabel || 0))}`,
-            yLabelsOffset: 18,
-          }}
-          bezier
-          withDots={!isWeb}
-          fromZero
-          style={{ alignSelf: 'center' }}
-        />
+        <ScrollView
+          horizontal
+          bounces={false}
+          showsHorizontalScrollIndicator={chartNeedsHorizontalScroll}
+          contentContainerStyle={{ paddingHorizontal: 10 }}
+        >
+          <LineChart
+            data={displayedChartData}
+            width={effectiveChartWidth}
+            height={180}
+            yAxisLabel={'\u20b1'}
+            chartConfig={{
+              backgroundColor: '#fff',
+              backgroundGradientFrom: '#fff',
+              backgroundGradientTo: '#fff',
+              decimalPlaces: 0,
+              color: (opacity = 1) => `rgba(236, 72, 153, ${opacity})`,
+              labelColor: (opacity = 1) => `rgba(55, 65, 81, ${opacity})`,
+              propsForDots: { r: '5', strokeWidth: '2', stroke: '#ec4899' },
+              formatYLabel: (yLabel) => `${Math.round(parseFloat(yLabel || 0))}`,
+              yLabelsOffset: 18,
+              propsForLabels: {
+                fontSize: chartNeedsHorizontalScroll ? 10 : 11,
+              },
+            }}
+            bezier
+            withDots={!isWeb}
+            fromZero
+            segments={4}
+            verticalLabelRotation={chartNeedsHorizontalScroll ? -35 : 0}
+            style={{ alignSelf: 'center', paddingRight: chartNeedsHorizontalScroll ? 20 : 0 }}
+          />
+        </ScrollView>
       </View>
       <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 14 }}>
         Cards and chart update from the live orders and requests in Supabase.

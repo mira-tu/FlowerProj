@@ -4,6 +4,7 @@ import { supabase } from './supabase';
 import { decode } from 'base64-arraybuffer';
 import {
     areAllDeliveryStopsConfirmed,
+    canAssignedRiderCompleteStop,
     confirmDeliveryStop,
     getDeliveryStopDisplayLabel,
     groupDeliveryDestinations,
@@ -1202,7 +1203,17 @@ const completeOrderDeliveryStopDirect = async (orderId, unitKey, options = {}) =
         throw new Error('Delivery stop not found.');
     }
 
-    if (stopToComplete.confirmation_owner !== 'rider') {
+    const fallbackAssignedRiderId = normalizedStops.length <= 1
+        ? String(currentOrder?.assigned_rider || '').trim()
+        : '';
+    const riderCanCompleteStop = canAssignedRiderCompleteStop(
+        stopToComplete,
+        currentOrder?.status,
+        fallbackAssignedRiderId,
+        normalizedStops
+    );
+
+    if (!riderCanCompleteStop) {
         throw new Error('This delivery stop is waiting for customer confirmation.');
     }
 
@@ -1220,9 +1231,6 @@ const completeOrderDeliveryStopDirect = async (orderId, unitKey, options = {}) =
         throw new Error('Proof photo is required before completing this delivery stop.');
     }
 
-    const fallbackAssignedRiderId = normalizedStops.length <= 1
-        ? String(currentOrder?.assigned_rider || '').trim()
-        : '';
     const assignedRiderId = String(
         stopToComplete?.assigned_rider_id || fallbackAssignedRiderId || ''
     ).trim();
@@ -3160,7 +3168,17 @@ const completeRequestDeliveryStopDirect = async (requestId, unitKey, options = {
         throw new Error('Delivery stop not found.');
     }
 
-    if (stopToComplete.confirmation_owner !== 'rider') {
+    const fallbackAssignedRiderId = normalizedStops.length <= 1
+        ? String(currentRequest?.assigned_rider || '').trim()
+        : '';
+    const riderCanCompleteStop = canAssignedRiderCompleteStop(
+        stopToComplete,
+        currentRequest?.status,
+        fallbackAssignedRiderId,
+        normalizedStops
+    );
+
+    if (!riderCanCompleteStop) {
         throw new Error('This delivery stop is waiting for customer confirmation.');
     }
 
@@ -3181,9 +3199,6 @@ const completeRequestDeliveryStopDirect = async (requestId, unitKey, options = {
         throw new Error('Proof photo is required before completing this delivery stop.');
     }
 
-    const fallbackAssignedRiderId = normalizedStops.length <= 1
-        ? String(currentRequest?.assigned_rider || '').trim()
-        : '';
     const assignedRiderId = String(
         stopToComplete?.assigned_rider_id || fallbackAssignedRiderId || ''
     ).trim();

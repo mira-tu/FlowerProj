@@ -26,6 +26,7 @@ import { formatTimestamp, getPaymentStatusDisplay, getStatusColor, getStatusLabe
 import DeliveryProofModal from '../components/DeliveryProofModal';
 import PaymentDetailsSection from '../components/PaymentDetailsSection';
 import {
+  canAssignedRiderCompleteStop,
   canCurrentUserCompleteRiderStop,
   DELIVERY_CONFIRMATION_OWNER,
   DELIVERY_CONFIRMATION_STATUS,
@@ -3059,7 +3060,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
 
     const fallbackAssignedRiderId = getStopFallbackAssignedRiderId(request);
     return normalizedStops.filter((stop) => (
-      canCurrentUserCompleteRiderStop(stop, currentUser?.id, request?.status, fallbackAssignedRiderId)
+      canCurrentUserCompleteRiderStop(stop, currentUser?.id, request?.status, fallbackAssignedRiderId, normalizedStops)
     ));
   }, [currentUser?.id, currentUser?.role, getNormalizedStopDestinations, getStopFallbackAssignedRiderId]);
 
@@ -3900,11 +3901,10 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
       : null;
     const normalizedStops = Array.isArray(stops) ? stops : [];
     const assignedStop = normalizedStops.find((stop) => (
-      canCurrentUserCompleteRiderStop(stop, currentUser?.id, request?.status, fallbackAssignedRiderId)
+      canCurrentUserCompleteRiderStop(stop, currentUser?.id, request?.status, fallbackAssignedRiderId, normalizedStops)
     ));
     const firstPendingRiderStop = normalizedStops.find((stop) => (
-      stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.RIDER
-      && stop.confirmation_status !== DELIVERY_CONFIRMATION_STATUS.CONFIRMED
+      canAssignedRiderCompleteStop(stop, request?.status, fallbackAssignedRiderId, normalizedStops)
     ));
 
     return assignedStop?.unit_key || firstPendingRiderStop?.unit_key || normalizedStops[0]?.unit_key || null;
@@ -3948,7 +3948,15 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
       return;
     }
 
-    if (selectedStop.confirmation_owner !== DELIVERY_CONFIRMATION_OWNER.RIDER) {
+    const fallbackAssignedRiderId = getStopFallbackAssignedRiderId(requestToCompleteStops);
+    const riderCanCompleteSelectedStop = canAssignedRiderCompleteStop(
+      selectedStop,
+      requestToCompleteStops?.status,
+      fallbackAssignedRiderId,
+      stops
+    );
+
+    if (!riderCanCompleteSelectedStop) {
       Alert.alert('Customer Confirmation Needed', 'This stop must be confirmed by the ordering customer.');
       return;
     }
@@ -3963,13 +3971,13 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
       return;
     }
 
-    const assignedRiderId = getDeliveryStopAssignedRiderId(selectedStop, getStopFallbackAssignedRiderId(requestToCompleteStops));
+    const assignedRiderId = getDeliveryStopAssignedRiderId(selectedStop, fallbackAssignedRiderId);
     if (!assignedRiderId) {
       Alert.alert('Assign Rider First', 'Please assign an employee rider to this delivery stop first.');
       return;
     }
 
-    if (!canCurrentUserCompleteRiderStop(selectedStop, currentUser?.id, requestToCompleteStops?.status, getStopFallbackAssignedRiderId(requestToCompleteStops))) {
+    if (!canCurrentUserCompleteRiderStop(selectedStop, currentUser?.id, requestToCompleteStops?.status, fallbackAssignedRiderId, stops)) {
       const assignedRiderName = riderLookup[String(assignedRiderId)]?.name;
       Alert.alert(
         'Assigned Rider Required',
@@ -5844,13 +5852,22 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                 {deliveryStopModalStops.map((stop, index) => {
                   const isSelected = selectedDeliveryStopKey === stop.unit_key;
                   const isConfirmed = stop.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED;
+                  const fallbackAssignedRiderId = requestToCompleteStops
+                    ? getStopFallbackAssignedRiderId(requestToCompleteStops)
+                    : null;
+                  const canAssignedRiderConfirmStop = canAssignedRiderCompleteStop(
+                    stop,
+                    requestToCompleteStops?.status,
+                    fallbackAssignedRiderId,
+                    deliveryStopModalStops
+                  );
                   const isCustomerOwned = stop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER;
 
                   return (
                     <TouchableOpacity
                       key={stop.unit_key || `request-stop-${index + 1}`}
                       activeOpacity={0.88}
-                      disabled={isCustomerOwned || isConfirmed}
+                      disabled={!canAssignedRiderConfirmStop || isConfirmed}
                       onPress={() => {
                         setSelectedDeliveryStopKey(stop.unit_key);
                         setSelectedDeliveryProof(null);
@@ -5892,7 +5909,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                               fontWeight: '700',
                               color: isCustomerOwned ? '#BE185D' : '#6D28D9',
                             }}>
-                              {isCustomerOwned ? 'Customer confirms' : 'Rider proof'}
+                              {isCustomerOwned && canAssignedRiderConfirmStop ? 'Customer or rider' : (isCustomerOwned ? 'Customer confirms' : 'Rider proof')}
                             </Text>
                           </View>
                           <View style={{
@@ -5906,7 +5923,9 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                               fontWeight: '700',
                               color: isConfirmed ? '#166534' : '#92400E',
                             }}>
-                              {isConfirmed ? 'Confirmed' : (isCustomerOwned ? 'Awaiting customer' : 'Pending proof')}
+                              {isConfirmed ? 'Confirmed' : (isCustomerOwned
+                                ? (canAssignedRiderConfirmStop ? 'Awaiting customer or rider' : 'Awaiting customer')
+                                : 'Pending proof')}
                             </Text>
                           </View>
                         </View>
@@ -5922,7 +5941,12 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                 })}
               </ScrollView>
 
-              {selectedDeliveryStop && selectedDeliveryStop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.RIDER && selectedDeliveryStop.confirmation_status !== DELIVERY_CONFIRMATION_STATUS.CONFIRMED ? (
+              {selectedDeliveryStop && canAssignedRiderCompleteStop(
+                selectedDeliveryStop,
+                requestToCompleteStops?.status,
+                requestToCompleteStops ? getStopFallbackAssignedRiderId(requestToCompleteStops) : null,
+                deliveryStopModalStops
+              ) && selectedDeliveryStop.confirmation_status !== DELIVERY_CONFIRMATION_STATUS.CONFIRMED ? (
                 <View style={{ gap: 12 }}>
                   <Text style={{ fontSize: 14, fontWeight: '700', color: '#374151' }}>
                     Proof for {getDeliveryStopDisplayLabel(selectedDeliveryStop)}
@@ -5980,7 +6004,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                 }}>
                   <Text style={{ fontSize: 13, lineHeight: 20, color: '#6B7280' }}>
                     {selectedDeliveryStop.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.CUSTOMER
-                      ? 'This stop will stay open until the ordering customer confirms it on tracking.'
+                      ? 'This stop will stay open until the ordering customer confirms it on tracking, unless the same assigned rider covers every active address and uploads proof here.'
                       : 'This stop is already confirmed.'}
                   </Text>
                 </View>
@@ -6024,7 +6048,12 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                   disabled={
                     isCompletingDeliveryStop
                     || !selectedDeliveryStop
-                    || selectedDeliveryStop.confirmation_owner !== DELIVERY_CONFIRMATION_OWNER.RIDER
+                    || !canAssignedRiderCompleteStop(
+                      selectedDeliveryStop,
+                      requestToCompleteStops?.status,
+                      requestToCompleteStops ? getStopFallbackAssignedRiderId(requestToCompleteStops) : null,
+                      deliveryStopModalStops
+                    )
                     || selectedDeliveryStop.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED
                     || (!selectedDeliveryProof?.base64 && !selectedDeliveryProof?.uri)
                   }

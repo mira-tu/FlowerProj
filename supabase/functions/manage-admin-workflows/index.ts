@@ -29,6 +29,10 @@ const DELIVERY_CONFIRMATION_STATUS = {
   PENDING: "pending",
   CONFIRMED: "confirmed",
 } as const;
+const DELIVERY_STOP_STATUS = {
+  ACTIVE: "active",
+  CANCELLED: "cancelled",
+} as const;
 
 const transporter = GMAIL_USER && GMAIL_APP_PASSWORD
   ? nodemailer.createTransport({
@@ -298,6 +302,20 @@ const normalizeDeliveryConfirmationStatus = (
   return fallback;
 };
 
+const normalizeDeliveryStopStatus = (value: unknown, fallback = DELIVERY_STOP_STATUS.ACTIVE) => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+
+  if (normalized === DELIVERY_STOP_STATUS.CANCELLED) {
+    return DELIVERY_STOP_STATUS.CANCELLED;
+  }
+
+  if (normalized === DELIVERY_STOP_STATUS.ACTIVE) {
+    return DELIVERY_STOP_STATUS.ACTIVE;
+  }
+
+  return fallback;
+};
+
 const buildDeliveryDestinationAddressText = (destination: Record<string, unknown> = {}) => {
   const snapshot = destination?.address_snapshot && typeof destination.address_snapshot === "object"
     ? destination.address_snapshot as Record<string, unknown>
@@ -338,6 +356,10 @@ const normalizeDeliveryDestination = (
   const assignedRiderId = String(
     destination?.assigned_rider_id ?? destination?.assignedRiderId ?? "",
   ).trim();
+  const stopStatus = normalizeDeliveryStopStatus(
+    destination?.stop_status ?? destination?.stopStatus,
+    DELIVERY_STOP_STATUS.ACTIVE,
+  );
 
   return {
     ...destination,
@@ -350,6 +372,7 @@ const normalizeDeliveryDestination = (
       ?? destination?.unitLabel
       ?? `Unit ${unitNumber}`,
     ).trim(),
+    stop_status: stopStatus,
     confirmation_owner: confirmationOwner,
     confirmation_status: confirmationStatus,
     confirmed_at: destination?.confirmed_at ?? destination?.confirmedAt ?? null,
@@ -361,6 +384,98 @@ const normalizeDeliveryDestination = (
     assigned_rider_id: assignedRiderId || null,
     addressText: buildDeliveryDestinationAddressText(destination),
   };
+};
+
+const isDeliveryStopCancelled = (destination: Record<string, unknown> = {}) => (
+  normalizeDeliveryDestination(destination).stop_status === DELIVERY_STOP_STATUS.CANCELLED
+);
+
+const getDeliveryStopAssignedRiderId = (
+  destination: Record<string, unknown> = {},
+  fallbackAssignedRiderId: unknown = null,
+) => {
+  const normalizedDestination = normalizeDeliveryDestination(destination);
+  const assignedRiderId = String(
+    normalizedDestination?.assigned_rider_id
+    ?? normalizedDestination?.assignedRiderId
+    ?? fallbackAssignedRiderId
+    ?? "",
+  ).trim();
+
+  return assignedRiderId || null;
+};
+
+const getSharedAssignedRiderIdForActiveStops = (
+  destinations: unknown,
+  fallbackAssignedRiderId: unknown = null,
+) => {
+  const normalizedStops = normalizeDeliveryDestinations(destinations);
+  const activeStops = normalizedStops.filter((destination) => !isDeliveryStopCancelled(destination));
+
+  if (normalizedStops.length <= 1 || activeStops.length <= 1) {
+    return null;
+  }
+
+  const assignedRiderIds = Array.from(
+    new Set(
+      activeStops
+        .map((destination) => getDeliveryStopAssignedRiderId(destination, fallbackAssignedRiderId))
+        .filter(Boolean),
+    ),
+  );
+
+  if (assignedRiderIds.length !== 1) {
+    return null;
+  }
+
+  const [sharedAssignedRiderId] = assignedRiderIds;
+  const allActiveStopsAssigned = activeStops.every((destination) => (
+    getDeliveryStopAssignedRiderId(destination, fallbackAssignedRiderId) === sharedAssignedRiderId
+  ));
+
+  return allActiveStopsAssigned ? sharedAssignedRiderId : null;
+};
+
+const canAssignedRiderCompleteStop = (
+  destination: Record<string, unknown> = {},
+  currentRecordStatus: unknown = "",
+  fallbackAssignedRiderId: unknown = null,
+  allDestinations: unknown = [],
+) => {
+  const normalizedDestination = normalizeDeliveryDestination(destination);
+  const normalizedRecordStatus = String(currentRecordStatus ?? "").trim().toLowerCase();
+
+  if (isDeliveryStopCancelled(normalizedDestination)) {
+    return false;
+  }
+
+  if (normalizedDestination.confirmation_status === DELIVERY_CONFIRMATION_STATUS.CONFIRMED) {
+    return false;
+  }
+
+  if (normalizedRecordStatus !== "out_for_delivery") {
+    return false;
+  }
+
+  const assignedRiderId = getDeliveryStopAssignedRiderId(normalizedDestination, fallbackAssignedRiderId);
+  if (!assignedRiderId) {
+    return false;
+  }
+
+  if (normalizedDestination.confirmation_owner === DELIVERY_CONFIRMATION_OWNER.RIDER) {
+    return true;
+  }
+
+  if (normalizedDestination.confirmation_owner !== DELIVERY_CONFIRMATION_OWNER.CUSTOMER) {
+    return false;
+  }
+
+  const sharedAssignedRiderId = getSharedAssignedRiderIdForActiveStops(
+    allDestinations,
+    fallbackAssignedRiderId,
+  );
+
+  return Boolean(sharedAssignedRiderId && sharedAssignedRiderId === assignedRiderId);
 };
 
 const normalizeDeliveryDestinations = (destinations: unknown) => (
@@ -1333,7 +1448,17 @@ serve(async (req) => {
           return json(404, { error: "Delivery stop not found." });
         }
 
-        if (stopToComplete.confirmation_owner !== DELIVERY_CONFIRMATION_OWNER.RIDER) {
+        const fallbackAssignedRiderId = normalizedStops.length <= 1
+          ? String(currentOrder?.assigned_rider ?? "").trim()
+          : "";
+        const riderCanCompleteStop = canAssignedRiderCompleteStop(
+          stopToComplete,
+          currentOrder?.status,
+          fallbackAssignedRiderId,
+          normalizedStops,
+        );
+
+        if (!riderCanCompleteStop) {
           return json(400, { error: "This delivery stop is waiting for customer confirmation." });
         }
 
@@ -1343,7 +1468,7 @@ serve(async (req) => {
 
         const assignedRiderId = String(
           stopToComplete.assigned_rider_id
-          ?? (normalizedStops.length <= 1 ? currentOrder?.assigned_rider : "")
+          ?? fallbackAssignedRiderId
           ?? "",
         ).trim();
 
@@ -1802,7 +1927,17 @@ serve(async (req) => {
           return json(404, { error: "Delivery stop not found." });
         }
 
-        if (stopToComplete.confirmation_owner !== DELIVERY_CONFIRMATION_OWNER.RIDER) {
+        const fallbackAssignedRiderId = normalizedStops.length <= 1
+          ? String(currentRequest?.assigned_rider ?? "").trim()
+          : "";
+        const riderCanCompleteStop = canAssignedRiderCompleteStop(
+          stopToComplete,
+          currentRequest?.status,
+          fallbackAssignedRiderId,
+          normalizedStops,
+        );
+
+        if (!riderCanCompleteStop) {
           return json(400, { error: "This delivery stop is waiting for customer confirmation." });
         }
 
@@ -1812,7 +1947,7 @@ serve(async (req) => {
 
         const assignedRiderId = String(
           stopToComplete.assigned_rider_id
-          ?? (normalizedStops.length <= 1 ? currentRequest?.assigned_rider : "")
+          ?? fallbackAssignedRiderId
           ?? "",
         ).trim();
 
