@@ -78,6 +78,18 @@ const Home = ({ addToCart, products, categories, user }) => {
             return;
         }
 
+        if (Number(product.stock_quantity) <= 0) {
+            setInfoModal({
+                show: true,
+                title: 'Out of Stock',
+                message: `${product.name} is currently out of stock and cannot be added to cart.`,
+                linkTo: null,
+                linkText: '',
+                linkState: null,
+            });
+            return;
+        }
+
         if (!user) {
             setInfoModal({
                 show: true,

@@ -188,6 +188,13 @@ const Checkout = ({ setCart, user, products = [] }) => {
         () => evaluateFreeShippingPromo(checkoutItems, freeShippingLookup),
         [checkoutItems, freeShippingLookup]
     );
+    const knownOutOfStockItems = useMemo(
+        () => checkoutItems.filter((item) => {
+            const stockQuantity = Number(item.stockQuantity);
+            return Number.isFinite(stockQuantity) && stockQuantity <= 0;
+        }),
+        [checkoutItems]
+    );
 
     const subtotal = checkoutItems.reduce((acc, item) => acc + (item.price * (item.qty || 1)), 0);
     const shippingFee = deliveryMethod === 'pickup'
@@ -280,7 +287,67 @@ const Checkout = ({ setCart, user, products = [] }) => {
             return;
         }
 
+        if (knownOutOfStockItems.length > 0) {
+            const outOfStockItemNames = knownOutOfStockItems.map((item) => item.name).join(', ');
+            showInfoModal('Out of Stock', `The following items are out of stock and cannot be ordered: ${outOfStockItemNames}. Please review your cart first.`);
+            return;
+        }
+
         setIsProcessing(true);
+
+        const productIds = Array.from(new Set(
+            checkoutItems
+                .map((item) => item.productId || item.id)
+                .filter((productId) => productId !== undefined && productId !== null)
+        ));
+
+        if (productIds.length > 0) {
+            const requestedQuantities = checkoutItems.reduce((accumulator, item) => {
+                const productId = item.productId || item.id;
+                if (productId === undefined || productId === null) {
+                    return accumulator;
+                }
+
+                accumulator[productId] = (accumulator[productId] || 0) + (item.qty || 1);
+                return accumulator;
+            }, {});
+
+            const { data: liveProducts, error: liveProductsError } = await supabase
+                .from('products')
+                .select('id, name, stock_quantity, is_active')
+                .in('id', productIds);
+
+            if (liveProductsError) {
+                console.error('Error validating live product stock:', liveProductsError);
+                showInfoModal('Order Error', 'We could not verify live product stock right now. Please try again.');
+                setIsProcessing(false);
+                return;
+            }
+
+            const liveProductMap = new Map((liveProducts || []).map((product) => [product.id, product]));
+            const invalidCheckoutItems = checkoutItems.filter((item) => {
+                const productId = item.productId || item.id;
+                const liveProduct = liveProductMap.get(productId);
+
+                if (!liveProduct || liveProduct.is_active === false) {
+                    return true;
+                }
+
+                const liveStockQuantity = Number(liveProduct.stock_quantity);
+                const requestedQuantity = requestedQuantities[productId] || 0;
+                return !Number.isFinite(liveStockQuantity) || liveStockQuantity < requestedQuantity;
+            });
+
+            if (invalidCheckoutItems.length > 0) {
+                const invalidItemNames = Array.from(new Set(invalidCheckoutItems.map((item) => item.name))).join(', ');
+                showInfoModal(
+                    'Stock Changed',
+                    `Some items are no longer available in the requested quantity: ${invalidItemNames}. Please review your cart and try again.`
+                );
+                setIsProcessing(false);
+                return;
+            }
+        }
 
         let finalAddressId = selectedAddressId;
 
@@ -757,7 +824,7 @@ const Checkout = ({ setCart, user, products = [] }) => {
                             <button
                                 className="btn-place-order"
                                 onClick={handlePlaceOrder}
-                                disabled={isProcessing}
+                                disabled={isProcessing || knownOutOfStockItems.length > 0}
                             >
                                 {isProcessing ? (
                                     <>
@@ -772,6 +839,12 @@ const Checkout = ({ setCart, user, products = [] }) => {
                                 <div className="small text-danger text-center mt-2">
                                     <i className="fas fa-map-marker-alt me-1"></i>
                                     {addressValidationMessage}
+                                </div>
+                            )}
+                            {knownOutOfStockItems.length > 0 && (
+                                <div className="small text-danger text-center mt-2">
+                                    <i className="fas fa-exclamation-circle me-1"></i>
+                                    One or more items in this checkout are out of stock. Please update your cart before ordering.
                                 </div>
                             )}
 

@@ -391,10 +391,10 @@ const ResetPassword = () => {
                                     </div>
 
                                     <form onSubmit={handleSubmit} autoComplete="off">
-                                        <div className="form-floating mb-3">
+                                        <div className="form-floating mb-3 password-toggle-wrapper">
                                             <input
                                                 type={showPassword ? 'text' : 'password'}
-                                                className="form-control"
+                                                className="form-control password-toggle-input"
                                                 id="newPassword"
                                                 name="resetPassword"
                                                 placeholder="New password"
@@ -412,7 +412,7 @@ const ResetPassword = () => {
                                             <label htmlFor="newPassword">New password</label>
                                             <button
                                                 type="button"
-                                                className="btn btn-link position-absolute top-50 end-0 translate-middle-y me-3 p-0 text-secondary"
+                                                className="btn btn-link position-absolute top-50 end-0 translate-middle-y me-3 p-0 text-secondary password-toggle-button"
                                                 style={{ zIndex: 4 }}
                                                 onClick={() => setShowPassword((previous) => !previous)}
                                                 aria-label={showPassword ? 'Hide password' : 'Show password'}
@@ -420,10 +420,10 @@ const ResetPassword = () => {
                                                 <i className={`fa-regular ${showPassword ? 'fa-eye' : 'fa-eye-slash'}`}></i>
                                             </button>
                                         </div>
-                                        <div className="form-floating mb-3">
+                                        <div className="form-floating mb-3 password-toggle-wrapper">
                                             <input
                                                 type={showConfirmPassword ? 'text' : 'password'}
-                                                className="form-control"
+                                                className="form-control password-toggle-input"
                                                 id="confirmPassword"
                                                 name="resetPasswordConfirm"
                                                 placeholder="Confirm password"
@@ -441,7 +441,7 @@ const ResetPassword = () => {
                                             <label htmlFor="confirmPassword">Confirm password</label>
                                             <button
                                                 type="button"
-                                                className="btn btn-link position-absolute top-50 end-0 translate-middle-y me-3 p-0 text-secondary"
+                                                className="btn btn-link position-absolute top-50 end-0 translate-middle-y me-3 p-0 text-secondary password-toggle-button"
                                                 style={{ zIndex: 4 }}
                                                 onClick={() => setShowConfirmPassword((previous) => !previous)}
                                                 aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}

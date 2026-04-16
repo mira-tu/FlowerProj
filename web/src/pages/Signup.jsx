@@ -648,10 +648,10 @@ const Signup = () => {
 
                         <div className="row g-2 mb-3">
                             <div className="col-md-6">
-                                <div className="form-floating">
+                                <div className="form-floating password-toggle-wrapper">
                                     <input
                                         type={showPassword ? 'text' : 'password'}
-                                        className={`form-control ${fieldErrors.password ? 'is-invalid' : ''}`}
+                                        className={`form-control password-toggle-input ${fieldErrors.password ? 'is-invalid' : ''}`}
                                         id="floatingPassword"
                                         name="password"
                                         placeholder="Password"
@@ -663,7 +663,7 @@ const Signup = () => {
                                     <label htmlFor="floatingPassword">Password</label>
                                     <button
                                         type="button"
-                                        className="btn btn-link position-absolute top-50 end-0 translate-middle-y me-3 p-0 text-secondary"
+                                        className="btn btn-link position-absolute top-50 end-0 translate-middle-y me-3 p-0 text-secondary password-toggle-button"
                                         style={{ zIndex: 4 }}
                                         onClick={() => setShowPassword((previous) => !previous)}
                                         aria-label={showPassword ? 'Hide password' : 'Show password'}
@@ -674,10 +674,10 @@ const Signup = () => {
                                 </div>
                             </div>
                             <div className="col-md-6">
-                                <div className="form-floating">
+                                <div className="form-floating password-toggle-wrapper">
                                     <input
                                         type={showConfirmPassword ? 'text' : 'password'}
-                                        className={`form-control ${fieldErrors.confirmPassword ? 'is-invalid' : ''}`}
+                                        className={`form-control password-toggle-input ${fieldErrors.confirmPassword ? 'is-invalid' : ''}`}
                                         id="floatingConfirmPassword"
                                         name="confirmPassword"
                                         placeholder="Confirm Password"
@@ -689,7 +689,7 @@ const Signup = () => {
                                     <label htmlFor="floatingConfirmPassword">Confirm Password</label>
                                     <button
                                         type="button"
-                                        className="btn btn-link position-absolute top-50 end-0 translate-middle-y me-3 p-0 text-secondary"
+                                        className="btn btn-link position-absolute top-50 end-0 translate-middle-y me-3 p-0 text-secondary password-toggle-button"
                                         style={{ zIndex: 4 }}
                                         onClick={() => setShowConfirmPassword((previous) => !previous)}
                                         aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}

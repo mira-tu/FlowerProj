@@ -529,10 +529,10 @@ const Login = ({ onLogin }) => {
                                     />
                                     <label htmlFor="floatingInput">Email address</label>
                                 </div>
-                                <div className="form-floating mb-3">
+                                <div className="form-floating mb-3 password-toggle-wrapper">
                                     <input
                                         type={showPassword ? 'text' : 'password'}
-                                        className="form-control"
+                                        className="form-control password-toggle-input"
                                         id="floatingPassword"
                                         placeholder="Password"
                                         value={password}
@@ -543,7 +543,7 @@ const Login = ({ onLogin }) => {
                                     <label htmlFor="floatingPassword">Password</label>
                                     <button
                                         type="button"
-                                        className="btn btn-link position-absolute top-50 end-0 translate-middle-y me-3 p-0 text-secondary"
+                                        className="btn btn-link position-absolute top-50 end-0 translate-middle-y me-3 p-0 text-secondary password-toggle-button"
                                         style={{ zIndex: 4 }}
                                         onClick={() => setShowPassword((previous) => !previous)}
                                         aria-label={showPassword ? 'Hide password' : 'Show password'}

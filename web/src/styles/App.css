@@ -10,3 +10,35 @@ body {
     background-color: #f9f9f9;
     padding-top: 76px;
 }
+
+.password-toggle-wrapper {
+    position: relative;
+}
+
+.password-toggle-input {
+    padding-right: 3.25rem !important;
+}
+
+.password-toggle-input::-ms-reveal,
+.password-toggle-input::-ms-clear {
+    display: none;
+}
+
+.password-toggle-input::-webkit-credentials-auto-fill-button,
+.password-toggle-input::-webkit-textfield-decoration-container {
+    visibility: hidden;
+    display: none !important;
+    pointer-events: none;
+}
+
+.password-toggle-button {
+    right: 14px;
+    z-index: 4;
+    color: #6c757d !important;
+    text-decoration: none !important;
+}
+
+.password-toggle-button:hover,
+.password-toggle-button:focus {
+    color: #495057 !important;
+}

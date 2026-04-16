@@ -350,29 +350,61 @@ function AppContent() {
     localStorage.setItem(cartKey, JSON.stringify(cart));
   }, [cart, user]); // Added user dependency to ensure key updates if user changes without cart changing
 
+  const normalizeStockQuantity = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
   const addToCart = (name, price, image, productId, stockQuantity) => {
     // Always use localStorage for cart operations
     setCart(prevCart => {
+      const normalizedStockQuantity = normalizeStockQuantity(stockQuantity);
+      const hasStockLimit = normalizedStockQuantity !== null;
+
+      if (hasStockLimit && normalizedStockQuantity <= 0) {
+        setInfoModal({
+          show: true,
+          title: 'Out of Stock',
+          message: `${name} is currently out of stock and cannot be added to cart.`
+        });
+        return prevCart;
+      }
+
       const existingItem = prevCart.find(item => (productId && item.productId === productId) || item.name === name);
       if (existingItem) {
         return prevCart.map(item => {
           if ((productId && item.productId === productId) || item.name === name) {
             const newQty = (item.qty || 0) + 1;
             // Cap quantity at stock limit
-            const finalQty = stockQuantity ? Math.min(newQty, stockQuantity) : newQty;
-            if (stockQuantity && newQty > stockQuantity) {
+            const finalQty = hasStockLimit ? Math.min(newQty, normalizedStockQuantity) : newQty;
+            if (hasStockLimit && newQty > normalizedStockQuantity) {
               setInfoModal({
                 show: true,
                 title: 'Stock Limit Reached',
-                message: `Only ${stockQuantity} items in stock for ${name}`
+                message: `Only ${normalizedStockQuantity} items in stock for ${name}`
               });
             }
-            return { ...item, qty: finalQty, stockQuantity: stockQuantity || item.stockQuantity };
+            return {
+              ...item,
+              qty: finalQty,
+              stockQuantity: hasStockLimit ? normalizedStockQuantity : item.stockQuantity,
+            };
           }
           return item;
         });
       } else {
-        return [...prevCart, { name, price, image, qty: 1, productId, id: productId || `local-${Date.now()}`, stockQuantity }];
+        return [
+          ...prevCart,
+          {
+            name,
+            price,
+            image,
+            qty: 1,
+            productId,
+            id: productId || `local-${Date.now()}`,
+            stockQuantity: hasStockLimit ? normalizedStockQuantity : stockQuantity,
+          },
+        ];
       }
     });
   };
@@ -381,7 +413,10 @@ function AppContent() {
     // Always use localStorage for cart operations
     setCart(prevCart => prevCart.map(item => {
       if (item.id === itemId || item.productId === itemId) {
-        const finalQty = item.stockQuantity ? Math.min(quantity, item.stockQuantity) : quantity;
+        const normalizedStockQuantity = normalizeStockQuantity(item.stockQuantity);
+        const finalQty = normalizedStockQuantity !== null
+          ? Math.min(quantity, Math.max(0, normalizedStockQuantity))
+          : quantity;
         return { ...item, qty: finalQty };
       }
       return item;

@@ -2045,43 +2045,47 @@ const Profile = ({ user, logout }) => {
                 <div className="row">
                     <div className="col-md-6 mb-3">
                         <label className="form-label">Current Password</label>
-                        <input
-                            type={showCurrentPassword ? 'text' : 'password'}
-                            className="form-control"
-                            name="currentPassword"
-                            value={profileForm.currentPassword}
-                            onChange={handleProfileFormChange}
-                            placeholder="Leave blank to keep current"
-                        />
-                        <button
-                            type="button"
-                            className="btn btn-link position-absolute translate-middle-y p-0 text-secondary"
-                            style={{ top: '74%', right: '14px', zIndex: 2 }}
-                            onClick={() => setShowCurrentPassword((previous) => !previous)}
-                            aria-label={showCurrentPassword ? 'Hide current password' : 'Show current password'}
-                        >
-                            <i className={`fa-regular ${showCurrentPassword ? 'fa-eye' : 'fa-eye-slash'}`}></i>
-                        </button>
+                        <div className="position-relative password-toggle-wrapper">
+                            <input
+                                type={showCurrentPassword ? 'text' : 'password'}
+                                className="form-control pe-5 password-toggle-input"
+                                name="currentPassword"
+                                value={profileForm.currentPassword}
+                                onChange={handleProfileFormChange}
+                                placeholder="Leave blank to keep current"
+                            />
+                            <button
+                                type="button"
+                                className="btn btn-link position-absolute top-50 end-0 translate-middle-y p-0 text-secondary password-toggle-button"
+                                style={{ right: '14px', zIndex: 2 }}
+                                onClick={() => setShowCurrentPassword((previous) => !previous)}
+                                aria-label={showCurrentPassword ? 'Hide current password' : 'Show current password'}
+                            >
+                                <i className={`fa-regular ${showCurrentPassword ? 'fa-eye' : 'fa-eye-slash'}`}></i>
+                            </button>
+                        </div>
                     </div>
                     <div className="col-md-6 mb-3">
                         <label className="form-label">New Password</label>
-                        <input
-                            type={showNewPassword ? 'text' : 'password'}
-                            className="form-control"
-                            name="newPassword"
-                            value={profileForm.newPassword}
-                            onChange={handleProfileFormChange}
-                            placeholder="Enter new password"
-                        />
-                        <button
-                            type="button"
-                            className="btn btn-link position-absolute translate-middle-y p-0 text-secondary"
-                            style={{ top: '74%', right: '14px', zIndex: 2 }}
-                            onClick={() => setShowNewPassword((previous) => !previous)}
-                            aria-label={showNewPassword ? 'Hide new password' : 'Show new password'}
-                        >
-                            <i className={`fa-regular ${showNewPassword ? 'fa-eye' : 'fa-eye-slash'}`}></i>
-                        </button>
+                        <div className="position-relative password-toggle-wrapper">
+                            <input
+                                type={showNewPassword ? 'text' : 'password'}
+                                className="form-control pe-5 password-toggle-input"
+                                name="newPassword"
+                                value={profileForm.newPassword}
+                                onChange={handleProfileFormChange}
+                                placeholder="Enter new password"
+                            />
+                            <button
+                                type="button"
+                                className="btn btn-link position-absolute top-50 end-0 translate-middle-y p-0 text-secondary password-toggle-button"
+                                style={{ right: '14px', zIndex: 2 }}
+                                onClick={() => setShowNewPassword((previous) => !previous)}
+                                aria-label={showNewPassword ? 'Hide new password' : 'Show new password'}
+                            >
+                                <i className={`fa-regular ${showNewPassword ? 'fa-eye' : 'fa-eye-slash'}`}></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
