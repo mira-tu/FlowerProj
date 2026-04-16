@@ -327,7 +327,12 @@ const Home = ({ addToCart, products, categories, user }) => {
                             <p className="text-muted mb-4 fs-5">
                                 Download this for admin mobile app to easily manage orders, products, and site content directly from your phone.
                             </p>
-                            <a href="https://expo.dev/accounts/neneth/projects/flowerforge-admin/builds/15466173-06c4-44ec-a716-e6ee960be7fc" className="btn btn-hero shadow-sm rounded-pill px-5 py-3 fs-5" style={{ backgroundColor: 'var(--main-pink)', color: 'white', border: 'none' }}>
+                            <a
+                                href="/downloads/application-dd75329e-d20d-480a-8bea-9580e81efd11.apk"
+                                download="Jocerrys-Flower-Shop-Admin.apk"
+                                className="btn btn-hero shadow-sm rounded-pill px-5 py-3 fs-5"
+                                style={{ backgroundColor: 'var(--main-pink)', color: 'white', border: 'none' }}
+                            >
                                 <i className="fa-brands fa-android me-2"></i> Download Admin App
                             </a>
                         </div>
