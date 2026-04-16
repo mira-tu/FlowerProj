@@ -194,6 +194,8 @@ const createSparseChartLabels = (labels = [], maxVisibleLabels = 6) => {
   });
 };
 
+const formatSalesAxisLabel = (value) => `₱${Math.round(Number(value) || 0)}`;
+
 const getSaleAmountValue = (sale) => {
   const parsed = Number.parseFloat(sale?.total_amount);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -451,9 +453,30 @@ const SalesTab = () => {
     ? Math.max(chartWidth, chartLabelCount * (isWeb ? 68 : 58))
     : chartWidth;
   const chartHorizontalPadding = isWeb
-    ? { paddingLeft: 10, paddingRight: chartNeedsHorizontalScroll ? 14 : 10 }
-    : { paddingLeft: 28, paddingRight: chartNeedsHorizontalScroll ? 18 : 12 };
-  const chartYLabelsOffset = isWeb ? 18 : 8;
+    ? { paddingLeft: 8, paddingRight: chartNeedsHorizontalScroll ? 16 : 12 }
+    : { paddingLeft: 6, paddingRight: chartNeedsHorizontalScroll ? 18 : 10 };
+  const chartYAxisWidth = isWeb ? 72 : 74;
+  const chartSegments = 4;
+  const chartStyle = {
+    alignSelf: 'center',
+    marginLeft: 0,
+    paddingRight: chartNeedsHorizontalScroll ? 20 : 0,
+  };
+  const chartYAxisLabels = React.useMemo(() => {
+    const dataset = Array.isArray(displayedChartData?.datasets?.[0]?.data)
+      ? displayedChartData.datasets[0].data
+      : [];
+    const maxValue = dataset.reduce((highest, value) => {
+      const numericValue = Number(value) || 0;
+      return numericValue > highest ? numericValue : highest;
+    }, 0);
+    const safeMaxValue = maxValue > 0 ? maxValue : 0;
+    const stepValue = chartSegments > 0 ? safeMaxValue / chartSegments : safeMaxValue;
+
+    return Array.from({ length: chartSegments + 1 }, (_, index) => (
+      formatSalesAxisLabel(safeMaxValue - (stepValue * index))
+    ));
+  }, [displayedChartData]);
   const overviewLoaded = sectionLoadKey.overview === activeFilterKey;
   const historyLoaded = sectionLoadKey.history === activeFilterKey;
   const productsLoaded = sectionLoadKey.products === activeFilterKey;
@@ -1210,32 +1233,58 @@ const SalesTab = () => {
           showsHorizontalScrollIndicator={chartNeedsHorizontalScroll}
           contentContainerStyle={chartHorizontalPadding}
         >
-          <LineChart
-            data={displayedChartData}
-            width={effectiveChartWidth}
-            height={180}
-            yAxisLabel={'\u20b1'}
-            chartConfig={{
-              backgroundColor: '#fff',
-              backgroundGradientFrom: '#fff',
-              backgroundGradientTo: '#fff',
-              decimalPlaces: 0,
-              color: (opacity = 1) => `rgba(236, 72, 153, ${opacity})`,
-              labelColor: (opacity = 1) => `rgba(55, 65, 81, ${opacity})`,
-              propsForDots: { r: '5', strokeWidth: '2', stroke: '#ec4899' },
-              formatYLabel: (yLabel) => `${Math.round(parseFloat(yLabel || 0))}`,
-              yLabelsOffset: chartYLabelsOffset,
-              propsForLabels: {
-                fontSize: chartNeedsHorizontalScroll ? 10 : 11,
-              },
-            }}
-            bezier
-            withDots={!isWeb}
-            fromZero
-            segments={4}
-            verticalLabelRotation={chartNeedsHorizontalScroll ? -35 : 0}
-            style={{ alignSelf: 'center', paddingRight: chartNeedsHorizontalScroll ? 20 : 0 }}
-          />
+          <View style={{ flexDirection: 'row', alignItems: 'stretch', overflow: 'visible' }}>
+            <View
+              style={{
+                width: chartYAxisWidth,
+                height: 180,
+                justifyContent: 'space-between',
+                paddingTop: 10,
+                paddingBottom: 24,
+                paddingRight: 8,
+              }}
+            >
+              {chartYAxisLabels.map((label, index) => (
+                <Text
+                  key={`sales-y-axis-${index}`}
+                  numberOfLines={1}
+                  style={{
+                    fontSize: 11,
+                    color: '#374151',
+                    textAlign: 'right',
+                    includeFontPadding: false,
+                  }}
+                >
+                  {label}
+                </Text>
+              ))}
+            </View>
+
+            <LineChart
+              data={displayedChartData}
+              width={effectiveChartWidth}
+              height={180}
+              chartConfig={{
+                backgroundColor: '#fff',
+                backgroundGradientFrom: '#fff',
+                backgroundGradientTo: '#fff',
+                decimalPlaces: 0,
+                color: (opacity = 1) => `rgba(236, 72, 153, ${opacity})`,
+                labelColor: (opacity = 1) => `rgba(55, 65, 81, ${opacity})`,
+                propsForDots: { r: '5', strokeWidth: '2', stroke: '#ec4899' },
+                propsForLabels: {
+                  fontSize: chartNeedsHorizontalScroll ? 10 : 11,
+                },
+              }}
+              bezier
+              withDots={!isWeb}
+              fromZero
+              segments={chartSegments}
+              withHorizontalLabels={false}
+              verticalLabelRotation={chartNeedsHorizontalScroll ? -35 : 0}
+              style={chartStyle}
+            />
+          </View>
         </ScrollView>
       </View>
       <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 14 }}>
