@@ -668,7 +668,7 @@ const Signup = () => {
                                         onClick={() => setShowPassword((previous) => !previous)}
                                         aria-label={showPassword ? 'Hide password' : 'Show password'}
                                     >
-                                        <i className={`fa-regular ${showPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                                        <i className={`fa-regular ${showPassword ? 'fa-eye' : 'fa-eye-slash'}`}></i>
                                     </button>
                                     {fieldErrors.password && <div className="invalid-feedback">{fieldErrors.password}</div>}
                                 </div>
@@ -694,7 +694,7 @@ const Signup = () => {
                                         onClick={() => setShowConfirmPassword((previous) => !previous)}
                                         aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
                                     >
-                                        <i className={`fa-regular ${showConfirmPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                                        <i className={`fa-regular ${showConfirmPassword ? 'fa-eye' : 'fa-eye-slash'}`}></i>
                                     </button>
                                     {fieldErrors.confirmPassword && <div className="invalid-feedback">{fieldErrors.confirmPassword}</div>}
                                 </div>

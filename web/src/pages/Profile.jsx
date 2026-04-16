@@ -2060,7 +2060,7 @@ const Profile = ({ user, logout }) => {
                             onClick={() => setShowCurrentPassword((previous) => !previous)}
                             aria-label={showCurrentPassword ? 'Hide current password' : 'Show current password'}
                         >
-                            <i className={`fa-regular ${showCurrentPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                            <i className={`fa-regular ${showCurrentPassword ? 'fa-eye' : 'fa-eye-slash'}`}></i>
                         </button>
                     </div>
                     <div className="col-md-6 mb-3">
@@ -2080,7 +2080,7 @@ const Profile = ({ user, logout }) => {
                             onClick={() => setShowNewPassword((previous) => !previous)}
                             aria-label={showNewPassword ? 'Hide new password' : 'Show new password'}
                         >
-                            <i className={`fa-regular ${showNewPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                            <i className={`fa-regular ${showNewPassword ? 'fa-eye' : 'fa-eye-slash'}`}></i>
                         </button>
                     </div>
                 </div>

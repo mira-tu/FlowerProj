@@ -548,7 +548,7 @@ const Login = ({ onLogin }) => {
                                         onClick={() => setShowPassword((previous) => !previous)}
                                         aria-label={showPassword ? 'Hide password' : 'Show password'}
                                     >
-                                        <i className={`fa-regular ${showPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                                        <i className={`fa-regular ${showPassword ? 'fa-eye' : 'fa-eye-slash'}`}></i>
                                     </button>
                                 </div>
 

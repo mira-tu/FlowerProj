@@ -450,6 +450,10 @@ const SalesTab = () => {
   const effectiveChartWidth = chartNeedsHorizontalScroll
     ? Math.max(chartWidth, chartLabelCount * (isWeb ? 68 : 58))
     : chartWidth;
+  const chartHorizontalPadding = isWeb
+    ? { paddingLeft: 10, paddingRight: chartNeedsHorizontalScroll ? 14 : 10 }
+    : { paddingLeft: 28, paddingRight: chartNeedsHorizontalScroll ? 18 : 12 };
+  const chartYLabelsOffset = isWeb ? 18 : 8;
   const overviewLoaded = sectionLoadKey.overview === activeFilterKey;
   const historyLoaded = sectionLoadKey.history === activeFilterKey;
   const productsLoaded = sectionLoadKey.products === activeFilterKey;
@@ -1204,7 +1208,7 @@ const SalesTab = () => {
           horizontal
           bounces={false}
           showsHorizontalScrollIndicator={chartNeedsHorizontalScroll}
-          contentContainerStyle={{ paddingHorizontal: 10 }}
+          contentContainerStyle={chartHorizontalPadding}
         >
           <LineChart
             data={displayedChartData}
@@ -1220,7 +1224,7 @@ const SalesTab = () => {
               labelColor: (opacity = 1) => `rgba(55, 65, 81, ${opacity})`,
               propsForDots: { r: '5', strokeWidth: '2', stroke: '#ec4899' },
               formatYLabel: (yLabel) => `${Math.round(parseFloat(yLabel || 0))}`,
-              yLabelsOffset: 18,
+              yLabelsOffset: chartYLabelsOffset,
               propsForLabels: {
                 fontSize: chartNeedsHorizontalScroll ? 10 : 11,
               },

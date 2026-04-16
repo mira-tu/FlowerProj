@@ -2573,13 +2573,29 @@ const buildCustomizedFlowerBreakdown = (item = {}, fallbackImageLookup = new Map
     }
 
     if (!breakdownMap.size) {
+        addFlowerBreakdownFromObject(
+            breakdownMap,
+            item?.flowerQuantities || item?.flower_quantities || item?.flowerBreakdown,
+            imageLookup
+        );
+    }
+
+    if (!breakdownMap.size) {
         const flowerNames = flowerEntries.length
             ? flowerEntries.map((flower) => flower?.name)
-            : getFlowerNamesFromValue(item?.flowers || item?.flower || item?.selectedFlowers);
+            : getFlowerNamesFromValue(
+                item?.flowers
+                || item?.flower
+                || item?.selectedFlowers
+                || item?.preferredFlowers
+                || item?.preferred_flowers
+                || item?.customerPreferredFlowers
+                || item?.customer_preferred_flowers
+            );
         addRoundRobinFlowerBreakdown(
             breakdownMap,
             flowerNames,
-            item?.bundleSize,
+            getRequestItemFlowerTotal(item),
             imageLookup
         );
     }
