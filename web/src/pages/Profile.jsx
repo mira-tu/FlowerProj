@@ -40,6 +40,7 @@ import {
     getCancellationRefundContext,
     hasActiveRefundRequest,
 } from '../utils/customerRefunds';
+import { getBouquetSizeDisplay } from '../utils/bouquetSize';
 import { sanitizeNameInput, validateNameField } from '../utils/signupValidation';
 
 const parseJsonObject = (value) => {
@@ -1495,7 +1496,7 @@ const Profile = ({ user, logout }) => {
                                                 <>
                                                     <div className="order-item-name">Customizer Studio {order.data?.items?.length > 1 ? `(${order.data.items.length} items)` : ''}</div>
                                                     {order.flower && <div className="order-item-variant"><strong>Flower:</strong> {typeof order.flower === 'object' ? order.flower.name : order.flower}</div>}
-                                                    {order.bundleSize && <div className="order-item-variant"><strong>Bundle Size:</strong> {order.bundleSize}</div>}
+                                                    {order.bundleSize && <div className="order-item-variant"><strong>Bundle Size:</strong> {getBouquetSizeDisplay(order.bundleSize)}</div>}
                                                     {order.wrapper && <div className="order-item-variant"><strong>Wrapper:</strong> {typeof order.wrapper === 'object' ? order.wrapper.name : order.wrapper}</div>}
                                                     {order.ribbon && <div className="order-item-variant"><strong>Ribbon:</strong> {typeof order.ribbon === 'object' ? order.ribbon.name : order.ribbon}</div>}
                                                     {order.notes && <div className="order-item-variant"><strong>Notes:</strong> {order.notes}</div>}

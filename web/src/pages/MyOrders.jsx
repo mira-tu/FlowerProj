@@ -32,6 +32,7 @@ import {
     getCancellationRefundContext,
     hasActiveRefundRequest,
 } from '../utils/customerRefunds';
+import { getBouquetSizeDisplay } from '../utils/bouquetSize';
 import '../styles/Shop.css';
 
 const orderTabs = [
@@ -51,12 +52,12 @@ const getCustomizedPreviewItems = (order) => {
     if (sourceItems.length) {
         return sourceItems.map((item, index) => ({
             key: item.id || item.listId || `${order?.id || 'customized'}-${index}`,
-            name: item.name || (item.bundleSize ? `Customizer Studio (${item.bundleSize} stems)` : `Customizer Studio ${index + 1}`),
+            name: item.name || (item.bundleSize ? `Customizer Studio (${getBouquetSizeDisplay(item.bundleSize)})` : `Customizer Studio ${index + 1}`),
             image: item.image_url || item.image || item.photo || order?.image_url || order?.photo || order?.photo_url || null,
             previewComposition: item.previewComposition || item.preview_composition || null,
             quantity: item.qty || item.quantity || 1,
             price: Number(item.price || 0),
-            variant: item.bundleSize ? `${item.bundleSize} stems` : null,
+            variant: item.bundleSize ? getBouquetSizeDisplay(item.bundleSize) : null,
         }));
     }
 
@@ -66,12 +67,12 @@ const getCustomizedPreviewItems = (order) => {
 
     return [{
         key: `${order?.id || 'customized'}-legacy`,
-        name: order?.bundleSize ? `Customizer Studio (${order.bundleSize} stems)` : 'Customizer Studio',
+        name: order?.bundleSize ? `Customizer Studio (${getBouquetSizeDisplay(order.bundleSize)})` : 'Customizer Studio',
         image: order?.image_url || order?.photo || order?.photo_url || null,
         previewComposition: order?.previewComposition || order?.preview_composition || order?.data?.previewComposition || order?.data?.preview_composition || null,
         quantity: 1,
         price: 0,
-        variant: order?.bundleSize ? `${order.bundleSize} stems` : null,
+        variant: order?.bundleSize ? getBouquetSizeDisplay(order.bundleSize) : null,
     }];
 };
 
@@ -1496,7 +1497,7 @@ const MyOrders = () => {
                                                 {order.type === 'customized' && (order.flower || order.data?.flower) && (
                                                     <div className="order-item-variant">
                                                         <i className="fas fa-seedling me-1"></i>
-                                                        {(order.flower || order.data?.flower)?.name || 'Custom Bouquet'} - {order.bundleSize || order.data?.bundleSize || 'N/A'} stems
+                                                        {(order.flower || order.data?.flower)?.name || 'Custom Bouquet'} - {getBouquetSizeDisplay(order.bundleSize || order.data?.bundleSize) || 'N/A'}
                                                     </div>
                                                 )}
                                             </div>

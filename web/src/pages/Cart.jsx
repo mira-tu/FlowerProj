@@ -11,6 +11,7 @@ import {
     fetchCustomizedStudioPromoSettings,
 } from '../utils/freeShipping';
 import { hydrateCustomizedBouquetItems } from '../utils/customizedBouquetPreview';
+import { getBouquetSizeDisplay } from '../utils/bouquetSize';
 
 const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
     const navigate = useNavigate();
@@ -614,7 +615,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                                         </div>
                                                         <CustomizedBouquetPreview item={item} size={80} zoomable />
                                                         <div className="ms-3 pe-4 flex-grow-1">
-                                                            <h6 className="mb-1 fw-bold">Customizer Studio ({item.bundleSize || '?'} stems)</h6>
+                                                            <h6 className="mb-1 fw-bold">Customizer Studio ({getBouquetSizeDisplay(item.bundleSize) || '? stems'})</h6>
                                                             <div className="text-muted small">
                                                                 <div><strong>Flowers:</strong> {(item.flowers || []).map(f => f.name).join(', ')}</div>
                                                                 {item.wrapper && <div><strong>Wrapper:</strong> {item.wrapper.name}</div>}

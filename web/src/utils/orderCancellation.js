@@ -1,4 +1,5 @@
 import { getSelectedEstimateFromItem } from './customOrderV4';
+import { getBouquetSizeDisplay } from './bouquetSize';
 
 const roundCurrency = (value) => {
     const amount = Number.parseFloat(String(value ?? 0));
@@ -62,7 +63,7 @@ const getCustomizerCancellationTitle = (item = {}, fallbackValue = '') => {
     const bouquetLabel = displayIndex ? `Bouquet ${displayIndex}` : 'Bouquet';
     const flowersLabel = getFlowerNames(item).join(', ');
     const wrapperLabel = getNamedValue(item?.wrapper);
-    const bundleLabel = item?.bundleSize ? `${item.bundleSize} stems` : '';
+    const bundleLabel = item?.bundleSize ? getBouquetSizeDisplay(item.bundleSize) : '';
     const descriptor = [flowersLabel, wrapperLabel || bundleLabel].filter(Boolean).join(' - ');
 
     return descriptor ? `${bouquetLabel} - ${descriptor}` : (fallbackValue || bouquetLabel);

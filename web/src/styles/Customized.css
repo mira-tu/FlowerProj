@@ -405,6 +405,19 @@
     color: var(--text-muted);
     transition: all 0.2s;
     box-shadow: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.15rem;
+}
+
+.customize-page .bundle-pill span {
+    font-size: 0.92rem;
+}
+
+.customize-page .bundle-pill small {
+    font-size: 0.72rem;
+    font-weight: 500;
 }
 
 .customize-page .bundle-pill:hover {
@@ -416,6 +429,25 @@
     background: #fff;
     color: var(--primary-color);
     box-shadow: var(--shadow-sm);
+}
+
+.customize-page .bundle-size-guide,
+.customize-page .selected-size-badge {
+    margin-top: 0.75rem;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.customize-page .selected-size-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.45rem 0.7rem;
+    border-radius: var(--radius-full);
+    background: #fff0f6;
+    color: var(--primary-color);
+    font-weight: 600;
 }
 
 .customize-page .grid-options {

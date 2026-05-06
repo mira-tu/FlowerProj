@@ -66,6 +66,32 @@ const formatTentativePeso = (value) => `PHP ${Number(value || 0).toLocaleString(
   maximumFractionDigits: 0,
 })}`;
 
+const getBouquetSizeInfo = (stemCount) => {
+  const count = Number.parseInt(stemCount, 10);
+  if (!Number.isFinite(count) || count < 3) {
+    return null;
+  }
+
+  if (count <= 6) {
+    return { label: 'Small', range: '3-6 stems' };
+  }
+
+  if (count <= 12) {
+    return { label: 'Medium', range: '7-12 stems' };
+  }
+
+  return { label: 'Large', range: '13+ stems' };
+};
+
+const getBouquetSizeDisplay = (stemCount) => {
+  const count = Number.parseInt(stemCount, 10);
+  const sizeInfo = getBouquetSizeInfo(count);
+  if (!sizeInfo || !Number.isFinite(count)) {
+    return stemCount ? `${stemCount} stems` : null;
+  }
+  return `${sizeInfo.label} (${count} stems)`;
+};
+
 const formatTentativeRange = (min, max, note = '') => {
   const safeMin = parseCurrencyNumber(min);
   const safeMaxCandidate = parseCurrencyNumber(max);
@@ -2537,7 +2563,7 @@ const getCustomizedRequestItems = (request) => {
     ? requestData.items
     : hasLegacyCustomizedItem
       ? [{
-        name: requestData.bundleSize ? `Customized Bouquet (${requestData.bundleSize} stems)` : 'Customized Bouquet',
+        name: requestData.bundleSize ? `Customized Bouquet (${getBouquetSizeDisplay(requestData.bundleSize)})` : 'Customized Bouquet',
         flowers: requestData.flower ? [requestData.flower] : [],
         bundleSize: requestData.bundleSize ?? null,
         wrapper: requestData.wrapper ?? null,
@@ -2608,8 +2634,10 @@ const getCustomizedRequestItems = (request) => {
     const remainingPrice = totalPrice !== null && originalQuantity > 0
       ? totalPrice * (remainingQuantity / originalQuantity)
       : null;
+    const bouquetSizeInfo = getBouquetSizeInfo(bundleSize);
+    const bouquetSizeText = getBouquetSizeDisplay(bundleSize);
     const title = String(item?.name || '').trim() || (
-      bundleSize ? `Customized Bouquet (${bundleSize} stems)` : `Customized Bouquet ${index + 1}`
+      bouquetSizeText ? `Customized Bouquet (${bouquetSizeText})` : `Customized Bouquet ${index + 1}`
     );
     const materialsSummary = [
       flowersText ? `Flowers: ${flowersText}` : null,
@@ -2640,7 +2668,9 @@ const getCustomizedRequestItems = (request) => {
       wrapperName,
       ribbonName,
       bundleSize,
-      bundleSizeText: bundleSize ? `${bundleSize} stems` : null,
+      bouquetSizeLabel: item?.bouquetSizeLabel || item?.bouquet_size_label || bouquetSizeInfo?.label || null,
+      bouquetSizeRange: item?.bouquetSizeRange || item?.bouquet_size_range || bouquetSizeInfo?.range || null,
+      bundleSizeText: bouquetSizeText,
       priceText: remainingPrice !== null ? `PHP ${remainingPrice.toFixed(2)}` : null,
       recipientName,
       addressText,

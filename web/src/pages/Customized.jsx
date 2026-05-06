@@ -16,6 +16,7 @@ import {
   RIBBON_SCOPE,
 } from '../utils/customizedRibbonOptions';
 import '../styles/Customized.css';
+import { getBouquetSizeInfo } from '../utils/bouquetSize';
 import {
   evaluateStandaloneFreeShippingPromo,
   fetchCustomizedStudioPromoSettings,
@@ -1017,6 +1018,12 @@ const Customized = ({ addToCart }) => {
     let numValue = value === '' ? 0 : parseInt(value, 10);
     let capped = false;
 
+    if (numValue > 0 && numValue < 3) {
+      setCustomBundleSizeInput('');
+      setSelection((prev) => ({ ...prev, bundleSize: 0 }));
+      return;
+    }
+
     const maxAllowed = Math.min(MAX_STEM_COUNT, getMaxAllowedBundleSize(selection.flowers));
 
     if (numValue > maxAllowed) {
@@ -1026,7 +1033,7 @@ const Customized = ({ addToCart }) => {
 
     setCustomBundleSizeInput(capped ? String(numValue) : value);
 
-    if (numValue >= 2) {
+    if (numValue >= 3) {
       setSelection((prev) => ({ ...prev, bundleSize: numValue }));
     } else {
       setSelection((prev) => ({ ...prev, bundleSize: 0 }));
@@ -1153,8 +1160,13 @@ const Customized = ({ addToCart }) => {
 
   const stemScale = useMemo(() => {
     if (selection.bundleSize <= 1) return 1;
-    return Math.max(0.52, 1 - Math.min(selection.bundleSize - 1, 24) * 0.02);
+    const densityScale = Math.max(0.52, 1 - Math.min(selection.bundleSize - 1, 24) * 0.02);
+    const sizeInfo = getBouquetSizeInfo(selection.bundleSize);
+    return densityScale * (sizeInfo?.visualScale || 1);
   }, [selection.bundleSize]);
+  const selectedBouquetSize = useMemo(() => (
+    getBouquetSizeInfo(selection.bundleSize)
+  ), [selection.bundleSize]);
   const flowerZoneConfig = useMemo(() => (
     getWrapperFlowerZoneConfig(selection.wrapper)
   ), [selection.wrapper]);
@@ -1360,6 +1372,8 @@ const Customized = ({ addToCart }) => {
         })),
         flowerAllocations: buildFlowerAllocations(selection.flowers, selection.bundleSize),
         bundleSize: selection.bundleSize,
+        bouquetSizeLabel: selectedBouquetSize?.label || null,
+        bouquetSizeRange: selectedBouquetSize?.range || null,
         wrapper: selection.wrapper ? {
           id: selection.wrapper.id,
           name: selection.wrapper.name,
@@ -1893,16 +1907,28 @@ const Customized = ({ addToCart }) => {
                 <label>Bundle Size</label>
                 <div className="bundle-selector-group">
                   {bundleOptions.map((size) => (
-                    <button
-                      key={size}
-                      type="button"
-                      className={`bundle-pill ${selection.bundleSize === size && customBundleSizeInput === '' ? 'active' : ''}`}
-                      onClick={() => handleBundleSelect(size)}
-                    >
-                      {size} Stems
-                    </button>
+                    (() => {
+                      const sizeInfo = getBouquetSizeInfo(size);
+                      return (
+                        <button
+                          key={size}
+                          type="button"
+                          className={`bundle-pill ${selection.bundleSize === size && customBundleSizeInput === '' ? 'active' : ''}`}
+                          onClick={() => handleBundleSelect(size)}
+                        >
+                          <span>{sizeInfo?.label || 'Custom'}</span>
+                          <small>{size} stems</small>
+                        </button>
+                      );
+                    })()
                   ))}
                 </div>
+                <p className="bundle-size-guide">Small: 3-6 | Medium: 7-12 | Large: 13+ stems</p>
+                {selectedBouquetSize && (
+                  <p className="selected-size-badge">
+                    Selected Size: <strong>{selectedBouquetSize.label}</strong> ({selection.bundleSize} stems)
+                  </p>
+                )}
               </div>
 
               {/* New Custom Stems Input */}
@@ -1911,11 +1937,11 @@ const Customized = ({ addToCart }) => {
                 <div className="custom-bundle-input-card">
                   <input
                     type="number"
-                    min="2"
+                    min="3"
                     step="1"
                     value={customBundleSizeInput}
                     onChange={handleCustomBundleChange}
-                    placeholder="e.g. 2"
+                    placeholder="e.g. 9"
                     className="custom-stem-input"
                   />
 

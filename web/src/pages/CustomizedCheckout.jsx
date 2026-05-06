@@ -24,6 +24,7 @@ import {
 import { PICKUP_TIME_OPTIONS, getEarliestPickupDate, isPickupDateSelectable } from '../utils/businessHours';
 import { hydrateCustomizedBouquetItems } from '../utils/customizedBouquetPreview';
 import { reserveRequestStockAllocations, reserveRequestStockAllocationsDirect } from '../utils/requestSubmission';
+import { getBouquetSizeDisplay, getBouquetSizeInfo } from '../utils/bouquetSize';
 
 const paymentMethods = [
     { id: 'gcash', name: 'GCash', description: 'Pay via GCash e-wallet', icon: 'fa-wallet' },
@@ -82,6 +83,15 @@ const buildCustomizedRequestStockAllocations = (items = []) => {
         stock_product_id,
         quantity,
     }));
+};
+
+const withBouquetSizeMetadata = (item = {}) => {
+    const sizeInfo = getBouquetSizeInfo(item.bundleSize);
+    return {
+        ...item,
+        bouquetSizeLabel: item.bouquetSizeLabel || sizeInfo?.label || null,
+        bouquetSizeRange: item.bouquetSizeRange || sizeInfo?.range || null,
+    };
 };
 
 const hasNumericStockId = (value) => /^[0-9]+$/.test(String(value ?? '').trim());
@@ -332,9 +342,9 @@ const CustomizedCheckout = ({ user }) => {
                 const selectedIds = JSON.parse(savedSelectedIds);
                 const allCustomizedItems = JSON.parse(savedCart);
                 const selectedItems = Array.isArray(allCustomizedItems)
-                    ? allCustomizedItems.filter((item) => selectedIds.includes(item.id)).map((item) => ({
+                    ? allCustomizedItems.filter((item) => selectedIds.includes(item.id)).map((item) => withBouquetSizeMetadata({
                         ...item,
-                        name: `Customizer Studio (${item.bundleSize || '?'} stems)`,
+                        name: `Customizer Studio (${getBouquetSizeDisplay(item.bundleSize) || '? stems'})`,
                         qty: 1,
                     }))
                     : [];
@@ -348,7 +358,7 @@ const CustomizedCheckout = ({ user }) => {
 
         const savedCheckoutItems = localStorage.getItem('checkoutItems');
         if (savedCheckoutItems) {
-            setCheckoutItems(JSON.parse(savedCheckoutItems));
+            setCheckoutItems(JSON.parse(savedCheckoutItems).map(withBouquetSizeMetadata));
         }
     }, [user?.id]);
 
@@ -535,6 +545,7 @@ const CustomizedCheckout = ({ user }) => {
 
         // 2. Upload all images from the cart
         const uploadedItems = await Promise.all(sanitizedCheckoutItems.map(async (item) => {
+            const itemWithSize = withBouquetSizeMetadata(item);
             if (item.image && item.image.startsWith('data:image')) {
                 const base64WithoutPrefix = item.image.split(',')[1];
                 const imageBuffer = Uint8Array.from(atob(base64WithoutPrefix), (c) => c.charCodeAt(0));
@@ -546,13 +557,13 @@ const CustomizedCheckout = ({ user }) => {
 
                 if (error) {
                     console.error('Error uploading bouquet image:', error);
-                    return { ...item, image_url: null, image: undefined };
+                    return { ...itemWithSize, image_url: null, image: undefined };
                 }
 
                 const { data: publicUrlData } = supabase.storage.from('request-images').getPublicUrl(imgFileName);
-                return { ...item, image_url: publicUrlData.publicUrl, image: undefined };
+                return { ...itemWithSize, image_url: publicUrlData.publicUrl, image: undefined };
             }
-            return item;
+            return itemWithSize;
         }));
 
         const stockAllocations = buildCustomizedRequestStockAllocations(uploadedItems);
@@ -839,6 +850,9 @@ const CustomizedCheckout = ({ user }) => {
                                     <CustomizedBouquetPreview item={item} size={80} zoomable />
                                     <div className="checkout-item-info">
                                         <div className="checkout-item-name">{item.name}</div>
+                                        {item.bundleSize ? (
+                                            <div className="checkout-item-qty">{getBouquetSizeDisplay(item.bundleSize)}</div>
+                                        ) : null}
                                         <div className="checkout-item-qty">Qty: {item.qty || 1}</div>
                                         <div className="small text-muted">
                                             {(item.flowers || []).map((flower) => flower.name).join(', ')}

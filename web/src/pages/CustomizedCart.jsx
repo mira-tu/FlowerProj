@@ -5,6 +5,7 @@ import { supabase } from '../config/supabase';
 import { stockAPI } from '../config/api';
 import CustomizedBouquetPreview from '../components/CustomizedBouquetPreview';
 import { hydrateCustomizedBouquetItems } from '../utils/customizedBouquetPreview';
+import { getBouquetSizeDisplay } from '../utils/bouquetSize';
 
 const CustomizedCart = ({ user }) => {
     const navigate = useNavigate();
@@ -195,7 +196,7 @@ const CustomizedCart = ({ user }) => {
                                             <CustomizedBouquetPreview item={item} size={80} zoomable />
                                             <div className="ms-3">
                                                 <h6 className="mb-0 fw-bold">{item.name}</h6>
-                                                <small className="text-muted">{item.bundleSize} stems</small>
+                                                <small className="text-muted">{getBouquetSizeDisplay(item.bundleSize) || '? stems'}</small>
                                             </div>
                                         </div>
                                         <div className="col-md-2 text-center mb-2 mb-md-0">

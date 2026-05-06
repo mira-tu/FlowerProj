@@ -33,6 +33,7 @@ import {
     canRequestRefundAfterCancellation,
     getCancellationRefundContext,
 } from '../utils/customerRefunds';
+import { getBouquetSizeDisplay } from '../utils/bouquetSize';
 import '../styles/Shop.css';
 
 // Timeline steps for Delivery Requests
@@ -63,7 +64,7 @@ const getCustomizedTrackingItems = (request) => {
         return summarizeCancellationItems(sourceItems).items.map((item, index) => ({
             ...item,
             key: item.id || item.listId || `${request?.id || 'customized'}-${index}`,
-            name: item.name || (item.bundleSize ? `Customizer Studio (${item.bundleSize} stems)` : `Customizer Studio ${index + 1}`),
+            name: item.name || (item.bundleSize ? `Customizer Studio (${getBouquetSizeDisplay(item.bundleSize)})` : `Customizer Studio ${index + 1}`),
             image: item.image_url || item.image || request?.imageUrl || null,
             previewComposition: item.previewComposition || item.preview_composition || null,
             quantity: item.remainingQuantity,
@@ -78,7 +79,7 @@ const getCustomizedTrackingItems = (request) => {
     return [{
         key: `${request?.id || 'customized'}-legacy`,
         name: request?.requestData?.bundleSize
-            ? `Customizer Studio (${request.requestData.bundleSize} stems)`
+            ? `Customizer Studio (${getBouquetSizeDisplay(request.requestData.bundleSize)})`
             : 'Customizer Studio',
         image: request?.imageUrl || null,
         previewComposition: request?.requestData?.previewComposition || request?.requestData?.preview_composition || null,
