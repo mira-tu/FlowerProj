@@ -157,6 +157,7 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
   const [orderToUpdate, setOrderToUpdate] = useState(null);
   const [selectedStatus, setSelectedStatus] = useState(null);
   const [deliveryFailureReason, setDeliveryFailureReason] = useState('');
+  const deliveryFailureReasonRef = useRef('');
   const [deliveryFailureModalVisible, setDeliveryFailureModalVisible] = useState(false);
   const [receiptModalVisible, setReceiptModalVisible] = useState(false);
   const [selectedReceiptUrl, setSelectedReceiptUrl] = useState(null);
@@ -791,6 +792,7 @@ const deliveryStepperStatuses = [
     setOrderToUpdate(null);
     setSelectedStatus(null);
     setDeliveryFailureReason('');
+    deliveryFailureReasonRef.current = '';
     setDeliveryFailureModalVisible(false);
   };
 
@@ -1042,20 +1044,21 @@ const deliveryStepperStatuses = [
   };
 
   const confirmStatusChange = async (overrideOptions = {}) => {
-    if (!orderToUpdate || !selectedStatus) return;
+    const nextStatus = overrideOptions.status || selectedStatus;
+    if (!orderToUpdate || !nextStatus) return;
     const orderId = orderToUpdate.id;
     const submittedDeliveryFailureReason = typeof overrideOptions.deliveryFailureReason === 'string'
       ? overrideOptions.deliveryFailureReason.trim()
-      : deliveryFailureReason.trim();
+      : (deliveryFailureReasonRef.current || deliveryFailureReason).trim();
 
-    if (selectedStatus === 'cancelled') {
+    if (nextStatus === 'cancelled') {
       const orderToCancel = orderToUpdate;
       closeStatusModal();
       openOrderDeclineModal(orderToCancel, 'cancel');
       return;
     }
 
-    if (selectedStatus === DELIVERY_FAILED_ATTEMPT_STATUS && !submittedDeliveryFailureReason) {
+    if (nextStatus === DELIVERY_FAILED_ATTEMPT_STATUS && !submittedDeliveryFailureReason) {
       setDeliveryFailureModalVisible(true);
       Alert.alert('Reason Required', 'Please enter why the delivery attempt failed.');
       return;
@@ -1073,7 +1076,7 @@ const deliveryStepperStatuses = [
     let shouldCloseAfterStatusChange = true;
 
     try {
-      if (selectedStatus === 'out_for_delivery') {
+      if (nextStatus === 'out_for_delivery') {
         const missingStopLabels = getMissingStopAssignmentLabels(orderToUpdate);
         const hasRider = hasRequiredRiderAssignments(orderToUpdate);
         if (!hasRider) {
@@ -1089,7 +1092,7 @@ const deliveryStepperStatuses = [
         }
       }
 
-      const isMovingToDelivery = ['ready_for_delivery', 'out_for_delivery', DELIVERY_FAILED_ATTEMPT_STATUS, 'ready_for_pick_up', 'ready_for_pickup', 'completed', 'claimed'].includes(selectedStatus);
+      const isMovingToDelivery = ['ready_for_delivery', 'out_for_delivery', DELIVERY_FAILED_ATTEMPT_STATUS, 'ready_for_pick_up', 'ready_for_pickup', 'completed', 'claimed'].includes(nextStatus);
       const isNotPaid = orderToUpdate.payment_status !== 'paid';
       const isNotCOD = orderToUpdate.payment_method?.toLowerCase() !== 'cod';
 
@@ -1103,16 +1106,16 @@ const deliveryStepperStatuses = [
         return;
       }
 
-      const statusOptions = selectedStatus === DELIVERY_FAILED_ATTEMPT_STATUS
+      const statusOptions = nextStatus === DELIVERY_FAILED_ATTEMPT_STATUS
         ? { deliveryFailureReason: submittedDeliveryFailureReason }
         : {};
-      const statusResponse = await adminAPI.updateOrderStatus(orderId, selectedStatus, statusOptions);
+      const statusResponse = await adminAPI.updateOrderStatus(orderId, nextStatus, statusOptions);
       let mergedOrder = statusResponse?.data?.order || {
         ...orderToUpdate,
-        status: selectedStatus,
+        status: nextStatus,
       };
 
-      if (selectedStatus === 'completed' && orderToUpdate.payment_method === 'cod' && orderToUpdate.payment_status === 'to_pay') {
+      if (nextStatus === 'completed' && orderToUpdate.payment_method === 'cod' && orderToUpdate.payment_status === 'to_pay') {
         const paymentResponse = await adminAPI.updateOrderPaymentStatus(orderId, 'paid');
         mergedOrder = {
           ...mergedOrder,
@@ -1120,7 +1123,7 @@ const deliveryStepperStatuses = [
           payment_status: 'paid',
         };
         Toast.show({ type: 'success', text1: 'Order Completed and Payment Marked as Paid' });
-      } else if (selectedStatus === 'claimed' && orderToUpdate.payment_method === 'cod' && orderToUpdate.payment_status === 'to_pay') {
+      } else if (nextStatus === 'claimed' && orderToUpdate.payment_method === 'cod' && orderToUpdate.payment_status === 'to_pay') {
         const paymentResponse = await adminAPI.updateOrderPaymentStatus(orderId, 'paid');
         mergedOrder = {
           ...mergedOrder,
@@ -1128,17 +1131,17 @@ const deliveryStepperStatuses = [
           payment_status: 'paid',
         };
         Toast.show({ type: 'success', text1: 'Order Claimed & Paid' });
-      } else if (selectedStatus === 'processing') {
+      } else if (nextStatus === 'processing') {
         Toast.show({ type: 'success', text1: 'Now Processing', text2: 'You can now assign a rider for delivery.' });
       } else {
-        Toast.show({ type: 'success', text1: `Status Updated to ${getStatusLabel(selectedStatus)}` });
+        Toast.show({ type: 'success', text1: `Status Updated to ${getStatusLabel(nextStatus)}` });
       }
 
       mergeOrderIntoState(mergedOrder);
       closeStatusModal();
 
-      if (['processing', 'completed', 'claimed', 'out_for_delivery'].includes(selectedStatus)) {
-        await sendStatusEmail(orderToUpdate, selectedStatus);
+      if (['processing', 'completed', 'claimed', 'out_for_delivery'].includes(nextStatus)) {
+        await sendStatusEmail(orderToUpdate, nextStatus);
       }
     } catch (error) {
       Toast.show({ type: 'error', text1: 'Update Failed' });
@@ -2685,7 +2688,10 @@ const deliveryStepperStatuses = [
               placeholder="Example: Customer unavailable or phone could not be reached"
               multiline
               value={deliveryFailureReason}
-              onChangeText={setDeliveryFailureReason}
+              onChangeText={(value) => {
+                deliveryFailureReasonRef.current = value;
+                setDeliveryFailureReason(value);
+              }}
             />
             <View style={styles.modalButtons}>
               <TouchableOpacity
@@ -2697,14 +2703,17 @@ const deliveryStepperStatuses = [
               <TouchableOpacity
                 style={[styles.modalButton, styles.saveButton]}
                 onPress={() => {
-                  const reason = deliveryFailureReason.trim();
+                  const reason = (deliveryFailureReasonRef.current || deliveryFailureReason).trim();
                   if (!reason) {
                     Alert.alert('Reason Required', 'Please enter why the delivery attempt failed.');
                     return;
                   }
                   setSelectedStatus(DELIVERY_FAILED_ATTEMPT_STATUS);
                   setDeliveryFailureModalVisible(false);
-                  confirmStatusChange({ deliveryFailureReason: reason });
+                  confirmStatusChange({
+                    status: DELIVERY_FAILED_ATTEMPT_STATUS,
+                    deliveryFailureReason: reason,
+                  });
                 }}
               >
                 <Text style={styles.buttonText}>Save Reason</Text>

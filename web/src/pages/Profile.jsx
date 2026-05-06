@@ -760,7 +760,7 @@ const Profile = ({ user, logout }) => {
             to_pay: 'pending',
             ready_for_pickup: 'processing',
             out_for_delivery: 'shipped',
-            delivery_failed_attempt: 'shipped',
+            delivery_failed_attempt: 'failed-delivery',
             claimed: 'shipped',
             completed: 'delivered',
             cancelled: 'cancelled',

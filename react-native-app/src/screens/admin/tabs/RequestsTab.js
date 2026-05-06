@@ -2856,6 +2856,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   const [requestToUpdate, setRequestToUpdate] = useState(null);
   const [selectedRequestStatus, setSelectedRequestStatus] = useState(null);
   const [deliveryFailureReason, setDeliveryFailureReason] = useState('');
+  const deliveryFailureReasonRef = useRef('');
   const [deliveryFailureModalVisible, setDeliveryFailureModalVisible] = useState(false);
   const [quoteModalVisible, setQuoteModalVisible] = useState(false);
   const [requestToQuote, setRequestToQuote] = useState(null);
@@ -3921,6 +3922,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     setRequestToUpdate(null);
     setSelectedRequestStatus(null);
     setDeliveryFailureReason('');
+    deliveryFailureReasonRef.current = '';
     setDeliveryFailureModalVisible(false);
   };
 
@@ -4179,20 +4181,21 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   }, [closeDetailsModal, loadRequests, runRequestAction]);
 
   const confirmRequestStatusChange = async (overrideOptions = {}) => {
-    if (!requestToUpdate || !selectedRequestStatus) return;
+    const nextStatus = overrideOptions.status || selectedRequestStatus;
+    if (!requestToUpdate || !nextStatus) return;
     const requestId = requestToUpdate.id;
     const submittedDeliveryFailureReason = typeof overrideOptions.deliveryFailureReason === 'string'
       ? overrideOptions.deliveryFailureReason.trim()
-      : deliveryFailureReason.trim();
+      : (deliveryFailureReasonRef.current || deliveryFailureReason).trim();
 
-    if (selectedRequestStatus === 'cancelled') {
+    if (nextStatus === 'cancelled') {
       const requestToCancel = requestToUpdate;
       closeRequestStatusModal();
       openRequestDeclineModal(requestToCancel, 'cancel');
       return;
     }
 
-    if (selectedRequestStatus === DELIVERY_FAILED_ATTEMPT_STATUS && !submittedDeliveryFailureReason) {
+    if (nextStatus === DELIVERY_FAILED_ATTEMPT_STATUS && !submittedDeliveryFailureReason) {
       setDeliveryFailureModalVisible(true);
       Alert.alert('Reason Required', 'Please enter why the delivery attempt failed.');
       return;
@@ -4210,7 +4213,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     let shouldCloseAfterStatusChange = true;
 
     try {
-      if (selectedRequestStatus === 'out_for_delivery') {
+      if (nextStatus === 'out_for_delivery') {
         const missingStopLabels = getMissingStopAssignmentLabels(requestToUpdate);
         const hasRider = hasRequiredRiderAssignments(requestToUpdate);
         if (!hasRider) {
@@ -4226,7 +4229,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
         }
       }
 
-      const isMovingToDelivery = ['ready_for_delivery', 'out_for_delivery', DELIVERY_FAILED_ATTEMPT_STATUS, 'ready_for_pickup', 'ready_for_pick_up', 'completed'].includes(selectedRequestStatus);
+      const isMovingToDelivery = ['ready_for_delivery', 'out_for_delivery', DELIVERY_FAILED_ATTEMPT_STATUS, 'ready_for_pickup', 'ready_for_pick_up', 'completed'].includes(nextStatus);
       const isNotPaid = requestToUpdate.payment_status !== 'paid';
       const isNotCOD = requestToUpdate.payment_method?.toLowerCase() !== 'cod';
 
@@ -4240,16 +4243,16 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
         return;
       }
 
-      const statusOptions = selectedRequestStatus === DELIVERY_FAILED_ATTEMPT_STATUS
+      const statusOptions = nextStatus === DELIVERY_FAILED_ATTEMPT_STATUS
         ? { deliveryFailureReason: submittedDeliveryFailureReason }
         : {};
-      const statusResponse = await adminAPI.updateRequestStatus(requestId, selectedRequestStatus, statusOptions);
+      const statusResponse = await adminAPI.updateRequestStatus(requestId, nextStatus, statusOptions);
       let mergedRequest = statusResponse?.data?.request || {
         ...requestToUpdate,
-        status: selectedRequestStatus,
+        status: nextStatus,
       };
 
-      if (selectedRequestStatus === 'completed' && requestToUpdate.payment_method?.toLowerCase() === 'cod' && requestToUpdate.payment_status === 'to_pay') {
+      if (nextStatus === 'completed' && requestToUpdate.payment_method?.toLowerCase() === 'cod' && requestToUpdate.payment_status === 'to_pay') {
         const paymentResponse = await adminAPI.updateRequestPaymentStatus(requestToUpdate, 'paid');
         mergedRequest = {
           ...mergedRequest,
@@ -4261,7 +4264,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
         Toast.show({
           type: 'success',
           text1: 'Status Updated',
-          text2: `Request #${requestToUpdate.request_number} is now ${selectedRequestStatus.replace(/_/g, ' ')}.`
+          text2: `Request #${requestToUpdate.request_number} is now ${getStatusLabel(nextStatus)}.`
         });
       }
       mergeRequestIntoState(mergedRequest);
@@ -6284,7 +6287,10 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
               placeholder="Example: Customer unavailable or phone could not be reached"
               multiline
               value={deliveryFailureReason}
-              onChangeText={setDeliveryFailureReason}
+              onChangeText={(value) => {
+                deliveryFailureReasonRef.current = value;
+                setDeliveryFailureReason(value);
+              }}
             />
             <View style={styles.modalButtons}>
               <TouchableOpacity
@@ -6296,14 +6302,17 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
               <TouchableOpacity
                 style={[styles.modalButton, styles.saveButton]}
                 onPress={() => {
-                  const reason = deliveryFailureReason.trim();
+                  const reason = (deliveryFailureReasonRef.current || deliveryFailureReason).trim();
                   if (!reason) {
                     Alert.alert('Reason Required', 'Please enter why the delivery attempt failed.');
                     return;
                   }
                   setSelectedRequestStatus(DELIVERY_FAILED_ATTEMPT_STATUS);
                   setDeliveryFailureModalVisible(false);
-                  confirmRequestStatusChange({ deliveryFailureReason: reason });
+                  confirmRequestStatusChange({
+                    status: DELIVERY_FAILED_ATTEMPT_STATUS,
+                    deliveryFailureReason: reason,
+                  });
                 }}
               >
                 <Text style={styles.buttonText}>Save Reason</Text>

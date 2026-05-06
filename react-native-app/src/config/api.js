@@ -914,6 +914,11 @@ const getDeliveryFailureReason = (options = {}) => (
         : ''
 );
 
+const hasPersistedDeliveryFailureReason = (record) => Boolean(
+    record?.status_timestamps?.delivery_failed_attempt_reason
+    || record?.statusTimestamps?.delivery_failed_attempt_reason
+);
+
 const syncRequestStockAllocationState = async (requestId, requestData, mode = 'release') => {
     const normalizedMode = String(mode || '').trim().toLowerCase();
     if (!requestId || !['reserve', 'release'].includes(normalizedMode)) {
@@ -4403,6 +4408,13 @@ export const adminAPI = {
     updateOrderStatus: async (id, status, options = {}) => {
         try {
             const data = await invokeAdminWorkflow('update_order_status', { id, status, options });
+            if (
+                status === DELIVERY_FAILED_ATTEMPT_STATUS
+                && getDeliveryFailureReason(options)
+                && !hasPersistedDeliveryFailureReason(data?.order || data)
+            ) {
+                return { data: await updateOrderStatusDirect(id, status, options) };
+            }
             return { data };
         } catch (error) {
             if (!shouldFallbackToDirectWorkflow(error)) throw error;
@@ -5744,6 +5756,13 @@ export const adminAPI = {
                 status,
                 options,
             });
+            if (
+                status === DELIVERY_FAILED_ATTEMPT_STATUS
+                && getDeliveryFailureReason(options)
+                && !hasPersistedDeliveryFailureReason(data?.request || data)
+            ) {
+                return { data: await updateRequestStatusDirect(id, status, options) };
+            }
             return { data };
         } catch (error) {
             if (!shouldFallbackToDirectWorkflow(error)) throw error;

@@ -745,7 +745,7 @@ const OrderTracking = ({ user }) => {
                             )}
 
                             {isFailedDeliveryAttempt ? (
-                                <div className="current-status-badge" style={{ backgroundColor: '#f97316', color: '#fff' }}>
+                                <div className="current-status-badge" style={{ backgroundColor: '#fef3c7', border: '1px solid #facc15', color: '#92400e' }}>
                                     Failed Delivery Attempt
                                 </div>
                             ) : isDeclinedOrCancelled ? (
@@ -838,7 +838,7 @@ const OrderTracking = ({ user }) => {
                                     >
                                         <div
                                             className="timeline-marker"
-                                            style={step.key === DELIVERY_FAILED_ATTEMPT_STATUS ? { backgroundColor: '#f97316', borderColor: '#f97316', color: '#fff' } : undefined}
+                                            style={step.key === DELIVERY_FAILED_ATTEMPT_STATUS ? { backgroundColor: '#fef3c7', borderColor: '#facc15', color: '#92400e' } : undefined}
                                         >
                                             <i className={`fas ${step.icon}`}></i>
                                         </div>
@@ -866,8 +866,8 @@ const OrderTracking = ({ user }) => {
                                                     <><br /><span className="fw-bold">Rider:</span> {order.rider.name} {order.rider.phone && `(${order.rider.phone})`}</>
                                                 )}
                                                 {step.key === DELIVERY_FAILED_ATTEMPT_STATUS && deliveryFailureReason && (
-                                                    <div className="mt-2 p-2 rounded shadow-sm border-start border-4 border-warning" style={{ backgroundColor: '#fff7ed', fontSize: '0.85rem' }}>
-                                                        <div className="fw-bold" style={{ color: '#c2410c' }}>
+                                                    <div className="mt-2 p-2 rounded shadow-sm border-start border-4 border-warning" style={{ backgroundColor: '#fefce8', fontSize: '0.85rem' }}>
+                                                        <div className="fw-bold" style={{ color: '#92400e' }}>
                                                             <i className="fas fa-triangle-exclamation me-2"></i>
                                                             Reason
                                                         </div>

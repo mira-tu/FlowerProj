@@ -461,7 +461,7 @@ const MyOrders = () => {
             to_pay: 'pending',
             ready_for_pickup: 'processing',
             out_for_delivery: 'shipped',
-            delivery_failed_attempt: 'shipped',
+            delivery_failed_attempt: 'failed-delivery',
             to_receive: 'shipped',
             claimed: 'shipped',
             completed: 'delivered',

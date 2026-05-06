@@ -765,6 +765,12 @@
     color: #388e3c;
 }
 
+.order-status.failed-delivery {
+    background: #fef3c7;
+    border: 1px solid #facc15;
+    color: #92400e;
+}
+
 .order-status.delivered {
     background: #e8f5e9;
     color: #2e7d32;
