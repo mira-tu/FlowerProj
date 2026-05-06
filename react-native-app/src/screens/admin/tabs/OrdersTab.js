@@ -1041,9 +1041,12 @@ const deliveryStepperStatuses = [
     }
   };
 
-  const confirmStatusChange = async () => {
+  const confirmStatusChange = async (overrideOptions = {}) => {
     if (!orderToUpdate || !selectedStatus) return;
     const orderId = orderToUpdate.id;
+    const submittedDeliveryFailureReason = typeof overrideOptions.deliveryFailureReason === 'string'
+      ? overrideOptions.deliveryFailureReason.trim()
+      : deliveryFailureReason.trim();
 
     if (selectedStatus === 'cancelled') {
       const orderToCancel = orderToUpdate;
@@ -1052,7 +1055,7 @@ const deliveryStepperStatuses = [
       return;
     }
 
-    if (selectedStatus === DELIVERY_FAILED_ATTEMPT_STATUS && !deliveryFailureReason.trim()) {
+    if (selectedStatus === DELIVERY_FAILED_ATTEMPT_STATUS && !submittedDeliveryFailureReason) {
       setDeliveryFailureModalVisible(true);
       Alert.alert('Reason Required', 'Please enter why the delivery attempt failed.');
       return;
@@ -1101,7 +1104,7 @@ const deliveryStepperStatuses = [
       }
 
       const statusOptions = selectedStatus === DELIVERY_FAILED_ATTEMPT_STATUS
-        ? { deliveryFailureReason: deliveryFailureReason.trim() }
+        ? { deliveryFailureReason: submittedDeliveryFailureReason }
         : {};
       const statusResponse = await adminAPI.updateOrderStatus(orderId, selectedStatus, statusOptions);
       let mergedOrder = statusResponse?.data?.order || {
@@ -2694,12 +2697,14 @@ const deliveryStepperStatuses = [
               <TouchableOpacity
                 style={[styles.modalButton, styles.saveButton]}
                 onPress={() => {
-                  if (!deliveryFailureReason.trim()) {
+                  const reason = deliveryFailureReason.trim();
+                  if (!reason) {
                     Alert.alert('Reason Required', 'Please enter why the delivery attempt failed.');
                     return;
                   }
                   setSelectedStatus(DELIVERY_FAILED_ATTEMPT_STATUS);
                   setDeliveryFailureModalVisible(false);
+                  confirmStatusChange({ deliveryFailureReason: reason });
                 }}
               >
                 <Text style={styles.buttonText}>Save Reason</Text>

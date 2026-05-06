@@ -4178,9 +4178,12 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     });
   }, [closeDetailsModal, loadRequests, runRequestAction]);
 
-  const confirmRequestStatusChange = async () => {
+  const confirmRequestStatusChange = async (overrideOptions = {}) => {
     if (!requestToUpdate || !selectedRequestStatus) return;
     const requestId = requestToUpdate.id;
+    const submittedDeliveryFailureReason = typeof overrideOptions.deliveryFailureReason === 'string'
+      ? overrideOptions.deliveryFailureReason.trim()
+      : deliveryFailureReason.trim();
 
     if (selectedRequestStatus === 'cancelled') {
       const requestToCancel = requestToUpdate;
@@ -4189,7 +4192,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
       return;
     }
 
-    if (selectedRequestStatus === DELIVERY_FAILED_ATTEMPT_STATUS && !deliveryFailureReason.trim()) {
+    if (selectedRequestStatus === DELIVERY_FAILED_ATTEMPT_STATUS && !submittedDeliveryFailureReason) {
       setDeliveryFailureModalVisible(true);
       Alert.alert('Reason Required', 'Please enter why the delivery attempt failed.');
       return;
@@ -4238,7 +4241,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
       }
 
       const statusOptions = selectedRequestStatus === DELIVERY_FAILED_ATTEMPT_STATUS
-        ? { deliveryFailureReason: deliveryFailureReason.trim() }
+        ? { deliveryFailureReason: submittedDeliveryFailureReason }
         : {};
       const statusResponse = await adminAPI.updateRequestStatus(requestId, selectedRequestStatus, statusOptions);
       let mergedRequest = statusResponse?.data?.request || {
@@ -6293,12 +6296,14 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
               <TouchableOpacity
                 style={[styles.modalButton, styles.saveButton]}
                 onPress={() => {
-                  if (!deliveryFailureReason.trim()) {
+                  const reason = deliveryFailureReason.trim();
+                  if (!reason) {
                     Alert.alert('Reason Required', 'Please enter why the delivery attempt failed.');
                     return;
                   }
                   setSelectedRequestStatus(DELIVERY_FAILED_ATTEMPT_STATUS);
                   setDeliveryFailureModalVisible(false);
+                  confirmRequestStatusChange({ deliveryFailureReason: reason });
                 }}
               >
                 <Text style={styles.buttonText}>Save Reason</Text>
