@@ -42,6 +42,7 @@ import {
 } from '../utils/customerRefunds';
 import { getBouquetSizeDisplay } from '../utils/bouquetSize';
 import { sanitizeNameInput, validateNameField } from '../utils/signupValidation';
+import { handleExpiredSessionError } from '../utils/authSession';
 
 const parseJsonObject = (value) => {
     if (!value) return {};
@@ -180,8 +181,10 @@ const Profile = ({ user, logout }) => {
 
             if (staffError) {
                 console.error('Error fetching staff IDs:', staffError);
+                if (await handleExpiredSessionError(staffError)) return;
                 // As a fallback, we might still want to fetch messages from the primary admin if one exists
                 const { data: adminUser, error: adminError } = await supabase.from('users').select('id').eq('role', 'admin').limit(1).single();
+                if (adminError && await handleExpiredSessionError(adminError)) return;
                 if (adminUser) {
                     staffIds = [adminUser.id];
                 }
@@ -203,6 +206,7 @@ const Profile = ({ user, logout }) => {
 
             if (error) {
                 console.error('Error fetching messages:', error);
+                await handleExpiredSessionError(error);
             } else {
                 setMessages(data || []);
             }
@@ -254,7 +258,10 @@ const Profile = ({ user, logout }) => {
     useEffect(() => {
         const fetchAdminId = async () => {
             const { data, error } = await supabase.from('users').select('id').eq('role', 'admin').limit(1).single();
-            if (error) console.error('Error fetching admin ID for sending:', error);
+            if (error) {
+                console.error('Error fetching admin ID for sending:', error);
+                await handleExpiredSessionError(error);
+            }
             else if (data) setAdminId(data.id);
             else console.warn('No admin user found to send messages to.');
         };
@@ -292,6 +299,7 @@ const Profile = ({ user, logout }) => {
 
                 if (error) {
                     console.error('Error fetching profile:', error);
+                    await handleExpiredSessionError(error);
                 } else {
                     setProfileData(data);
                 }
@@ -528,6 +536,10 @@ const Profile = ({ user, logout }) => {
             console.error('Error loading orders:', error);
             setOrders([]);
 
+            if (await handleExpiredSessionError(error)) {
+                return [];
+            }
+
             if (error.message?.includes('Authentication')) {
                 navigate('/login');
             } else {
@@ -556,6 +568,7 @@ const Profile = ({ user, logout }) => {
 
                 if (error) {
                     console.error('Error fetching addresses:', error);
+                    await handleExpiredSessionError(error);
                 } else {
                     // Filter out soft-deleted addresses
                     setAddresses(data.filter(addr => !addr.label.startsWith('[DEL]')));

@@ -73,6 +73,7 @@ import { normalizeProductPricing } from './utils/productPricing';
 
 import { supabase } from './config/supabase';
 import { ensureVerifiedUserSession } from './utils/emailVerification';
+import { handleExpiredSessionError } from './utils/authSession';
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -303,7 +304,12 @@ function AppContent() {
       }
     };
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) {
+        handleExpiredSessionError(error);
+        handleSessionUser(null);
+        return;
+      }
       handleSessionUser(session?.user ?? null);
     });
 
