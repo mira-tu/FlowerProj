@@ -2004,6 +2004,7 @@ const getCompactRequestSummary = (item) => {
     ) || customizedItems.length || 1;
     const lines = [
       firstItem?.bundleSizeText ? `Bundle: ${firstItem.bundleSizeText}` : null,
+      firstItem?.flowerSizeLabel ? `Flower size: ${firstItem.flowerSizeLabel}` : null,
       firstItem?.flowersText ? `Flowers: ${firstItem.flowersText}` : null,
       firstItem?.destinationSummary
         ? `Deliver to: ${firstItem.destinationSummary}`
@@ -2516,6 +2517,28 @@ const getBookingRequestItems = (request) => {
   });
 };
 
+const CUSTOMIZED_FLOWER_SIZE_LABELS = Object.freeze({
+  small: 'Small',
+  standard: 'Standard',
+  large: 'Large',
+});
+
+const getCustomizedFlowerSizeLabel = (...sources) => {
+  for (const source of sources) {
+    if (!source || typeof source !== 'object') continue;
+
+    const explicitLabel = String(source?.flowerSizeLabel || source?.flower_size_label || '').trim();
+    if (explicitLabel) return explicitLabel;
+
+    const normalizedSize = String(source?.flowerSize || source?.flower_size || '').trim().toLowerCase();
+    if (CUSTOMIZED_FLOWER_SIZE_LABELS[normalizedSize]) {
+      return CUSTOMIZED_FLOWER_SIZE_LABELS[normalizedSize];
+    }
+  }
+
+  return CUSTOMIZED_FLOWER_SIZE_LABELS.standard;
+};
+
 const getCustomizedRequestItems = (request) => {
   const requestData = normalizeRequestData(request);
   const canonicalPreviewImageUrl = getPreferredRequestPreviewImage(request, requestData);
@@ -2540,6 +2563,8 @@ const getCustomizedRequestItems = (request) => {
         name: requestData.bundleSize ? `Customized Bouquet (${requestData.bundleSize} stems)` : 'Customized Bouquet',
         flowers: requestData.flower ? [requestData.flower] : [],
         bundleSize: requestData.bundleSize ?? null,
+        flowerSize: requestData.flowerSize || requestData.flower_size || null,
+        flowerSizeLabel: requestData.flowerSizeLabel || requestData.flower_size_label || null,
         wrapper: requestData.wrapper ?? null,
         ribbon: requestData.ribbon ?? null,
         image_url: canonicalPreviewImageUrl,
@@ -2570,6 +2595,7 @@ const getCustomizedRequestItems = (request) => {
     const wrapperName = getNamedValue(item?.wrapper) || getNamedValue(requestData.wrapper);
     const ribbonName = getNamedValue(item?.ribbon) || getNamedValue(requestData.ribbon);
     const bundleSize = toPositiveInt(item?.bundleSize, 0) || toPositiveInt(requestData.bundleSize, 0);
+    const flowerSizeLabel = getCustomizedFlowerSizeLabel(item, requestData);
     const itemDestinations = normalizedStops.filter(
       (destination) => String(destination?.item_index ?? destination?.itemIndex ?? '') === String(index)
     );
@@ -2612,6 +2638,7 @@ const getCustomizedRequestItems = (request) => {
       bundleSize ? `Customized Bouquet (${bundleSize} stems)` : `Customized Bouquet ${index + 1}`
     );
     const materialsSummary = [
+      flowerSizeLabel ? `Flower size: ${flowerSizeLabel}` : null,
       flowersText ? `Flowers: ${flowersText}` : null,
       wrapperName ? `Wrapper: ${wrapperName}` : null,
       ribbonName ? `Ribbon: ${ribbonName}` : null,
@@ -2641,6 +2668,7 @@ const getCustomizedRequestItems = (request) => {
       ribbonName,
       bundleSize,
       bundleSizeText: bundleSize ? `${bundleSize} stems` : null,
+      flowerSizeLabel,
       priceText: remainingPrice !== null ? `PHP ${remainingPrice.toFixed(2)}` : null,
       recipientName,
       addressText,
@@ -3656,6 +3684,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
             <DetailSection label="Quantity:" value={String(remainingQuantity)} />
             <DetailSection label="Cancelled Quantity:" value={cancelledQuantity ? String(cancelledQuantity) : null} />
             <DetailSection label="Bundle Size:" value={item.bundleSizeText} />
+            <DetailSection label="Flower Size:" value={item.flowerSizeLabel} />
             <DetailSection label="Flowers:" value={item.flowersText} />
             <DetailSection label="Wrapper:" value={item.wrapperName} />
             <DetailSection label="Ribbon:" value={item.ribbonName} />
@@ -5785,6 +5814,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                       : null}
                   />
                   <DetailSection label="Bundle Size:" value={selectedCustomizedItem.item.bundleSizeText} />
+                  <DetailSection label="Flower Size:" value={selectedCustomizedItem.item.flowerSizeLabel} />
                   <DetailSection label="Flowers:" value={selectedCustomizedItem.item.flowersText} />
                   <DetailSection label="Wrapper:" value={selectedCustomizedItem.item.wrapperName} />
                   <DetailSection label="Ribbon:" value={selectedCustomizedItem.item.ribbonName} />

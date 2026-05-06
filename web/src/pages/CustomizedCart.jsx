@@ -4,7 +4,7 @@ import '../styles/Shop.css';
 import { supabase } from '../config/supabase';
 import { stockAPI } from '../config/api';
 import CustomizedBouquetPreview from '../components/CustomizedBouquetPreview';
-import { hydrateCustomizedBouquetItems } from '../utils/customizedBouquetPreview';
+import { getCustomizedFlowerSizeLabel, hydrateCustomizedBouquetItems } from '../utils/customizedBouquetPreview';
 
 const CustomizedCart = ({ user }) => {
     const navigate = useNavigate();
@@ -196,6 +196,7 @@ const CustomizedCart = ({ user }) => {
                                             <div className="ms-3">
                                                 <h6 className="mb-0 fw-bold">{item.name}</h6>
                                                 <small className="text-muted">{item.bundleSize} stems</small>
+                                                <div className="text-muted small">Flower size: {getCustomizedFlowerSizeLabel(item)}</div>
                                             </div>
                                         </div>
                                         <div className="col-md-2 text-center mb-2 mb-md-0">

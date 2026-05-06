@@ -386,7 +386,8 @@
     letter-spacing: 0.05em;
 }
 
-.customize-page .bundle-selector-group {
+.customize-page .bundle-selector-group,
+.customize-page .flower-size-selector-group {
     display: flex;
     gap: 1rem;
     background: var(--secondary-color);
@@ -394,7 +395,8 @@
     border-radius: var(--radius-lg);
 }
 
-.customize-page .bundle-pill {
+.customize-page .bundle-pill,
+.customize-page .flower-size-pill {
     flex: 1;
     padding: 0.75rem;
     border: none;
@@ -407,12 +409,14 @@
     box-shadow: none;
 }
 
-.customize-page .bundle-pill:hover {
+.customize-page .bundle-pill:hover,
+.customize-page .flower-size-pill:hover {
     color: var(--text-main);
     background: rgba(255, 255, 255, 0.5);
 }
 
-.customize-page .bundle-pill.active {
+.customize-page .bundle-pill.active,
+.customize-page .flower-size-pill.active {
     background: #fff;
     color: var(--primary-color);
     box-shadow: var(--shadow-sm);
@@ -933,12 +937,14 @@
         margin-bottom: 0.5rem;
     }
 
-    .customize-page .bundle-selector-group {
+    .customize-page .bundle-selector-group,
+    .customize-page .flower-size-selector-group {
         padding: 0.35rem;
         gap: 0.4rem;
     }
 
-    .customize-page .bundle-pill {
+    .customize-page .bundle-pill,
+    .customize-page .flower-size-pill {
         padding: 0.55rem 0.4rem;
         font-size: 0.85rem;
         min-height: 44px;
@@ -1075,6 +1081,10 @@
         padding: 0.5rem;
     }
 
+    .customize-page .flower-size-pill {
+        padding: 0.5rem 0.35rem;
+    }
+
     .customize-page .grid-options {
         grid-template-columns: repeat(2, 1fr);
         gap: 0.5rem;
@@ -1156,7 +1166,8 @@
         padding: 0.5rem;
     }
 
-    .customize-page .bundle-pill {
+    .customize-page .bundle-pill,
+    .customize-page .flower-size-pill {
         padding: 0.45rem;
         font-size: 0.8rem;
     }

@@ -8,6 +8,7 @@ import InfoModal from '../components/InfoModal';
 import RefundRequestModal from '../components/RefundRequestModal';
 import RefundRequestPanel from '../components/RefundRequestPanel';
 import CustomizedBouquetPreview from '../components/CustomizedBouquetPreview';
+import { getCustomizedFlowerSizeLabel } from '../utils/customizedBouquetPreview';
 import { insertStaffNotifications } from '../utils/notificationApi';
 import { buildTimelineTimestampMap, formatTimelineTimestamp } from '../utils/timelineTimestamps';
 import {
@@ -82,6 +83,8 @@ const getCustomizedTrackingItems = (request) => {
             : 'Customizer Studio',
         image: request?.imageUrl || null,
         previewComposition: request?.requestData?.previewComposition || request?.requestData?.preview_composition || null,
+        flowerSize: request?.requestData?.flowerSize || request?.requestData?.flower_size || null,
+        flowerSizeLabel: request?.requestData?.flowerSizeLabel || request?.requestData?.flower_size_label || null,
         quantity: 1,
         price: Number(request?.finalPrice || 0),
     }];
@@ -1065,6 +1068,9 @@ const OrderCustomizedTracking = ({ user }) => {
                                         <div className="fw-bold">{item.name}</div>
                                                     <div className="text-muted small">
                                                         {item.remainingQuantity > 0 ? `Qty: ${item.quantity}` : 'Cancelled'}
+                                                    </div>
+                                                    <div className="text-muted small">
+                                                        Flower size: {getCustomizedFlowerSizeLabel(item)}
                                                     </div>
                                                     {item.cancelledQuantity > 0 && (
                                                         <div className="text-danger small">Cancelled: {item.cancelledQuantity}</div>

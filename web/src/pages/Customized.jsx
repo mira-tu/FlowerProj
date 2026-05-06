@@ -32,6 +32,15 @@ const CLASSIC_FLOWER_ZONE_HEIGHT = 250;
 const BASE_STEM_MAX_X = CLASSIC_FLOWER_ZONE_WIDTH - STEM_HANDLE_SIZE;
 const BASE_STEM_MAX_Y = CLASSIC_FLOWER_ZONE_HEIGHT - STEM_HANDLE_SIZE;
 const bundleOptions = [3, 6, 12];
+const DEFAULT_FLOWER_SIZE = 'standard';
+const FLOWER_SIZE_OPTIONS = Object.freeze([
+  { id: 'small', label: 'Small', multiplier: 0.84 },
+  { id: DEFAULT_FLOWER_SIZE, label: 'Standard', multiplier: 1 },
+  { id: 'large', label: 'Large', multiplier: 1.16 },
+]);
+const getFlowerSizeOption = (value) => (
+  FLOWER_SIZE_OPTIONS.find((option) => option.id === value) || FLOWER_SIZE_OPTIONS[1]
+);
 const BASE_STEPS = [
   { id: 1, icon: <FaScroll />, label: 'Wrapper' },
   { id: 2, icon: <FaRibbon />, label: 'Ribbon' },
@@ -643,7 +652,8 @@ const Customized = ({ addToCart }) => {
     flowers: [],
     bundleSize: 0,
     wrapper: null,
-    ribbon: null
+    ribbon: null,
+    flowerSize: DEFAULT_FLOWER_SIZE
   });
   const [customBundleSizeInput, setCustomBundleSizeInput] = useState('');
   const [infoModal, setInfoModal] = useState({ show: false, title: '', message: '', linkTo: null, linkText: '', linkState: null }); // State for InfoModal
@@ -1010,6 +1020,11 @@ const Customized = ({ addToCart }) => {
     setCustomBundleSizeInput(''); // Clear custom input when a predefined bundle is selected
   };
 
+  const handleFlowerSizeSelect = (sizeId) => {
+    const nextSize = getFlowerSizeOption(sizeId);
+    setSelection((prev) => ({ ...prev, flowerSize: nextSize.id }));
+  };
+
   const handleCustomBundleChange = (e) => {
     const value = e.target.value;
     if (!/^\d*$/.test(value)) return; // Only allow digits
@@ -1135,7 +1150,7 @@ const Customized = ({ addToCart }) => {
     closeWrapperColorModal();
   };
   const handleReset = () => {
-    setSelection({ flowers: [], bundleSize: 0, wrapper: null, ribbon: null });
+    setSelection({ flowers: [], bundleSize: 0, wrapper: null, ribbon: null, flowerSize: DEFAULT_FLOWER_SIZE });
     closeWrapperColorModal();
     setActiveStep(1);
   };
@@ -1151,10 +1166,16 @@ const Customized = ({ addToCart }) => {
     return total;
   }, [selection]);
 
+  const selectedFlowerSize = useMemo(
+    () => getFlowerSizeOption(selection.flowerSize),
+    [selection.flowerSize]
+  );
   const stemScale = useMemo(() => {
-    if (selection.bundleSize <= 1) return 1;
-    return Math.max(0.52, 1 - Math.min(selection.bundleSize - 1, 24) * 0.02);
-  }, [selection.bundleSize]);
+    const densityScale = selection.bundleSize <= 1
+      ? 1
+      : Math.max(0.52, 1 - Math.min(selection.bundleSize - 1, 24) * 0.02);
+    return densityScale * selectedFlowerSize.multiplier;
+  }, [selection.bundleSize, selectedFlowerSize.multiplier]);
   const flowerZoneConfig = useMemo(() => (
     getWrapperFlowerZoneConfig(selection.wrapper)
   ), [selection.wrapper]);
@@ -1170,11 +1191,12 @@ const Customized = ({ addToCart }) => {
     const zoneConfigs = Array.isArray(flowerZoneConfig.zones) && flowerZoneConfig.zones.length > 0
       ? flowerZoneConfig.zones
       : [flowerZoneConfig];
+    const scaledStemHandleSize = STEM_HANDLE_SIZE * stemScale;
 
     return zoneConfigs.map((zoneConfig, zoneIndex) => {
       if (zoneConfig.mode === 'relative' && wrapperLayerBox) {
-        const width = Math.max(wrapperLayerBox.width * zoneConfig.widthFactor, STEM_HANDLE_SIZE + 40);
-        const height = Math.max(wrapperLayerBox.height * zoneConfig.heightFactor, STEM_HANDLE_SIZE + 40);
+        const width = Math.max(wrapperLayerBox.width * zoneConfig.widthFactor, scaledStemHandleSize + 40);
+        const height = Math.max(wrapperLayerBox.height * zoneConfig.heightFactor, scaledStemHandleSize + 40);
 
         return {
           id: zoneConfig.id || `flower-zone-${zoneIndex}`,
@@ -1185,8 +1207,8 @@ const Customized = ({ addToCart }) => {
           transform: 'none',
           shape: zoneConfig.shape || 'rectangle',
           stemShare: zoneConfig.stemShare,
-          maxX: Math.max(width - STEM_HANDLE_SIZE, 0),
-          maxY: Math.max(height - STEM_HANDLE_SIZE, 0),
+          maxX: Math.max(width - scaledStemHandleSize, 0),
+          maxY: Math.max(height - scaledStemHandleSize, 0),
         };
       }
 
@@ -1202,11 +1224,11 @@ const Customized = ({ addToCart }) => {
         transform: zoneConfig.transform ?? 'translateX(-50%)',
         shape: zoneConfig.shape || 'rectangle',
         stemShare: zoneConfig.stemShare,
-        maxX: Math.max(width - STEM_HANDLE_SIZE, 0),
-        maxY: Math.max(height - STEM_HANDLE_SIZE, 0),
+        maxX: Math.max(width - scaledStemHandleSize, 0),
+        maxY: Math.max(height - scaledStemHandleSize, 0),
       };
     });
-  }, [flowerZoneConfig, wrapperLayerBox]);
+  }, [flowerZoneConfig, stemScale, wrapperLayerBox]);
   const stemZonePlan = useMemo(() => (
     buildStemZonePlan(selection.bundleSize, flowerZoneLayouts)
   ), [flowerZoneLayouts, selection.bundleSize]);
@@ -1388,6 +1410,8 @@ const Customized = ({ addToCart }) => {
           is_available: selection.ribbon.is_available !== false,
         } : null,
         previewComposition,
+        flowerSize: selectedFlowerSize.id,
+        flowerSizeLabel: selectedFlowerSize.label,
         price: totalPrice,
         qty: 1
       };
@@ -1440,6 +1464,8 @@ const Customized = ({ addToCart }) => {
         zoneWidth: zoneLayout?.width ?? CLASSIC_FLOWER_ZONE_WIDTH,
         zoneHeight: zoneLayout?.height ?? CLASSIC_FLOWER_ZONE_HEIGHT,
         shape: zoneLayout?.shape || 'rectangle',
+        handleWidth: STEM_HANDLE_SIZE * stemScale,
+        handleHeight: STEM_HANDLE_SIZE * stemScale,
       });
 
       return {
@@ -1452,7 +1478,7 @@ const Customized = ({ addToCart }) => {
         y: constrainedPosition.y,
       };
     }));
-  }, [flowerZoneLayouts, selection.bundleSize, selection.flowers.length, stemZonePlan]);
+  }, [flowerZoneLayouts, selection.bundleSize, selection.flowers.length, stemScale, stemZonePlan]);
 
   const isEmpty = selection.flowers.length === 0 && !selection.wrapper && !selection.ribbon;
 
@@ -1900,6 +1926,23 @@ const Customized = ({ addToCart }) => {
                       onClick={() => handleBundleSelect(size)}
                     >
                       {size} Stems
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="control-group">
+                <label>Flower Size</label>
+                <div className="flower-size-selector-group">
+                  {FLOWER_SIZE_OPTIONS.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={`flower-size-pill ${selectedFlowerSize.id === option.id ? 'active' : ''}`}
+                      onClick={() => handleFlowerSizeSelect(option.id)}
+                      aria-pressed={selectedFlowerSize.id === option.id}
+                    >
+                      {option.label}
                     </button>
                   ))}
                 </div>

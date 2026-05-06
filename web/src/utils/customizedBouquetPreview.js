@@ -1,5 +1,19 @@
 const isNumericId = (value) => Number.isFinite(Number.parseInt(value, 10));
 
+export const CUSTOMIZED_FLOWER_SIZE_LABELS = Object.freeze({
+  small: 'Small',
+  standard: 'Standard',
+  large: 'Large',
+});
+
+export const getCustomizedFlowerSizeLabel = (item = {}) => {
+  const explicitLabel = String(item?.flowerSizeLabel || item?.flower_size_label || '').trim();
+  if (explicitLabel) return explicitLabel;
+
+  const normalizedSize = String(item?.flowerSize || item?.flower_size || 'standard').trim().toLowerCase();
+  return CUSTOMIZED_FLOWER_SIZE_LABELS[normalizedSize] || CUSTOMIZED_FLOWER_SIZE_LABELS.standard;
+};
+
 const createStockLookup = (stockItems = []) => {
   const lookup = new Map();
 

@@ -19,6 +19,23 @@ const normalizeText = (value) => String(value || '').trim().toLowerCase();
 
 const toPercent = (ratio) => `${Math.max(0, Math.min(1, Number(ratio) || 0)) * 100}%`;
 
+const FLOWER_SIZE_MULTIPLIERS = Object.freeze({
+  small: 0.84,
+  standard: 1,
+  large: 1.16,
+});
+
+const getFlowerSizeMultiplier = (item = {}) => {
+  const normalizedSize = normalizeText(item?.flowerSize || item?.flower_size || 'standard');
+  return FLOWER_SIZE_MULTIPLIERS[normalizedSize] || FLOWER_SIZE_MULTIPLIERS.standard;
+};
+
+const scalePercent = (value, multiplier) => {
+  const match = String(value || '').trim().match(/^([\d.]+)%$/);
+  if (!match) return value;
+  return `${Number(match[1]) * multiplier}%`;
+};
+
 const normalizePreviewComposition = (value) => {
   if (!value || typeof value !== 'object') {
     return null;
@@ -178,6 +195,7 @@ const CustomizedBouquetPreview = ({ item, size = 96, zoomable = false }) => {
     || item?.wrapper?.name
     || '';
   const isClassicWrapper = normalizeText(wrapperName).includes('classic wrap');
+  const flowerSizeMultiplier = getFlowerSizeMultiplier(item);
   const savedPreviewComposition = useMemo(
     () => normalizePreviewComposition(item?.previewComposition || item?.preview_composition),
     [item?.previewComposition, item?.preview_composition]
@@ -296,6 +314,7 @@ const CustomizedBouquetPreview = ({ item, size = 96, zoomable = false }) => {
             style={{
               position: 'absolute',
               ...placement,
+              width: scalePercent(placement.width, flowerSizeMultiplier),
               zIndex: 2 + index,
               objectFit: 'contain',
               maxHeight: renderSize === size ? '58%' : '64%',

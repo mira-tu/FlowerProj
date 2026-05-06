@@ -2127,6 +2127,28 @@ const getTransactionQuantity = (value) => {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 };
 
+const CUSTOMIZED_FLOWER_SIZE_LABELS = Object.freeze({
+    small: 'Small',
+    standard: 'Standard',
+    large: 'Large',
+});
+
+const getCustomizedFlowerSizeLabel = (item = {}) => {
+    const explicitLabel = String(item?.flowerSizeLabel || item?.flower_size_label || '').trim();
+    if (explicitLabel) return explicitLabel;
+
+    const normalizedSize = String(item?.flowerSize || item?.flower_size || 'standard').trim().toLowerCase();
+    return CUSTOMIZED_FLOWER_SIZE_LABELS[normalizedSize] || CUSTOMIZED_FLOWER_SIZE_LABELS.standard;
+};
+
+const isCustomizedDescriptionItem = (item = {}) => Boolean(
+    item?.bundleSize
+    || item?.flowerSize
+    || item?.flower_size
+    || item?.previewComposition
+    || item?.preview_composition
+);
+
 const buildRequestItemDescription = (item = {}) => {
     const arrangement = getFirstTransactionText(
         item?.arrangementSummary,
@@ -2137,11 +2159,13 @@ const buildRequestItemDescription = (item = {}) => {
     const occasion = getFirstTransactionText(item?.occasion, item?.otherOccasion);
     const flowers = getFirstTransactionText(item?.flowers, item?.flower, item?.selectedFlowers);
     const bundleSize = getFirstTransactionText(item?.bundleSize ? `${item.bundleSize} stems` : null);
+    const flowerSize = isCustomizedDescriptionItem(item) ? getCustomizedFlowerSizeLabel(item) : null;
 
     return [
         arrangement,
         occasion,
         bundleSize,
+        flowerSize ? `Flower size: ${flowerSize}` : null,
         flowers ? `Flowers: ${flowers}` : null,
     ].filter(Boolean).join(' | ');
 };
@@ -6059,7 +6083,7 @@ export const uploadAPI = {
 };
 
 // Base URL export
-export const BASE_URL = 'https://luzcecstkebntjnfonwv.supabase.co/storage/v1/object/public/product-images/';
+export const BASE_URL = 'https://twrymktdborzvhiulnzg.supabase.co/storage/v1/object/public/product-images/';
 
 // Default export
 export default {

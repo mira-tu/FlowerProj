@@ -10,7 +10,7 @@ import {
     evaluateStandaloneFreeShippingPromo,
     fetchCustomizedStudioPromoSettings,
 } from '../utils/freeShipping';
-import { hydrateCustomizedBouquetItems } from '../utils/customizedBouquetPreview';
+import { getCustomizedFlowerSizeLabel, hydrateCustomizedBouquetItems } from '../utils/customizedBouquetPreview';
 
 const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
     const navigate = useNavigate();
@@ -616,6 +616,7 @@ const Cart = ({ cart, updateCartItem, removeFromCart, user }) => {
                                                         <div className="ms-3 pe-4 flex-grow-1">
                                                             <h6 className="mb-1 fw-bold">Customizer Studio ({item.bundleSize || '?'} stems)</h6>
                                                             <div className="text-muted small">
+                                                                <div><strong>Flower size:</strong> {getCustomizedFlowerSizeLabel(item)}</div>
                                                                 <div><strong>Flowers:</strong> {(item.flowers || []).map(f => f.name).join(', ')}</div>
                                                                 {item.wrapper && <div><strong>Wrapper:</strong> {item.wrapper.name}</div>}
                                                                 {item.ribbon && <div><strong>Ribbon:</strong> {item.ribbon.name}</div>}

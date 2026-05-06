@@ -26,6 +26,20 @@ import {
   getAssignedDestinationsForRider,
 } from '../../../utils/riderAssignmentFilter';
 
+const CUSTOMIZED_FLOWER_SIZE_LABELS = Object.freeze({
+  small: 'Small',
+  standard: 'Standard',
+  large: 'Large',
+});
+
+const getCustomizedFlowerSizeLabel = (item = {}) => {
+  const explicitLabel = String(item?.flowerSizeLabel || item?.flower_size_label || '').trim();
+  if (explicitLabel) return explicitLabel;
+
+  const normalizedSize = String(item?.flowerSize || item?.flower_size || 'standard').trim().toLowerCase();
+  return CUSTOMIZED_FLOWER_SIZE_LABELS[normalizedSize] || CUSTOMIZED_FLOWER_SIZE_LABELS.standard;
+};
+
 const ORDER_DETAIL_SELECT = `
   id,
   created_at,
@@ -426,7 +440,9 @@ const buildRequestPreview = (request, currentUserId = null) => {
           : null;
         const wrapper = item?.wrapper?.name || null;
         const ribbon = item?.ribbon?.name || null;
+        const flowerSize = getCustomizedFlowerSizeLabel(item);
         const summaryParts = [
+          flowerSize ? `Flower size: ${flowerSize}` : null,
           flowers ? `Flowers: ${flowers}` : null,
           wrapper ? `Wrapper: ${wrapper}` : null,
           ribbon ? `Ribbon: ${ribbon}` : null,
@@ -434,6 +450,7 @@ const buildRequestPreview = (request, currentUserId = null) => {
 
         return {
           label: item?.bundleSize ? `${item.bundleSize} stems` : `Customizer Studio ${index + 1}`,
+          flowerSizeLabel: flowerSize,
           secondary: summaryParts.join(' | '),
           imageUri: toAbsoluteImageUrl(item?.image_url),
         };
@@ -476,6 +493,14 @@ const buildRequestPreview = (request, currentUserId = null) => {
         value: pickFirstValue(
           customizedItems.map((item) => item.label).join(', '),
           requestData?.bundleSize
+        ),
+      },
+      {
+        label: 'Flower size',
+        value: pickFirstValue(
+          customizedItems.map((item) => item.flowerSizeLabel).filter(Boolean).join(', '),
+          requestData?.flowerSizeLabel,
+          requestData?.flower_size_label
         ),
       }
     );

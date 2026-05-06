@@ -22,7 +22,7 @@ import {
     fetchCustomizedStudioPromoSettings,
 } from '../utils/freeShipping';
 import { PICKUP_TIME_OPTIONS, getEarliestPickupDate, isPickupDateSelectable } from '../utils/businessHours';
-import { hydrateCustomizedBouquetItems } from '../utils/customizedBouquetPreview';
+import { getCustomizedFlowerSizeLabel, hydrateCustomizedBouquetItems } from '../utils/customizedBouquetPreview';
 import { reserveRequestStockAllocations, reserveRequestStockAllocationsDirect } from '../utils/requestSubmission';
 
 const paymentMethods = [
@@ -841,6 +841,8 @@ const CustomizedCheckout = ({ user }) => {
                                         <div className="checkout-item-name">{item.name}</div>
                                         <div className="checkout-item-qty">Qty: {item.qty || 1}</div>
                                         <div className="small text-muted">
+                                            Flower size: {getCustomizedFlowerSizeLabel(item)}
+                                            <br />
                                             {(item.flowers || []).map((flower) => flower.name).join(', ')}
                                             {item.wrapper?.name ? ` • ${item.wrapper.name}` : ''}
                                             {item.ribbon?.name ? ` • ${item.ribbon.name}` : ''}

@@ -92,6 +92,25 @@ serve(async (req) => {
       });
     }
 
+    const { data: existingProfile, error: profileError } = await adminClient
+      .from("users")
+      .select("id")
+      .eq("email", email)
+      .limit(1)
+      .maybeSingle();
+
+    if (profileError) {
+      throw profileError;
+    }
+
+    if (existingProfile?.id) {
+      return json(200, {
+        available: false,
+        status: "duplicate_email",
+        message: "An account with this email address already exists. Please use a different email address or log in instead.",
+      });
+    }
+
     return json(200, {
       available: true,
       status: "available",
