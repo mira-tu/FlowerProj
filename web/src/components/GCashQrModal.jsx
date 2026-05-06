@@ -5,7 +5,7 @@ const GCashQrModal = ({
     visible,
     onClose,
     amount = null,
-    title = 'GCash QR Code',
+    title = 'Qr Ph code',
 }) => {
     if (!visible) {
         return null;
@@ -47,7 +47,7 @@ const GCashQrModal = ({
                     >
                         <img
                             src={qrCodeImage}
-                            alt="GCash QR"
+                            alt="Qr Ph code"
                             className="img-fluid rounded-3"
                             style={{
                                 width: '100%',
@@ -57,7 +57,7 @@ const GCashQrModal = ({
                         />
                     </div>
                     <div className="alert alert-info small mb-0">
-                        Scan this QR using GCash, then upload your receipt and transaction number in the payment confirmation section.
+                        Scan this Qr Ph code using GCash, then upload your receipt and transaction number in the payment confirmation section.
                         {Number.isFinite(Number(amount)) && Number(amount) > 0 && (
                             <div className="fw-bold mt-2">
                                 Amount to send: ₱{Number(amount).toLocaleString()}

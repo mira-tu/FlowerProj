@@ -166,6 +166,18 @@ const DEFAULT_COLORS = [
   { value: 'Others', label: 'Others', colors: [] },
 ];
 
+const DEFAULT_OCCASIONS = [
+  { value: 'Birthday', label: 'Birthday' },
+  { value: 'Wedding', label: 'Wedding' },
+  { value: 'Anniversary', label: 'Anniversary' },
+  { value: 'Graduation', label: 'Graduation' },
+  { value: 'Corporate Event', label: 'Corporate Event' },
+  { value: "Valentine's Day", label: "Valentine's Day" },
+  { value: "Mother's Day", label: "Mother's Day" },
+  { value: 'Sympathy/Funeral', label: 'Sympathy/Funeral' },
+  { value: 'Other', label: 'Other' },
+];
+
 const trimText = (value) => String(value || '').trim();
 
 const buildSlug = (value, fallbackPrefix) => {
@@ -304,11 +316,24 @@ const normalizeColor = (item, index) => {
   };
 };
 
+const normalizeOccasion = (item, index) => {
+  const label = trimText(item?.label || item?.value || `Occasion ${index + 1}`);
+  const value = trimText(item?.value || label) || `occasion-${index + 1}`;
+
+  return {
+    id: trimText(item?.id) || buildCustomOrderItemId(value, 'occasion'),
+    value,
+    label,
+    isActive: item?.isActive !== false,
+  };
+};
+
 export const DEFAULT_CUSTOM_ORDER_ADMIN_CATALOG = {
   version: 1,
   flowers: DEFAULT_FLOWERS.map(normalizeFlower),
   arrangements: DEFAULT_ARRANGEMENTS.map(normalizeArrangement),
   colors: DEFAULT_COLORS.map(normalizeColor),
+  occasions: DEFAULT_OCCASIONS.map(normalizeOccasion),
 };
 
 export const normalizeCustomOrderAdminCatalog = (catalog) => {
@@ -333,6 +358,12 @@ export const normalizeCustomOrderAdminCatalog = (catalog) => {
       : DEFAULT_CUSTOM_ORDER_ADMIN_CATALOG.colors
     )
       .map(normalizeColor)
+      .filter((item) => item.label),
+    occasions: (Array.isArray(sourceCatalog.occasions) && sourceCatalog.occasions.length
+      ? sourceCatalog.occasions
+      : DEFAULT_CUSTOM_ORDER_ADMIN_CATALOG.occasions
+    )
+      .map(normalizeOccasion)
       .filter((item) => item.label),
   };
 };
@@ -360,6 +391,15 @@ export const createEmptyCustomOrderItem = (type) => {
       value: '',
       label: '',
       img: '',
+      isActive: true,
+    };
+  }
+
+  if (type === 'occasion') {
+    return {
+      id: '',
+      value: '',
+      label: '',
       isActive: true,
     };
   }

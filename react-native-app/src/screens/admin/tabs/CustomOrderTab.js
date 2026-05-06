@@ -72,6 +72,13 @@ const SECTION_CONFIG = [
     emptyText: 'No color palettes yet.',
     addLabel: 'Add Color',
   },
+  {
+    key: 'occasions',
+    type: 'occasion',
+    title: 'Occasion Options',
+    emptyText: 'No occasion options yet.',
+    addLabel: 'Add Occasion',
+  },
 ];
 
 const trimText = (value) => String(value || '').trim();
@@ -200,6 +207,7 @@ const pickImageAsset = async () => {
 const buildDuplicateMessage = (type) => {
   if (type === 'arrangement') return 'Another arrangement already uses that internal value.';
   if (type === 'flower') return 'Another flower already uses that internal value.';
+  if (type === 'occasion') return 'Another occasion already uses that internal value.';
   return 'Another color palette already uses that internal value.';
 };
 
@@ -219,6 +227,7 @@ const CustomOrderTab = () => {
       catalog.arrangements.filter((item) => item.isActive !== false).length
       + catalog.flowers.filter((item) => item.isActive !== false).length
       + catalog.colors.filter((item) => item.isActive !== false).length
+      + (catalog.occasions || []).filter((item) => item.isActive !== false).length
     ),
     [catalog]
   );
@@ -348,13 +357,17 @@ const CustomOrderTab = () => {
       ? 'arrangements'
       : editorType === 'flower'
         ? 'flowers'
-        : 'colors';
+        : editorType === 'occasion'
+          ? 'occasions'
+          : 'colors';
     const sectionItems = catalog[sectionKey] || [];
     const fallbackPrefix = editorType === 'arrangement'
       ? 'arrangement'
       : editorType === 'flower'
         ? 'flower'
-        : 'color';
+        : editorType === 'occasion'
+          ? 'occasion'
+          : 'color';
     const nextValue = trimText(editorForm.value) || buildCustomOrderOptionValue(label, fallbackPrefix);
     const hasDuplicate = sectionItems.some((item) => (
       item.id !== editorForm.id
@@ -382,6 +395,15 @@ const CustomOrderTab = () => {
         value: nextValue,
         label,
         img: editorForm.img || '',
+        isActive: editorForm.isActive !== false,
+      };
+    }
+
+    if (editorType === 'occasion') {
+      return {
+        id: trimText(editorForm.id) || buildCustomOrderItemId(nextValue, 'occasion'),
+        value: nextValue,
+        label,
         isActive: editorForm.isActive !== false,
       };
     }
@@ -457,11 +479,17 @@ const CustomOrderTab = () => {
       colors: Array.isArray(item.colors) ? item.colors.filter(Boolean) : [],
     }));
 
+    const occasions = (workingCatalog.occasions || []).map((item, index) => ({
+      ...item,
+      id: trimText(item.id) || buildCustomOrderItemId(item.value || item.label || `occasion-${index + 1}`, 'occasion'),
+    }));
+
     return normalizeCustomOrderAdminCatalog({
       version: Number(workingCatalog.version || 1) + 1,
       arrangements,
       flowers,
       colors,
+      occasions,
     });
   };
 
@@ -519,7 +547,9 @@ const CustomOrderTab = () => {
       ? 'arrangements'
       : editorType === 'flower'
         ? 'flowers'
-        : 'colors';
+        : editorType === 'occasion'
+          ? 'occasions'
+          : 'colors';
 
     const nextCatalog = getNextCatalogSnapshot(sectionKey, (items) => {
       if (editorMode === 'edit') {
@@ -549,6 +579,10 @@ const CustomOrderTab = () => {
       return item.colors?.length
         ? item.colors.join(', ')
         : 'No swatches set';
+    }
+
+    if (type === 'occasion') {
+      return item.value || '';
     }
 
     return item.value || '';
@@ -587,7 +621,7 @@ const CustomOrderTab = () => {
     <ScrollView style={styles.tabContent} keyboardShouldPersistTaps="handled">
       <Text style={styles.tabTitle}>Custom Order Settings</Text>
       <Text style={styles.customOrderAdminIntro}>
-        Manage the floral specifications shown on the web custom order form. Add, edit, hide, or remove arrangement types, flower options, and color palettes.
+        Manage the floral specifications shown on the web custom order form. Add, edit, hide, or remove arrangement types, flower options, color palettes, and occasions.
       </Text>
 
       <View style={styles.customOrderAdminSummaryCard}>
@@ -602,6 +636,10 @@ const CustomOrderTab = () => {
         <View style={styles.customOrderAdminSummaryBlock}>
           <Text style={styles.customOrderAdminSummaryValue}>{catalog.flowers.length}</Text>
           <Text style={styles.customOrderAdminSummaryLabel}>Flower options</Text>
+        </View>
+        <View style={styles.customOrderAdminSummaryBlock}>
+          <Text style={styles.customOrderAdminSummaryValue}>{(catalog.occasions || []).length}</Text>
+          <Text style={styles.customOrderAdminSummaryLabel}>Occasions</Text>
         </View>
       </View>
 
@@ -836,7 +874,7 @@ const CustomOrderTab = () => {
                     Separate each color with a comma. This can stay blank for the custom "other color" option.
                   </Text>
                 </>
-              ) : (
+              ) : editorType === 'occasion' ? null : (
                 <>
                   <Text style={styles.inputLabel}>Picture</Text>
                   <TouchableOpacity style={styles.imageUploadBox} onPress={handlePickEditorImage}>

@@ -1984,7 +1984,7 @@ const MyOrders = () => {
                                                             ₱{item.amount.toLocaleString()}
                                                         </div>
 
-                                                        {/* GCash QR Code */}
+                                                        {/* Qr Ph code */}
                                                         <div style={{
                                                             background: 'white',
                                                             padding: '16px',
@@ -2011,7 +2011,7 @@ const MyOrders = () => {
                                                             }}>
                                                                 <img
                                                                     src={gcashQrCodeImage}
-                                                                    alt="GCash QR Code"
+                                                                    alt="Qr Ph code"
                                                                     style={{
                                                                         width: '100%',
                                                                         height: '100%',
@@ -2023,7 +2023,7 @@ const MyOrders = () => {
                                                             <div className="mt-3">
                                                                 <small className="text-muted">
                                                                     <i className="fas fa-info-circle me-1"></i>
-                                                                    Scan this QR code with your GCash app
+                                                                    Scan this Qr Ph code with your GCash app
                                                                 </small>
                                                             </div>
                                                         </div>

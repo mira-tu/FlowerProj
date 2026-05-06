@@ -752,6 +752,11 @@ const CustomOrder = ({ user }) => {
         [customOrderCatalog]
     );
 
+    const catalogOccasionOptions = useMemo(
+        () => customOrderCatalog.occasions.filter((item) => item.isActive !== false),
+        [customOrderCatalog]
+    );
+
     const arrangementOptionLookup = useMemo(
         () => new Map(flattenedCatalogArrangementOptions.map((option) => [option.value, option])),
         [flattenedCatalogArrangementOptions]
@@ -1537,15 +1542,11 @@ const CustomOrder = ({ user }) => {
                                             <label className="form-label fw-semibold">Occasion <span className="text-danger">*</span></label>
                                             <select name="occasion" className="form-select bg-light border-0 py-3" value={formData.occasion} onChange={handleChange} required>
                                                 <option value="" disabled>Select Occasion</option>
-                                                <option value="Birthday">Birthday</option>
-                                                <option value="Wedding">Wedding</option>
-                                                <option value="Anniversary">Anniversary</option>
-                                                <option value="Graduation">Graduation</option>
-                                                <option value="Corporate Event">Corporate Event</option>
-                                                <option value="Valentine's Day">Valentine’s Day</option>
-                                                <option value="Mother's Day">Mother’s Day</option>
-                                                <option value="Sympathy/Funeral">Sympathy/Funeral</option>
-                                                <option value="Other">Other</option>
+                                                {catalogOccasionOptions.map((option) => (
+                                                    <option key={option.id || option.value} value={option.value}>
+                                                        {option.label}
+                                                    </option>
+                                                ))}
                                             </select>
                                             {formData.occasion === 'Other' && (
                                                 <input type="text" name="otherOccasion" className="form-control bg-light border-0 py-3 mt-2" placeholder="Please specify the occasion" value={formData.otherOccasion} onChange={handleChange} required />

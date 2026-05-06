@@ -157,6 +157,18 @@ const colorOptions = [
   { value: 'Others', label: 'Others', colors: [] },
 ];
 
+const occasionOptions = [
+  { value: 'Birthday', label: 'Birthday' },
+  { value: 'Wedding', label: 'Wedding' },
+  { value: 'Anniversary', label: 'Anniversary' },
+  { value: 'Graduation', label: 'Graduation' },
+  { value: 'Corporate Event', label: 'Corporate Event' },
+  { value: "Valentine's Day", label: "Valentine's Day" },
+  { value: "Mother's Day", label: "Mother's Day" },
+  { value: 'Sympathy/Funeral', label: 'Sympathy/Funeral' },
+  { value: 'Other', label: 'Other' },
+];
+
 export const CUSTOM_ORDER_CATALOG_KEY = 'custom_order_catalog';
 
 const DEFAULT_ARRANGEMENT_PRICE_RANGES = Object.freeze({
@@ -223,6 +235,12 @@ export const DEFAULT_CUSTOM_ORDER_CATALOG = {
     colors: item.colors,
     isActive: true,
   })),
+  occasions: occasionOptions.map((item, index) => ({
+    id: `occasion-${index + 1}`,
+    value: item.value,
+    label: item.label,
+    isActive: true,
+  })),
 };
 
 export const EMPTY_CUSTOM_ORDER_CATALOG = Object.freeze({
@@ -230,6 +248,7 @@ export const EMPTY_CUSTOM_ORDER_CATALOG = Object.freeze({
   flowers: [],
   arrangements: [],
   colors: [],
+  occasions: [],
 });
 
 const makeCatalogItemId = (value, prefix) => {
@@ -384,6 +403,18 @@ const normalizeColorCatalogItem = (item, index) => {
   };
 };
 
+const normalizeOccasionCatalogItem = (item, index) => {
+  const label = String(item?.label || item?.value || `Occasion ${index + 1}`).trim();
+  const value = String(item?.value || label).trim();
+
+  return {
+    id: String(item?.id || makeCatalogItemId(value || label, 'occasion')),
+    value: value || `occasion-${index + 1}`,
+    label,
+    isActive: item?.isActive !== false,
+  };
+};
+
 export const normalizeCustomOrderCatalog = (catalog) => {
   const sourceCatalog = catalog && typeof catalog === 'object' ? catalog : DEFAULT_CUSTOM_ORDER_CATALOG;
 
@@ -403,6 +434,11 @@ export const normalizeCustomOrderCatalog = (catalog) => {
       ? sourceCatalog.colors
       : DEFAULT_CUSTOM_ORDER_CATALOG.colors)
       .map(normalizeColorCatalogItem)
+      .filter((item) => item.label),
+    occasions: (Array.isArray(sourceCatalog.occasions) && sourceCatalog.occasions.length
+      ? sourceCatalog.occasions
+      : DEFAULT_CUSTOM_ORDER_CATALOG.occasions)
+      .map(normalizeOccasionCatalogItem)
       .filter((item) => item.label),
   };
 };

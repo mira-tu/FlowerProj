@@ -3,7 +3,7 @@ import React from 'react';
 const buildDefaultSteps = (amount) => {
     const numericAmount = Number(amount);
     return [
-        'Open your GCash app and scan the QR code.',
+        'Open your GCash app and scan the Qr Ph code.',
         Number.isFinite(numericAmount) && numericAmount > 0
             ? `Send exactly ₱${numericAmount.toLocaleString()} to Jocerry's Flower Shop.`
             : 'Send the amount shown in your order or quote summary.',
@@ -58,7 +58,7 @@ const GCashConfirmationSection = ({
                         disabled={disabled}
                     >
                         <i className="fas fa-qrcode me-2"></i>
-                        View QR Code
+                        View Qr Ph code
                     </button>
                 )}
             </div>
