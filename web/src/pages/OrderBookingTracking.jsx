@@ -46,6 +46,11 @@ import {
     getCancellationRefundContext,
     hasActiveRefundRequest,
 } from '../utils/customerRefunds';
+import {
+    DELIVERY_FAILED_ATTEMPT_STATUS,
+    getDeliveryFailureReason,
+    withDeliveryFailedAttemptStep,
+} from '../utils/deliveryFailure';
 import '../styles/Shop.css';
 
 // Timeline steps for Delivery Requests
@@ -366,7 +371,7 @@ const OrderBookingTracking = () => {
         }
 
         let riderDetails = null;
-        if (foundRequest.assigned_rider && ['processing', 'ready_for_delivery', 'out_for_delivery', 'completed', 'claimed'].includes(foundRequest.status)) {
+        if (foundRequest.assigned_rider && ['processing', 'ready_for_delivery', 'out_for_delivery', DELIVERY_FAILED_ATTEMPT_STATUS, 'completed', 'claimed'].includes(foundRequest.status)) {
             const { data: rider, error: riderError } = await supabase
                 .from('users')
                 .select('name, phone')
@@ -456,7 +461,9 @@ const OrderBookingTracking = () => {
             setRefundRequest(null);
         }
 
-        const steps = transformedRequest.deliveryMethod === 'pickup' ? requestPickupSteps : requestDeliverySteps;
+        const steps = transformedRequest.deliveryMethod === 'pickup'
+            ? requestPickupSteps
+            : withDeliveryFailedAttemptStep(requestDeliverySteps, transformedRequest);
         const finalRequestStatuses = ['completed', 'claimed', 'declined', 'cancelled'];
 
         if (finalRequestStatuses.includes(transformedRequest.status)) {
@@ -473,6 +480,7 @@ const OrderBookingTracking = () => {
                 processing: 'processing',
                 ready_for_delivery: 'ready_for_delivery',
                 out_for_delivery: 'out_for_delivery',
+                [DELIVERY_FAILED_ATTEMPT_STATUS]: DELIVERY_FAILED_ATTEMPT_STATUS,
                 ready_for_pickup: 'ready_for_pickup',
             };
 
@@ -637,7 +645,9 @@ const OrderBookingTracking = () => {
 
     const getTrackingSteps = () => {
         if (!request) return requestDeliverySteps;
-        return request.deliveryMethod === 'pickup' ? requestPickupSteps : requestDeliverySteps;
+        return request.deliveryMethod === 'pickup'
+            ? requestPickupSteps
+            : withDeliveryFailedAttemptStep(requestDeliverySteps, request);
     };
 
     const getTimelineDate = (stepId) => {
@@ -1208,6 +1218,8 @@ const OrderBookingTracking = () => {
     const isPickup = request?.deliveryMethod === 'pickup';
     const isFinalStep = currentStep >= trackingSteps.length && currentStep !== -1;
     const isDeclinedOrCancelled = currentStep === -1;
+    const deliveryFailureReason = getDeliveryFailureReason(request || {});
+    const isFailedDeliveryAttempt = request?.status === DELIVERY_FAILED_ATTEMPT_STATUS;
     const bookingOverview = useMemo(
         () => buildBookingOverview(request?.requestData || {}),
         [request]
@@ -1323,7 +1335,11 @@ const OrderBookingTracking = () => {
                                 </button>
                             )}
 
-                            {isDeclinedOrCancelled ? (
+                            {isFailedDeliveryAttempt ? (
+                                <div className="current-status-badge" style={{ backgroundColor: '#f97316', color: '#fff' }}>
+                                    Failed Delivery Attempt
+                                </div>
+                            ) : isDeclinedOrCancelled ? (
                                 <div className="current-status-badge" style={{ backgroundColor: '#f44336', color: '#fff' }}>
                                     Request {request.status === 'declined' ? 'Declined' : 'Cancelled'}
                                 </div>
@@ -1335,10 +1351,12 @@ const OrderBookingTracking = () => {
                                 </div>
                             )}
                             <div className="expected-delivery">
-                                {!isFinalStep && !isDeclinedOrCancelled && (
-                                    request.status === 'quoted' ? `Please review quote by: ${getExpectedResolutionDate()}` :
-                                        `Expected resolution by: ${getExpectedResolutionDate()}`
-                                )}
+                                {isFailedDeliveryAttempt
+                                    ? 'Delivery was attempted but could not be completed. Please wait for our team to contact you or retry delivery.'
+                                    : (!isFinalStep && !isDeclinedOrCancelled && (
+                                        request.status === 'quoted' ? `Please review quote by: ${getExpectedResolutionDate()}` :
+                                            `Expected resolution by: ${getExpectedResolutionDate()}`
+                                    ))}
 
                                 {isDeclinedOrCancelled && (cancellationReason
                                     ? `${request.status === 'declined' ? 'Declined' : 'Cancelled'}: ${cancellationReason}`
@@ -1411,7 +1429,10 @@ const OrderBookingTracking = () => {
                                                 step.id === currentStep ? 'current' : ''
                                                 }`}
                                         >
-                                            <div className="timeline-marker">
+                                            <div
+                                                className="timeline-marker"
+                                                style={step.status === DELIVERY_FAILED_ATTEMPT_STATUS ? { backgroundColor: '#f97316', borderColor: '#f97316', color: '#fff' } : undefined}
+                                            >
                                                 <i className={`fas ${step.icon}`}></i>
                                             </div>
                                             <div className="timeline-content">
@@ -1434,12 +1455,21 @@ const OrderBookingTracking = () => {
                                                             </div>
                                                         </div>
                                                     )}
-                                                    {step.status === 'out_for_delivery' && ['out_for_delivery', 'delivered', 'completed', 'claimed'].includes(request.status) && request.rider && (
+                                                    {step.status === 'out_for_delivery' && ['out_for_delivery', DELIVERY_FAILED_ATTEMPT_STATUS, 'delivered', 'completed', 'claimed'].includes(request.status) && request.rider && (
                                                         <>
                                                             <br />
                                                             <span className="fw-bold">Rider:</span> {request.rider.name}
                                                             {request.rider.phone && ` (${request.rider.phone})`}
                                                         </>
+                                                    )}
+                                                    {step.status === DELIVERY_FAILED_ATTEMPT_STATUS && deliveryFailureReason && (
+                                                        <div className="mt-2 p-2 rounded shadow-sm border-start border-4 border-warning" style={{ backgroundColor: '#fff7ed', fontSize: '0.85rem' }}>
+                                                            <div className="fw-bold" style={{ color: '#c2410c' }}>
+                                                                <i className="fas fa-triangle-exclamation me-2"></i>
+                                                                Reason
+                                                            </div>
+                                                            <div>{deliveryFailureReason}</div>
+                                                        </div>
                                                     )}
                                                 </div>
                                                 <div className="timeline-date">{getTimelineDate(step.id)}</div>

@@ -49,6 +49,7 @@ const formatMessageTimestamp = (dateString) => {
 const getStatusLabel = (status) => {
   if (!status) return '';
   if (status.toLowerCase() === 'booking') return 'Custom Order';
+  if (status.toLowerCase() === 'delivery_failed_attempt') return 'Failed Delivery Attempt';
   return status.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
 };
 
@@ -58,6 +59,7 @@ const getStatusColor = (status) => {
     case 'claimed': return '#4CAF50';
     case 'ready_for_pick_up': return '#6366F1';
     case 'out_for_delivery': return '#8B5CF6';
+    case 'delivery_failed_attempt': return '#EF4444';
     case 'processing': return '#2196F3';
     case 'accepted': return '#0891B2';
     case 'cancelled': return '#f44336';

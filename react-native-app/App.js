@@ -89,6 +89,15 @@ const parseDeepLinkTokens = (url) => {
 
 const isResetPasswordUrl = (url = '') => url.includes('reset-password');
 
+const withTimeout = (promise, timeoutMs, fallbackValue) => (
+  Promise.race([
+    promise,
+    new Promise((resolve) => {
+      setTimeout(() => resolve(fallbackValue), timeoutMs);
+    }),
+  ])
+);
+
 function App() {
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [initialRouteName, setInitialRouteName] = useState('Login');
@@ -126,13 +135,17 @@ function App() {
 
     const bootstrapApp = async () => {
       try {
-        const initialUrl = await Linking.getInitialURL();
+        const initialUrl = await withTimeout(Linking.getInitialURL(), 3000, null);
 
         if (initialUrl) {
-          const handledResetLink = await handleDeepLink({ url: initialUrl });
+          const handledResetLink = await withTimeout(handleDeepLink({ url: initialUrl }), 5000, false);
 
           if (isResetPasswordUrl(initialUrl)) {
-            const { data: { session } } = await supabase.auth.getSession();
+            const { data: { session } } = await withTimeout(
+              supabase.auth.getSession(),
+              5000,
+              { data: { session: null }, error: new Error('Session lookup timed out') }
+            );
             if (isActive) {
               setInitialRouteName(handledResetLink && session ? 'ResetPassword' : 'Login');
             }
@@ -140,7 +153,7 @@ function App() {
           }
         }
 
-        const response = await authAPI.getMe();
+        const response = await withTimeout(authAPI.getMe(), 6000, { data: null });
         if (isActive) {
           setInitialRouteName(response?.data ? 'AdminDashboard' : 'Login');
         }

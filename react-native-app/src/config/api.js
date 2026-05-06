@@ -906,6 +906,14 @@ const withStatusTimestamp = (existingValue, status) => ({
     [status]: new Date().toISOString(),
 });
 
+const DELIVERY_FAILED_ATTEMPT_STATUS = 'delivery_failed_attempt';
+
+const getDeliveryFailureReason = (options = {}) => (
+    typeof options?.deliveryFailureReason === 'string'
+        ? options.deliveryFailureReason.trim()
+        : ''
+);
+
 const syncRequestStockAllocationState = async (requestId, requestData, mode = 'release') => {
     const normalizedMode = String(mode || '').trim().toLowerCase();
     if (!requestId || !['reserve', 'release'].includes(normalizedMode)) {
@@ -946,7 +954,7 @@ const updateOrderStatusDirect = async (id, status, options = {}) => {
     let fetchError = null;
 
     try {
-        current = await getOrderById(id, 'id, status_timestamps, cancellation_reason, notes, assigned_rider');
+        current = await getOrderById(id, 'id, order_number, user_id, status_timestamps, cancellation_reason, notes, assigned_rider');
     } catch (error) {
         fetchError = error;
     }
@@ -965,6 +973,7 @@ const updateOrderStatusDirect = async (id, status, options = {}) => {
     const cancellationReason = typeof options?.cancellationReason === 'string'
         ? options.cancellationReason.trim()
         : '';
+    const deliveryFailureReason = getDeliveryFailureReason(options);
 
     if (String(status || '').trim().toLowerCase() === 'out_for_delivery') {
         const parsedNotes = parseMultiDeliveryNotes(current?.notes);
@@ -986,6 +995,13 @@ const updateOrderStatusDirect = async (id, status, options = {}) => {
         nextStatusTimestamps.cancel_reason = cancellationReason;
     }
 
+    if (status === DELIVERY_FAILED_ATTEMPT_STATUS) {
+        if (!deliveryFailureReason) {
+            throw new Error('A failed delivery attempt reason is required.');
+        }
+        nextStatusTimestamps.delivery_failed_attempt_reason = deliveryFailureReason;
+    }
+
     const data = await updateOrderRecordAndReload(
         id,
         {
@@ -1004,6 +1020,20 @@ const updateOrderStatusDirect = async (id, status, options = {}) => {
                 && order?.cancellation_reason === normalizedReason;
         }
     );
+
+    if (status === DELIVERY_FAILED_ATTEMPT_STATUS && current?.user_id) {
+        try {
+            await insertNotificationRecord({
+                user_id: current.user_id,
+                title: 'Delivery attempt failed',
+                message: `Delivery attempt for order #${current.order_number || id} failed. Reason: ${deliveryFailureReason}`,
+                type: 'order_update',
+                link: '/profile',
+            });
+        } catch (error) {
+            console.error('Failed to send failed delivery notification:', error);
+        }
+    }
 
     return { success: true, order: data };
 };
@@ -2912,6 +2942,7 @@ const updateRequestStatusDirect = async (id, status, options = {}) => {
     const cancellationReason = typeof options?.cancellationReason === 'string'
         ? options.cancellationReason.trim()
         : '';
+    const deliveryFailureReason = getDeliveryFailureReason(options);
 
     if (String(status || '').trim().toLowerCase() === 'out_for_delivery') {
         const currentData = parseJsonObject(current?.data);
@@ -2929,6 +2960,13 @@ const updateRequestStatusDirect = async (id, status, options = {}) => {
 
     if (status === 'cancelled' || status === 'declined') {
         updatePayload.cancellation_reason = cancellationReason || current?.cancellation_reason || null;
+    }
+
+    if (status === DELIVERY_FAILED_ATTEMPT_STATUS) {
+        if (!deliveryFailureReason) {
+            throw new Error('A failed delivery attempt reason is required.');
+        }
+        updatePayload.status_timestamps.delivery_failed_attempt_reason = deliveryFailureReason;
     }
 
     if (options?.dataPatch && typeof options.dataPatch === 'object') {
@@ -2983,6 +3021,20 @@ const updateRequestStatusDirect = async (id, status, options = {}) => {
 
         if (notificationError) {
             console.error('Failed to send request status notification:', notificationError);
+        }
+    }
+
+    if (status === DELIVERY_FAILED_ATTEMPT_STATUS && requestRecord?.user_id) {
+        try {
+            await insertNotificationRecord({
+                user_id: requestRecord.user_id,
+                title: 'Delivery attempt failed',
+                message: `Delivery attempt for request #${requestRecord.request_number || current?.request_number || id} failed. Reason: ${deliveryFailureReason}`,
+                type: 'request_update',
+                link: '/profile',
+            });
+        } catch (error) {
+            console.error('Failed to send failed request delivery notification:', error);
         }
     }
 

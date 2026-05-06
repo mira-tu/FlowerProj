@@ -92,6 +92,8 @@ const getBouquetSizeDisplay = (stemCount) => {
   return `${sizeInfo.label} (${count} stems)`;
 };
 
+const DELIVERY_FAILED_ATTEMPT_STATUS = 'delivery_failed_attempt';
+
 const formatTentativeRange = (min, max, note = '') => {
   const safeMin = parseCurrencyNumber(min);
   const safeMaxCandidate = parseCurrencyNumber(max);
@@ -2232,7 +2234,7 @@ const RequestSummaryCard = React.memo(({
           </View>
         ) : null}
 
-        {item.type === 'booking' && !['completed', 'cancelled', 'declined', 'ready_for_delivery', 'out_for_delivery', 'ready_for_pickup', 'ready_for_pick_up', 'claimed'].includes(item.status) ? (
+        {item.type === 'booking' && !['completed', 'cancelled', 'declined', 'ready_for_delivery', 'out_for_delivery', DELIVERY_FAILED_ATTEMPT_STATUS, 'ready_for_pickup', 'ready_for_pick_up', 'claimed'].includes(item.status) ? (
           <>
             {hasActiveBookingItems ? (
               <TouchableOpacity
@@ -2853,6 +2855,8 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   const [requestStatusModalVisible, setRequestStatusModalVisible] = useState(false);
   const [requestToUpdate, setRequestToUpdate] = useState(null);
   const [selectedRequestStatus, setSelectedRequestStatus] = useState(null);
+  const [deliveryFailureReason, setDeliveryFailureReason] = useState('');
+  const [deliveryFailureModalVisible, setDeliveryFailureModalVisible] = useState(false);
   const [quoteModalVisible, setQuoteModalVisible] = useState(false);
   const [requestToQuote, setRequestToQuote] = useState(null);
   const [quoteAmount, setQuoteAmount] = useState('');
@@ -3277,7 +3281,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
           case 'Pending': return status === 'pending';
           case 'Quoted / Acc': return status === 'quoted' || status === 'accepted';
           case 'Processing': return status === 'processing' || status === 'partial';
-          case 'Delivery/Pickup': return status === 'ready_for_delivery' || status === 'out_for_delivery' || status === 'ready_for_pickup' || status === 'ready_for_pick_up';
+          case 'Delivery/Pickup': return status === 'ready_for_delivery' || status === 'out_for_delivery' || status === DELIVERY_FAILED_ATTEMPT_STATUS || status === 'ready_for_pickup' || status === 'ready_for_pick_up';
           case 'Completed': return status === 'completed' || status === 'claimed';
           case 'Cancelled': return status === 'cancelled' || status === 'declined';
           default: return true;
@@ -3407,6 +3411,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     { id: 'processing', label: 'Processing', description: 'Being prepared' },
     { id: 'ready_for_delivery', label: 'Ready for Delivery', description: 'Packed and queued' },
     { id: 'out_for_delivery', label: 'Out for Delivery', description: 'On the way' },
+    { id: DELIVERY_FAILED_ATTEMPT_STATUS, label: 'Failed Delivery Attempt', description: 'Attempt failed; ready to retry' },
     { id: 'completed', label: 'Completed', description: 'Delivered successfully' }
   ];
 
@@ -3825,6 +3830,8 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
         return 'processing';
       case 'processing':
         return deliveryMethod === 'pickup' ? 'ready_for_pickup' : 'out_for_delivery';
+      case DELIVERY_FAILED_ATTEMPT_STATUS:
+        return 'out_for_delivery';
       case 'out_for_delivery':
       case 'ready_for_pickup':
         return 'completed';
@@ -3913,6 +3920,8 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     setRequestStatusModalVisible(false);
     setRequestToUpdate(null);
     setSelectedRequestStatus(null);
+    setDeliveryFailureReason('');
+    setDeliveryFailureModalVisible(false);
   };
 
   const closeDeliveryStopModal = React.useCallback(() => {
@@ -4180,6 +4189,12 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
       return;
     }
 
+    if (selectedRequestStatus === DELIVERY_FAILED_ATTEMPT_STATUS && !deliveryFailureReason.trim()) {
+      setDeliveryFailureModalVisible(true);
+      Alert.alert('Reason Required', 'Please enter why the delivery attempt failed.');
+      return;
+    }
+
     const actionKey = getRequestActionKey('status', requestId);
     actionLockRef.current = actionKey;
     setActiveActionKey(actionKey);
@@ -4208,7 +4223,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
         }
       }
 
-      const isMovingToDelivery = ['ready_for_delivery', 'out_for_delivery', 'ready_for_pickup', 'ready_for_pick_up', 'completed'].includes(selectedRequestStatus);
+      const isMovingToDelivery = ['ready_for_delivery', 'out_for_delivery', DELIVERY_FAILED_ATTEMPT_STATUS, 'ready_for_pickup', 'ready_for_pick_up', 'completed'].includes(selectedRequestStatus);
       const isNotPaid = requestToUpdate.payment_status !== 'paid';
       const isNotCOD = requestToUpdate.payment_method?.toLowerCase() !== 'cod';
 
@@ -4222,7 +4237,10 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
         return;
       }
 
-      const statusResponse = await adminAPI.updateRequestStatus(requestId, selectedRequestStatus);
+      const statusOptions = selectedRequestStatus === DELIVERY_FAILED_ATTEMPT_STATUS
+        ? { deliveryFailureReason: deliveryFailureReason.trim() }
+        : {};
+      const statusResponse = await adminAPI.updateRequestStatus(requestId, selectedRequestStatus, statusOptions);
       let mergedRequest = statusResponse?.data?.request || {
         ...requestToUpdate,
         status: selectedRequestStatus,
@@ -5378,7 +5396,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
             </View>
           )}
 
-          {item.type === 'booking' && !['completed', 'cancelled', 'declined', 'ready_for_delivery', 'out_for_delivery', 'ready_for_pickup', 'ready_for_pick_up', 'claimed'].includes(item.status) && (
+          {item.type === 'booking' && !['completed', 'cancelled', 'declined', 'ready_for_delivery', 'out_for_delivery', DELIVERY_FAILED_ATTEMPT_STATUS, 'ready_for_pickup', 'ready_for_pick_up', 'claimed'].includes(item.status) && (
             <>
               {hasActiveBookingItems ? (
                 <TouchableOpacity
@@ -6194,6 +6212,26 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                       );
                     })}
                     <View style={styles.timelineActions}>
+                      {requestToUpdate?.delivery_method === 'delivery' && requestToUpdate?.status === 'out_for_delivery' ? (
+                        <TouchableOpacity
+                          onPress={() => {
+                            setSelectedRequestStatus(DELIVERY_FAILED_ATTEMPT_STATUS);
+                            setDeliveryFailureModalVisible(true);
+                          }}
+                          style={[
+                            styles.timelineCancelButton,
+                            selectedRequestStatus === DELIVERY_FAILED_ATTEMPT_STATUS && { backgroundColor: '#F97316', borderColor: '#F97316' }
+                          ]}
+                        >
+                          <Ionicons name="warning-outline" size={16} color={selectedRequestStatus === DELIVERY_FAILED_ATTEMPT_STATUS ? '#fff' : '#F97316'} />
+                          <Text style={[
+                            styles.timelineCancelButtonText,
+                            selectedRequestStatus === DELIVERY_FAILED_ATTEMPT_STATUS ? { color: '#fff' } : { color: '#F97316' }
+                          ]}>
+                            Failed Attempt
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
                       <TouchableOpacity
                         onPress={() => setSelectedRequestStatus('cancelled')}
                         style={[
@@ -6230,6 +6268,45 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
           </View>
         </View>
       </Modal >
+
+      <Modal visible={deliveryFailureModalVisible} animationType="fade" transparent onRequestClose={() => setDeliveryFailureModalVisible(false)}>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Failed Delivery Attempt</Text>
+            <Text style={{ marginBottom: 10, color: '#6B7280' }}>
+              Enter the reason customers should see on their delivery timeline.
+            </Text>
+            <TextInput
+              style={[styles.input, { minHeight: 96, textAlignVertical: 'top' }]}
+              placeholder="Example: Customer unavailable or phone could not be reached"
+              multiline
+              value={deliveryFailureReason}
+              onChangeText={setDeliveryFailureReason}
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => setDeliveryFailureModalVisible(false)}
+              >
+                <Text style={styles.buttonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.saveButton]}
+                onPress={() => {
+                  if (!deliveryFailureReason.trim()) {
+                    Alert.alert('Reason Required', 'Please enter why the delivery attempt failed.');
+                    return;
+                  }
+                  setSelectedRequestStatus(DELIVERY_FAILED_ATTEMPT_STATUS);
+                  setDeliveryFailureModalVisible(false);
+                }}
+              >
+                <Text style={styles.buttonText}>Save Reason</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Provide Quote Modal */}
       < Modal visible={quoteModalVisible} animationType="fade" transparent onRequestClose={closeQuoteModal}>

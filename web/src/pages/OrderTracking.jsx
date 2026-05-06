@@ -33,6 +33,11 @@ import {
 } from '../utils/gcashPayments';
 import { summarizeCancellationItems } from '../utils/orderCancellation';
 import {
+    DELIVERY_FAILED_ATTEMPT_STATUS,
+    getDeliveryFailureReason,
+    withDeliveryFailedAttemptStep,
+} from '../utils/deliveryFailure';
+import {
     buildRefundReasonFromCancelledEntity,
     canRequestRefundAfterCancellation,
     getCancellationRefundContext,
@@ -96,7 +101,9 @@ const OrderTracking = ({ user }) => {
                     });
                 }
             }
-            return baseSteps;
+            return orderObj.deliveryMethod === 'pickup'
+                ? baseSteps
+                : withDeliveryFailedAttemptStep(baseSteps, orderObj);
         };
 
         const fetchOrder = async () => {
@@ -122,7 +129,7 @@ const OrderTracking = ({ user }) => {
 
             // Fetch rider details if assigned
             let riderDetails = null;
-            if (foundOrder.assigned_rider && ['processing', 'ready_for_delivery', 'out_for_delivery', 'completed', 'claimed'].includes(foundOrder.status)) {
+            if (foundOrder.assigned_rider && ['processing', 'ready_for_delivery', 'out_for_delivery', DELIVERY_FAILED_ATTEMPT_STATUS, 'completed', 'claimed'].includes(foundOrder.status)) {
                 const { data: rider, error: riderError } = await supabase
                     .from('users')
                     .select('name, phone')
@@ -217,6 +224,8 @@ const OrderTracking = ({ user }) => {
                     }
                 } else if (status === 'to_receive') {
                     currentStepKey = 'out_for_delivery';
+                } else if (status === DELIVERY_FAILED_ATTEMPT_STATUS) {
+                    currentStepKey = DELIVERY_FAILED_ATTEMPT_STATUS;
                 } else {
                     currentStepKey = status;
                 }
@@ -411,7 +420,9 @@ const OrderTracking = ({ user }) => {
                 });
             }
         }
-        return baseSteps;
+        return order.deliveryMethod === 'pickup'
+            ? baseSteps
+            : withDeliveryFailedAttemptStep(baseSteps, order);
     };
 
     const getTimelineDate = (stepId) => {
@@ -642,6 +653,8 @@ const OrderTracking = ({ user }) => {
         refundRequest,
     });
     const usesStopConfirmationFlow = hasStopConfirmationFlow(order?.multiDeliveryDestinations || []);
+    const deliveryFailureReason = getDeliveryFailureReason(order || {});
+    const isFailedDeliveryAttempt = order?.status === DELIVERY_FAILED_ATTEMPT_STATUS;
 
     if (loading) {
         return (
@@ -731,7 +744,11 @@ const OrderTracking = ({ user }) => {
                                 </button>
                             )}
 
-                            {isDeclinedOrCancelled ? (
+                            {isFailedDeliveryAttempt ? (
+                                <div className="current-status-badge" style={{ backgroundColor: '#f97316', color: '#fff' }}>
+                                    Failed Delivery Attempt
+                                </div>
+                            ) : isDeclinedOrCancelled ? (
                                 <div className="current-status-badge" style={{ backgroundColor: '#f44336', color: '#fff' }}>
                                     Order {order.status === 'declined' ? 'Declined' : 'Cancelled'}
                                 </div>
@@ -741,7 +758,9 @@ const OrderTracking = ({ user }) => {
                                 </div>
                             )}
                             <div className="expected-delivery">
-                                {!isFinalStep && !isDeclinedOrCancelled && `Expected delivery by: ${getExpectedDeliveryDate()}`}
+                                {isFailedDeliveryAttempt
+                                    ? 'Delivery was attempted but could not be completed. Please wait for our team to contact you or retry delivery.'
+                                    : (!isFinalStep && !isDeclinedOrCancelled && `Expected delivery by: ${getExpectedDeliveryDate()}`)}
 
                                 {isDeclinedOrCancelled && (
                                     cancellationReason
@@ -817,7 +836,10 @@ const OrderTracking = ({ user }) => {
                                             step.id === currentStep ? 'current' : ''
                                             }`}
                                     >
-                                        <div className="timeline-marker">
+                                        <div
+                                            className="timeline-marker"
+                                            style={step.key === DELIVERY_FAILED_ATTEMPT_STATUS ? { backgroundColor: '#f97316', borderColor: '#f97316', color: '#fff' } : undefined}
+                                        >
                                             <i className={`fas ${step.icon}`}></i>
                                         </div>
                                         <div className="timeline-content">
@@ -840,8 +862,17 @@ const OrderTracking = ({ user }) => {
                                                         </div>
                                                     </div>
                                                 )}
-                                                {step.key === 'out_for_delivery' && ['out_for_delivery', 'delivered', 'completed', 'claimed'].includes(order.status) && order.rider && (
+                                                {step.key === 'out_for_delivery' && ['out_for_delivery', DELIVERY_FAILED_ATTEMPT_STATUS, 'delivered', 'completed', 'claimed'].includes(order.status) && order.rider && (
                                                     <><br /><span className="fw-bold">Rider:</span> {order.rider.name} {order.rider.phone && `(${order.rider.phone})`}</>
+                                                )}
+                                                {step.key === DELIVERY_FAILED_ATTEMPT_STATUS && deliveryFailureReason && (
+                                                    <div className="mt-2 p-2 rounded shadow-sm border-start border-4 border-warning" style={{ backgroundColor: '#fff7ed', fontSize: '0.85rem' }}>
+                                                        <div className="fw-bold" style={{ color: '#c2410c' }}>
+                                                            <i className="fas fa-triangle-exclamation me-2"></i>
+                                                            Reason
+                                                        </div>
+                                                        <div>{deliveryFailureReason}</div>
+                                                    </div>
                                                 )}
                                             </div>
                                             <div className="timeline-date">{getTimelineDate(step.id)}</div>

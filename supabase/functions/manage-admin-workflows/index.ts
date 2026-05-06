@@ -186,6 +186,14 @@ const withStatusTimestamp = (value: unknown, status: string) => {
   };
 };
 
+const DELIVERY_FAILED_ATTEMPT_STATUS = "delivery_failed_attempt";
+
+const getDeliveryFailureReason = (options: Record<string, unknown>) => (
+  typeof options?.deliveryFailureReason === "string"
+    ? options.deliveryFailureReason.trim()
+    : ""
+);
+
 const syncRequestStockAllocationState = async (
   adminClient: ReturnType<typeof createClient>,
   requestId: unknown,
@@ -1210,13 +1218,14 @@ serve(async (req) => {
         const cancellationReason = typeof options?.cancellationReason === "string"
           ? options.cancellationReason.trim()
           : "";
+        const deliveryFailureReason = getDeliveryFailureReason(options);
         if (!id || !status) {
           return json(400, { error: "Order id and status are required." });
         }
 
         const { data: currentOrder, error: fetchError } = await adminClient
           .from("orders")
-          .select("status_timestamps, cancellation_reason, notes, assigned_rider")
+          .select("status_timestamps, cancellation_reason, notes, assigned_rider, user_id, order_number")
           .eq("id", id)
           .single();
 
@@ -1243,6 +1252,13 @@ serve(async (req) => {
           nextStatusTimestamps.cancel_reason = cancellationReason;
         }
 
+        if (status === DELIVERY_FAILED_ATTEMPT_STATUS) {
+          if (!deliveryFailureReason) {
+            return json(400, { error: "A failed delivery attempt reason is required." });
+          }
+          nextStatusTimestamps.delivery_failed_attempt_reason = deliveryFailureReason;
+        }
+
         const { data: order, error: updateError } = await adminClient
           .from("orders")
           .update({
@@ -1258,6 +1274,16 @@ serve(async (req) => {
 
         if (updateError) {
           throw updateError;
+        }
+
+        if (status === DELIVERY_FAILED_ATTEMPT_STATUS && currentOrder?.user_id) {
+          await insertNotificationSafely(adminClient, {
+            user_id: currentOrder.user_id,
+            title: "Delivery attempt failed",
+            message: `Delivery attempt for order #${currentOrder.order_number || id} failed. Reason: ${deliveryFailureReason}`,
+            type: "order_update",
+            link: "/profile",
+          });
         }
 
         return json(200, { success: true, order });
@@ -1636,6 +1662,7 @@ serve(async (req) => {
         const cancellationReason = typeof options?.cancellationReason === "string"
           ? options.cancellationReason.trim()
           : "";
+        const deliveryFailureReason = getDeliveryFailureReason(options);
         if (!id || !status) {
           return json(400, { error: "Request id and status are required." });
         }
@@ -1667,6 +1694,13 @@ serve(async (req) => {
           status,
           status_timestamps: withStatusTimestamp(currentRequest?.status_timestamps, status),
         };
+
+        if (status === DELIVERY_FAILED_ATTEMPT_STATUS) {
+          if (!deliveryFailureReason) {
+            return json(400, { error: "A failed delivery attempt reason is required." });
+          }
+          (updatePayload.status_timestamps as Record<string, unknown>).delivery_failed_attempt_reason = deliveryFailureReason;
+        }
 
         if (status === "cancelled" || status === "declined") {
           updatePayload.cancellation_reason = cancellationReason || currentRequest?.cancellation_reason || null;
@@ -1734,6 +1768,16 @@ serve(async (req) => {
           if (notificationError) {
             console.error("Failed to send request status notification:", notificationError);
           }
+        }
+
+        if (status === DELIVERY_FAILED_ATTEMPT_STATUS && requestRecord?.user_id) {
+          await insertNotificationSafely(adminClient, {
+            user_id: requestRecord.user_id,
+            title: "Delivery attempt failed",
+            message: `Delivery attempt for request #${requestRecord.request_number || currentRequest?.request_number || id} failed. Reason: ${deliveryFailureReason}`,
+            type: "request_update",
+            link: "/profile",
+          });
         }
 
         return json(200, { success: true, request: requestRecord });

@@ -43,6 +43,8 @@ const getNormalizedPaymentMethod = (paymentMethod) => String(paymentMethod || ''
 
 const getOrderActionKey = (action, orderId) => `${action}:${orderId || 'unknown'}`;
 
+const DELIVERY_FAILED_ATTEMPT_STATUS = 'delivery_failed_attempt';
+
 const toAbsoluteImageUrl = (value) => {
   const text = String(value || '').trim();
   if (!text) return null;
@@ -154,6 +156,8 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
   const [statusModalVisible, setStatusModalVisible] = useState(false);
   const [orderToUpdate, setOrderToUpdate] = useState(null);
   const [selectedStatus, setSelectedStatus] = useState(null);
+  const [deliveryFailureReason, setDeliveryFailureReason] = useState('');
+  const [deliveryFailureModalVisible, setDeliveryFailureModalVisible] = useState(false);
   const [receiptModalVisible, setReceiptModalVisible] = useState(false);
   const [selectedReceiptUrl, setSelectedReceiptUrl] = useState(null);
   const [declineModalVisible, setDeclineModalVisible] = useState(false);
@@ -466,7 +470,7 @@ const OrdersTab = ({ currentUser, setActiveTab, handleSelectCustomerForMessage, 
         switch (statusFilter) {
           case 'Pending': return status === 'pending';
           case 'Processing': return status === 'processing' || status === 'accepted' || status === 'partial';
-          case 'To Deliver': return status === 'ready_for_delivery' || status === 'out_for_delivery';
+          case 'To Deliver': return status === 'ready_for_delivery' || status === 'out_for_delivery' || status === DELIVERY_FAILED_ATTEMPT_STATUS;
           case 'To Pick Up': return status === 'ready_for_pickup' || status === 'ready_for_pick_up';
           case 'Completed': return status === 'completed' || status === 'claimed';
           case 'Cancelled': return status === 'cancelled';
@@ -549,6 +553,7 @@ const deliveryStepperStatuses = [
     { id: 'processing', label: 'Processing', description: 'Being prepared' },
     { id: 'ready_for_delivery', label: 'Ready for Delivery', description: 'Packed and queued' },
     { id: 'out_for_delivery', label: 'Out for Delivery', description: 'On the way' },
+    { id: DELIVERY_FAILED_ATTEMPT_STATUS, label: 'Failed Delivery Attempt', description: 'Attempt failed; ready to retry' },
     { id: 'completed', label: 'Completed', description: 'Delivered successfully' }
   ];
 
@@ -785,6 +790,8 @@ const deliveryStepperStatuses = [
     setStatusModalVisible(false);
     setOrderToUpdate(null);
     setSelectedStatus(null);
+    setDeliveryFailureReason('');
+    setDeliveryFailureModalVisible(false);
   };
 
   const closeDeliveryStopModal = React.useCallback(() => {
@@ -1022,6 +1029,8 @@ const deliveryStepperStatuses = [
         return 'processing';
       case 'processing':
         return deliveryMethod === 'delivery' ? 'out_for_delivery' : 'ready_for_pickup';
+      case DELIVERY_FAILED_ATTEMPT_STATUS:
+        return 'out_for_delivery';
       case 'out_for_delivery':
         return 'completed';
       case 'ready_for_pick_up':
@@ -1040,6 +1049,12 @@ const deliveryStepperStatuses = [
       const orderToCancel = orderToUpdate;
       closeStatusModal();
       openOrderDeclineModal(orderToCancel, 'cancel');
+      return;
+    }
+
+    if (selectedStatus === DELIVERY_FAILED_ATTEMPT_STATUS && !deliveryFailureReason.trim()) {
+      setDeliveryFailureModalVisible(true);
+      Alert.alert('Reason Required', 'Please enter why the delivery attempt failed.');
       return;
     }
 
@@ -1071,7 +1086,7 @@ const deliveryStepperStatuses = [
         }
       }
 
-      const isMovingToDelivery = ['ready_for_delivery', 'out_for_delivery', 'ready_for_pick_up', 'ready_for_pickup', 'completed', 'claimed'].includes(selectedStatus);
+      const isMovingToDelivery = ['ready_for_delivery', 'out_for_delivery', DELIVERY_FAILED_ATTEMPT_STATUS, 'ready_for_pick_up', 'ready_for_pickup', 'completed', 'claimed'].includes(selectedStatus);
       const isNotPaid = orderToUpdate.payment_status !== 'paid';
       const isNotCOD = orderToUpdate.payment_method?.toLowerCase() !== 'cod';
 
@@ -1085,7 +1100,10 @@ const deliveryStepperStatuses = [
         return;
       }
 
-      const statusResponse = await adminAPI.updateOrderStatus(orderId, selectedStatus);
+      const statusOptions = selectedStatus === DELIVERY_FAILED_ATTEMPT_STATUS
+        ? { deliveryFailureReason: deliveryFailureReason.trim() }
+        : {};
+      const statusResponse = await adminAPI.updateOrderStatus(orderId, selectedStatus, statusOptions);
       let mergedOrder = statusResponse?.data?.order || {
         ...orderToUpdate,
         status: selectedStatus,
@@ -1141,6 +1159,7 @@ const deliveryStepperStatuses = [
       case 'ready_for_pickup': return { backgroundColor: '#6366F1' };
       case 'ready_for_delivery': return { backgroundColor: '#6366F1' };
       case 'out_for_delivery': return { backgroundColor: '#8B5CF6' };
+      case DELIVERY_FAILED_ATTEMPT_STATUS: return { backgroundColor: '#EF4444' };
       case 'processing': return { backgroundColor: '#3B82F6' };
       case 'accepted': return { backgroundColor: '#0891B2' };
       case 'cancelled': return { backgroundColor: '#EF4444' };
@@ -1157,6 +1176,7 @@ const deliveryStepperStatuses = [
       ready_for_pickup: '75%',
       ready_for_delivery: '60%',
       out_for_delivery: '75%',
+      [DELIVERY_FAILED_ATTEMPT_STATUS]: '80%',
       processing: '50%',
       accepted: '30%',
       pending: '15%',
@@ -2589,6 +2609,26 @@ const deliveryStepperStatuses = [
                       );
                     })}
                     <View style={styles.timelineActions}>
+                      {orderToUpdate?.delivery_method === 'delivery' && orderToUpdate?.status === 'out_for_delivery' ? (
+                        <TouchableOpacity
+                          onPress={() => {
+                            setSelectedStatus(DELIVERY_FAILED_ATTEMPT_STATUS);
+                            setDeliveryFailureModalVisible(true);
+                          }}
+                          style={[
+                            styles.timelineCancelButton,
+                            selectedStatus === DELIVERY_FAILED_ATTEMPT_STATUS && { backgroundColor: '#F97316', borderColor: '#F97316' }
+                          ]}
+                        >
+                          <Ionicons name="warning-outline" size={16} color={selectedStatus === DELIVERY_FAILED_ATTEMPT_STATUS ? '#fff' : '#F97316'} />
+                          <Text style={[
+                            styles.timelineCancelButtonText,
+                            selectedStatus === DELIVERY_FAILED_ATTEMPT_STATUS ? { color: '#fff' } : { color: '#F97316' }
+                          ]}>
+                            Failed Attempt
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
                       <TouchableOpacity
                         onPress={() => setSelectedStatus('cancelled')}
                         style={[
@@ -2624,6 +2664,45 @@ const deliveryStepperStatuses = [
                 disabled={false}
               >
                 <Text style={styles.statusCloseButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={deliveryFailureModalVisible} animationType="fade" transparent onRequestClose={() => setDeliveryFailureModalVisible(false)}>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Failed Delivery Attempt</Text>
+            <Text style={{ marginBottom: 10, color: '#6B7280' }}>
+              Enter the reason customers should see on their delivery timeline.
+            </Text>
+            <TextInput
+              style={[styles.input, { minHeight: 96, textAlignVertical: 'top' }]}
+              placeholder="Example: Customer unavailable or phone could not be reached"
+              multiline
+              value={deliveryFailureReason}
+              onChangeText={setDeliveryFailureReason}
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => setDeliveryFailureModalVisible(false)}
+              >
+                <Text style={styles.buttonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.saveButton]}
+                onPress={() => {
+                  if (!deliveryFailureReason.trim()) {
+                    Alert.alert('Reason Required', 'Please enter why the delivery attempt failed.');
+                    return;
+                  }
+                  setSelectedStatus(DELIVERY_FAILED_ATTEMPT_STATUS);
+                  setDeliveryFailureModalVisible(false);
+                }}
+              >
+                <Text style={styles.buttonText}>Save Reason</Text>
               </TouchableOpacity>
             </View>
           </View>
