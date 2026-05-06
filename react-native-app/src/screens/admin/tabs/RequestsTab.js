@@ -3841,6 +3841,24 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     }
   };
 
+  const getRequestStatusConfirmLabel = () => {
+    if (selectedRequestStatus === 'cancelled') return 'Cancel Request';
+    if (
+      requestToUpdate?.status === DELIVERY_FAILED_ATTEMPT_STATUS
+      && selectedRequestStatus === 'out_for_delivery'
+    ) {
+      return 'Retry Delivery';
+    }
+    if (
+      requestToUpdate?.status === DELIVERY_FAILED_ATTEMPT_STATUS
+      && selectedRequestStatus === 'completed'
+    ) {
+      return 'Mark Completed';
+    }
+    if (selectedRequestStatus === 'completed') return 'Mark Completed';
+    return 'Proceed';
+  };
+
   const closeDetailsModal = React.useCallback(() => {
     setModalVisible(false);
     setSelectedRequest(null);
@@ -6218,10 +6236,43 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                       );
                     })}
                     <View style={styles.timelineActions}>
+                      {requestToUpdate?.delivery_method === 'delivery' && requestToUpdate?.status === DELIVERY_FAILED_ATTEMPT_STATUS ? (
+                        <TouchableOpacity
+                          onPress={() => setSelectedRequestStatus('out_for_delivery')}
+                          style={[
+                            styles.timelineCancelButton,
+                            selectedRequestStatus === 'out_for_delivery' && { backgroundColor: '#2563EB', borderColor: '#2563EB' }
+                          ]}
+                        >
+                          <Ionicons name="refresh-outline" size={16} color={selectedRequestStatus === 'out_for_delivery' ? '#fff' : '#2563EB'} />
+                          <Text style={[
+                            styles.timelineCancelButtonText,
+                            selectedRequestStatus === 'out_for_delivery' ? { color: '#fff' } : { color: '#2563EB' }
+                          ]}>
+                            Retry Delivery
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+                      {requestToUpdate?.delivery_method === 'delivery' && requestToUpdate?.status === DELIVERY_FAILED_ATTEMPT_STATUS ? (
+                        <TouchableOpacity
+                          onPress={() => setSelectedRequestStatus('completed')}
+                          style={[
+                            styles.timelineCancelButton,
+                            selectedRequestStatus === 'completed' && { backgroundColor: '#16A34A', borderColor: '#16A34A' }
+                          ]}
+                        >
+                          <Ionicons name="checkmark-circle-outline" size={16} color={selectedRequestStatus === 'completed' ? '#fff' : '#16A34A'} />
+                          <Text style={[
+                            styles.timelineCancelButtonText,
+                            selectedRequestStatus === 'completed' ? { color: '#fff' } : { color: '#16A34A' }
+                          ]}>
+                            Mark Completed
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
                       {requestToUpdate?.delivery_method === 'delivery' && requestToUpdate?.status === 'out_for_delivery' ? (
                         <TouchableOpacity
                           onPress={() => {
-                            setSelectedRequestStatus(DELIVERY_FAILED_ATTEMPT_STATUS);
                             setDeliveryFailureModalVisible(true);
                           }}
                           style={[
@@ -6265,7 +6316,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                 style={styles.statusConfirmButton}
                 disabled={false}
               >
-                <Text style={styles.statusConfirmButtonText}>Proceed</Text>
+                <Text style={styles.statusConfirmButtonText}>{getRequestStatusConfirmLabel()}</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={closeRequestStatusModal} style={styles.statusCloseButton} disabled={false}>
                 <Text style={styles.statusCloseButtonText}>Cancel</Text>
@@ -6295,7 +6346,11 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => setDeliveryFailureModalVisible(false)}
+                onPress={() => {
+                  setDeliveryFailureModalVisible(false);
+                  setDeliveryFailureReason('');
+                  deliveryFailureReasonRef.current = '';
+                }}
               >
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>

@@ -1043,6 +1043,25 @@ const deliveryStepperStatuses = [
     }
   };
 
+  const getStatusConfirmLabel = () => {
+    if (selectedStatus === 'cancelled') return 'Cancel Order';
+    if (
+      orderToUpdate?.status === DELIVERY_FAILED_ATTEMPT_STATUS
+      && selectedStatus === 'out_for_delivery'
+    ) {
+      return 'Retry Delivery';
+    }
+    if (
+      orderToUpdate?.status === DELIVERY_FAILED_ATTEMPT_STATUS
+      && selectedStatus === 'completed'
+    ) {
+      return 'Mark Completed';
+    }
+    if (selectedStatus === 'completed') return 'Mark Completed';
+    if (selectedStatus === 'claimed') return 'Mark Claimed';
+    return 'Proceed';
+  };
+
   const confirmStatusChange = async (overrideOptions = {}) => {
     const nextStatus = overrideOptions.status || selectedStatus;
     if (!orderToUpdate || !nextStatus) return;
@@ -2615,10 +2634,43 @@ const deliveryStepperStatuses = [
                       );
                     })}
                     <View style={styles.timelineActions}>
+                      {orderToUpdate?.delivery_method === 'delivery' && orderToUpdate?.status === DELIVERY_FAILED_ATTEMPT_STATUS ? (
+                        <TouchableOpacity
+                          onPress={() => setSelectedStatus('out_for_delivery')}
+                          style={[
+                            styles.timelineCancelButton,
+                            selectedStatus === 'out_for_delivery' && { backgroundColor: '#2563EB', borderColor: '#2563EB' }
+                          ]}
+                        >
+                          <Ionicons name="refresh-outline" size={16} color={selectedStatus === 'out_for_delivery' ? '#fff' : '#2563EB'} />
+                          <Text style={[
+                            styles.timelineCancelButtonText,
+                            selectedStatus === 'out_for_delivery' ? { color: '#fff' } : { color: '#2563EB' }
+                          ]}>
+                            Retry Delivery
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+                      {orderToUpdate?.delivery_method === 'delivery' && orderToUpdate?.status === DELIVERY_FAILED_ATTEMPT_STATUS ? (
+                        <TouchableOpacity
+                          onPress={() => setSelectedStatus('completed')}
+                          style={[
+                            styles.timelineCancelButton,
+                            selectedStatus === 'completed' && { backgroundColor: '#16A34A', borderColor: '#16A34A' }
+                          ]}
+                        >
+                          <Ionicons name="checkmark-circle-outline" size={16} color={selectedStatus === 'completed' ? '#fff' : '#16A34A'} />
+                          <Text style={[
+                            styles.timelineCancelButtonText,
+                            selectedStatus === 'completed' ? { color: '#fff' } : { color: '#16A34A' }
+                          ]}>
+                            Mark Completed
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
                       {orderToUpdate?.delivery_method === 'delivery' && orderToUpdate?.status === 'out_for_delivery' ? (
                         <TouchableOpacity
                           onPress={() => {
-                            setSelectedStatus(DELIVERY_FAILED_ATTEMPT_STATUS);
                             setDeliveryFailureModalVisible(true);
                           }}
                           style={[
@@ -2662,7 +2714,7 @@ const deliveryStepperStatuses = [
                 style={styles.statusConfirmButton}
                 disabled={false}
               >
-                <Text style={styles.statusConfirmButtonText}>Proceed</Text>
+                <Text style={styles.statusConfirmButtonText}>{getStatusConfirmLabel()}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={closeStatusModal}
@@ -2696,7 +2748,11 @@ const deliveryStepperStatuses = [
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => setDeliveryFailureModalVisible(false)}
+                onPress={() => {
+                  setDeliveryFailureModalVisible(false);
+                  setDeliveryFailureReason('');
+                  deliveryFailureReasonRef.current = '';
+                }}
               >
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>
