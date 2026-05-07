@@ -1,11 +1,14 @@
 project_id = "luzcecstkebntjnfonwv"
 
 [auth]
-site_url = "https://jocerrys-flowershop.up.railway.app"
+site_url = "https://joccery-flower.shop"
 additional_redirect_urls = [
-  "https://jocerrys-flowershop.up.railway.app",
-  "https://jocerrys-flowershop.up.railway.app/reset-password",
-  "https://jocerrys-flowershop.up.railway.app/email-verification",
+  "https://joccery-flower.shop",
+  "https://joccery-flower.shop/reset-password",
+  "https://joccery-flower.shop/email-verification",
+  "https://flowerproj-production.up.railway.app",
+  "https://flowerproj-production.up.railway.app/reset-password",
+  "https://flowerproj-production.up.railway.app/email-verification",
 ]
 
 [auth.email]

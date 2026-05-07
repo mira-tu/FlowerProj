@@ -18,7 +18,8 @@ const PASSWORD_RESET_MAX_DAILY_ATTEMPTS = Number(Deno.env.get("PASSWORD_RESET_MA
 const PASSWORD_RESET_DAILY_WINDOW_HOURS = Number(Deno.env.get("PASSWORD_RESET_DAILY_WINDOW_HOURS") ?? "24");
 
 const DEFAULT_REDIRECT_ORIGINS = [
-  "https://jocerrys-flowershop.up.railway.app",
+  "https://joccery-flower.shop",
+  "https://flowerproj-production.up.railway.app",
 ];
 
 const genericSuccessMessage =

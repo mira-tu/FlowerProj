@@ -10,7 +10,7 @@ export const EMAIL_VERIFICATION_PATH = '/email-verification';
 export const PASSWORD_RESET_PATH = '/reset-password';
 
 const VALID_USER_ROLES = new Set(['customer', 'admin', 'employee']);
-const FALLBACK_SITE_URL = 'https://jocerrys-flowershop.up.railway.app';
+const FALLBACK_SITE_URL = 'https://joccery-flower.shop';
 const PASSWORD_RECOVERY_STORAGE_KEY = 'auth.password-recovery.in-progress';
 const AUTH_QUERY_KEYS = new Set([
     'code',
