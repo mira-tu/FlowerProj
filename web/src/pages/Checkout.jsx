@@ -23,6 +23,16 @@ import {
 } from '../utils/deliveryDestinations';
 import { buildFreeShippingLookup, evaluateFreeShippingPromo } from '../utils/freeShipping';
 import { PICKUP_TIME_OPTIONS, getEarliestPickupDate, isPickupDateSelectable } from '../utils/businessHours';
+import {
+    PROMO_CHANNELS,
+    buildDiscountFields,
+    calculatePromoPricing,
+    fetchDiscountPromos,
+    getPromoValidationMessage,
+    normalizePromoCode,
+    recordDiscountRedemption,
+    roundCurrency,
+} from '../utils/promoEngine';
 
 const paymentMethods = [
     { id: 'cod', name: 'Cash on Delivery', description: 'Pay when you receive', icon: 'fa-money-bill-wave' },
@@ -35,7 +45,7 @@ const insertOrderWithNotesFallback = async (orderPayload) => {
     const retryResult = await writeWithOptionalColumns({
         tableName: 'orders',
         initialPayload: orderPayload,
-        optionalColumns: ['notes', 'gcash_reference_number'],
+        optionalColumns: ['notes', 'gcash_reference_number', 'discount_total', 'discount_snapshot', 'applied_promo_code'],
         execute: (payload) => (
             supabase
                 .from('orders')
@@ -82,6 +92,15 @@ const Checkout = ({ setCart, user, products = [] }) => {
     const [multiAddressEnabled, setMultiAddressEnabled] = useState(false);
     const [deliveryAssignments, setDeliveryAssignments] = useState([]);
     const [addressValidationMessage, setAddressValidationMessage] = useState('');
+    const [promoCodeInput, setPromoCodeInput] = useState('');
+    const [appliedPromoCode, setAppliedPromoCode] = useState('');
+    const [promoState, setPromoState] = useState({
+        promos: [],
+        loading: false,
+        unavailable: false,
+        message: '',
+        type: '',
+    });
     const addressSectionRef = useRef(null);
 
     const scrollToAddressSection = () => {
@@ -188,6 +207,36 @@ const Checkout = ({ setCart, user, products = [] }) => {
         () => evaluateFreeShippingPromo(checkoutItems, freeShippingLookup),
         [checkoutItems, freeShippingLookup]
     );
+    const productById = useMemo(() => {
+        const lookup = new Map();
+        (Array.isArray(products) ? products : []).forEach((product) => {
+            if (product?.id !== undefined && product?.id !== null) {
+                lookup.set(String(product.id), product);
+            }
+        });
+        return lookup;
+    }, [products]);
+    const promoLines = useMemo(() => checkoutItems.map((item, index) => {
+        const productId = item.productId || item.product_id || item.id;
+        const product = productById.get(String(productId)) || {};
+        return {
+            key: `catalog-${productId || index}-${index}`,
+            id: productId,
+            productId,
+            categoryId: product.category_id || item.category_id || null,
+            name: item.name,
+            quantity: item.qty || 1,
+            unitPrice: item.price,
+            originalUnitPrice: product.original_price ?? product.originalPrice ?? item.original_price ?? item.originalPrice ?? item.price,
+            builtInDiscountPercent: product.discount_percentage ?? product.discountPercentage ?? item.discount_percentage ?? item.discountPercentage ?? 0,
+            targetKeys: [
+                productId,
+                item.name,
+                product.category_name,
+                product.category_id,
+            ].filter(Boolean),
+        };
+    }), [checkoutItems, productById]);
     const knownOutOfStockItems = useMemo(
         () => checkoutItems.filter((item) => {
             const stockQuantity = Number(item.stockQuantity);
@@ -196,7 +245,45 @@ const Checkout = ({ setCart, user, products = [] }) => {
         [checkoutItems]
     );
 
-    const subtotal = checkoutItems.reduce((acc, item) => acc + (item.price * (item.qty || 1)), 0);
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadPromos = async () => {
+            setPromoState((current) => ({ ...current, loading: true }));
+            try {
+                const result = await fetchDiscountPromos(supabase, {
+                    channelScope: PROMO_CHANNELS.CATALOG,
+                });
+                if (isMounted) {
+                    setPromoState({
+                        promos: result.promos,
+                        loading: false,
+                        unavailable: result.unavailable,
+                        message: result.unavailable ? 'Discount promos are not available until the database migration is applied.' : '',
+                        type: result.unavailable ? 'warning' : '',
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading discount promos:', error);
+                if (isMounted) {
+                    setPromoState({
+                        promos: [],
+                        loading: false,
+                        unavailable: false,
+                        message: 'Discount promos could not be loaded right now.',
+                        type: 'error',
+                    });
+                }
+            }
+        };
+
+        loadPromos();
+        return () => {
+            isMounted = false;
+        };
+    }, [user?.id]);
+
+    const currentItemSubtotal = checkoutItems.reduce((acc, item) => acc + (item.price * (item.qty || 1)), 0);
     const shippingFee = deliveryMethod === 'pickup'
         ? 0
         : calculateDeliveryFee({
@@ -209,7 +296,50 @@ const Checkout = ({ setCart, user, products = [] }) => {
                 ? addressFeeMap
                 : { [selectedAddressId]: dynamicShippingFee },
         });
-    const total = subtotal + shippingFee;
+    const promoPricing = useMemo(() => calculatePromoPricing({
+        lines: promoLines,
+        promos: promoState.promos,
+        channelScope: PROMO_CHANNELS.CATALOG,
+        enteredCode: appliedPromoCode,
+        shippingFee,
+    }), [appliedPromoCode, promoLines, promoState.promos, shippingFee]);
+    const subtotal = promoPricing.subtotalBeforeDiscount || currentItemSubtotal;
+    const discountTotal = promoPricing.discountTotal;
+    const subtotalAfterDiscount = promoPricing.subtotalAfterDiscount;
+    const total = promoPricing.finalTotal;
+    const promoLineBreakdownByKey = useMemo(() => new Map(
+        (promoPricing.lineBreakdown || []).map((line) => [String(line.key), line])
+    ), [promoPricing.lineBreakdown]);
+    const promoFeedbackMessage = appliedPromoCode
+        ? getPromoValidationMessage(promoPricing.validation)
+        : (
+            promoPricing.chosenPromo
+                ? `${promoPricing.chosenPromo.name || promoPricing.chosenPromo.code} applied automatically.`
+                : ''
+        );
+    const promoFeedbackType = appliedPromoCode && promoPricing.validation?.status !== 'applied'
+        ? 'error'
+        : (promoFeedbackMessage ? 'success' : '');
+
+    const handleApplyPromo = () => {
+        const normalizedCode = normalizePromoCode(promoCodeInput);
+        if (!normalizedCode) {
+            setPromoState((current) => ({
+                ...current,
+                message: 'Enter a discount code first.',
+                type: 'error',
+            }));
+            return;
+        }
+        setAppliedPromoCode(normalizedCode);
+        setPromoCodeInput(normalizedCode);
+    };
+
+    const handleRemovePromo = () => {
+        setAppliedPromoCode('');
+        setPromoCodeInput('');
+        setPromoState((current) => ({ ...current, message: '', type: '' }));
+    };
 
     const handlePaymentChange = (paymentId) => {
         setSelectedPayment(paymentId);
@@ -413,7 +543,7 @@ const Checkout = ({ setCart, user, products = [] }) => {
             address_id: deliveryMethod === 'delivery' ? finalAddressId : null,
             payment_method: selectedPayment,
             payment_status: selectedPayment === 'cod' ? 'to_pay' : 'waiting_for_confirmation',
-            subtotal: subtotal,
+            subtotal: subtotalAfterDiscount,
             shipping_fee: shippingFee,
             total: total,
             status: 'pending',
@@ -422,6 +552,7 @@ const Checkout = ({ setCart, user, products = [] }) => {
             receipt_url: uploadedReceiptUrl,
             gcash_reference_number: selectedPayment === 'gcash' ? normalizedGcashReference : null,
             notes: serializedOrderNotes,
+            ...buildDiscountFields(promoPricing),
         };
 
         const { data, error, usedNotesFallback, usedGcashReferenceFallback } = await insertOrderWithNotesFallback(newOrder);
@@ -443,14 +574,24 @@ const Checkout = ({ setCart, user, products = [] }) => {
         const newOrderId = data.id; // Correct: Use data.id for the internal ID
         const newOrderNumber = data.order_number; // Correct: Use data.order_number for the human-readable number
 
-        const orderItems = checkoutItems.map(item => ({
-            order_id: newOrderId, // Correct: Link items using the internal ID
-            product_id: item.id,
-            name: item.name,
-            price: item.price,
-            quantity: item.qty || 1,
-            image_url: item.image_url || item.image || item.photo,
-        }));
+        const orderItems = checkoutItems.map((item, index) => {
+            const productId = item.productId || item.product_id || item.id;
+            const lineKey = `catalog-${productId || index}-${index}`;
+            const promoLine = promoLineBreakdownByKey.get(String(lineKey));
+            const normalizedLine = promoPricing.lines.find((line) => String(line.key) === String(lineKey));
+            const finalUnitPrice = promoLine
+                ? roundCurrency(promoLine.final_subtotal / Math.max(1, promoLine.quantity || 1))
+                : roundCurrency(normalizedLine?.originalUnitPrice ?? item.price);
+
+            return {
+                order_id: newOrderId, // Correct: Link items using the internal ID
+                product_id: productId,
+                name: item.name,
+                price: finalUnitPrice,
+                quantity: item.qty || 1,
+                image_url: item.image_url || item.image || item.photo,
+            };
+        });
 
         const { error: itemsError } = await supabase
             .from('order_items')
@@ -462,14 +603,27 @@ const Checkout = ({ setCart, user, products = [] }) => {
             return;
         }
 
+        try {
+            await recordDiscountRedemption(supabase, {
+                pricing: promoPricing,
+                userId: user.id,
+                orderId: newOrderId,
+                channelScope: PROMO_CHANNELS.CATALOG,
+                status: 'applied',
+            });
+        } catch (redemptionError) {
+            console.error('Error recording discount redemption:', redemptionError);
+        }
+
         // Deduct stock for each purchased item
         for (const item of checkoutItems) {
             try {
+                const productId = item.productId || item.product_id || item.id;
                 // Fetch current stock to avoid overwriting with stale frontend data
                 const { data: productData, error: fetchError } = await supabase
                     .from('products')
                     .select('stock_quantity')
-                    .eq('id', item.id)
+                    .eq('id', productId)
                     .single();
 
                 if (!fetchError && productData) {
@@ -477,7 +631,7 @@ const Checkout = ({ setCart, user, products = [] }) => {
                     await supabase
                         .from('products')
                         .update({ stock_quantity: newStock })
-                        .eq('id', item.id);
+                        .eq('id', productId);
                 }
             } catch (err) {
                 console.error(`Failed to update stock for product ${item.id}`, err);
@@ -775,6 +929,56 @@ const Checkout = ({ setCart, user, products = [] }) => {
                                 <span>Subtotal ({checkoutItems.reduce((acc, item) => acc + (item.qty || 1), 0)} items)</span>
                                 <span>₱{subtotal.toLocaleString()}</span>
                             </div>
+                            <div className="mb-3">
+                                <label className="form-label small fw-bold mb-2">Discount Code</label>
+                                <div className="d-flex gap-2">
+                                    <input
+                                        type="text"
+                                        className="form-control"
+                                        value={promoCodeInput}
+                                        onChange={(event) => setPromoCodeInput(normalizePromoCode(event.target.value))}
+                                        placeholder="Enter code"
+                                        disabled={isProcessing || promoState.loading}
+                                    />
+                                    {appliedPromoCode ? (
+                                        <button
+                                            type="button"
+                                            className="btn btn-outline-secondary"
+                                            onClick={handleRemovePromo}
+                                            disabled={isProcessing}
+                                        >
+                                            Remove
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            className="btn btn-outline-primary"
+                                            onClick={handleApplyPromo}
+                                            disabled={isProcessing || promoState.loading}
+                                        >
+                                            Apply
+                                        </button>
+                                    )}
+                                </div>
+                                {(promoFeedbackMessage || promoState.message) && (
+                                    <div className={`small mt-2 ${promoFeedbackType === 'error' || promoState.type === 'error' ? 'text-danger' : promoState.type === 'warning' ? 'text-muted' : 'text-success'}`}>
+                                        <i className={`fas ${promoFeedbackType === 'error' || promoState.type === 'error' ? 'fa-exclamation-circle' : 'fa-tag'} me-1`}></i>
+                                        {promoFeedbackMessage || promoState.message}
+                                    </div>
+                                )}
+                            </div>
+                            {discountTotal > 0 && (
+                                <div className="summary-row text-success">
+                                    <span>Discount{promoPricing.chosenPromo?.code ? ` (${promoPricing.chosenPromo.code})` : ''}</span>
+                                    <span>-₱{discountTotal.toLocaleString()}</span>
+                                </div>
+                            )}
+                            {discountTotal > 0 && (
+                                <div className="summary-row">
+                                    <span>Discounted Subtotal</span>
+                                    <span>₱{subtotalAfterDiscount.toLocaleString()}</span>
+                                </div>
+                            )}
                             <div className="summary-row">
                                     <span>{deliveryMethod === 'pickup' ? 'Pickup' : 'Delivery Fee'}</span>
                                 <span>{shippingFee === 0 ? 'FREE' : `₱${shippingFee}`}</span>

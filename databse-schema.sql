@@ -8,6 +8,10 @@ CREATE TYPE request_type AS ENUM ('booking', 'customized', 'special_order');
 CREATE TYPE request_status AS ENUM ('pending', 'quoted', 'accepted', 'processing', 'ready_for_pickup', 'out_for_delivery', 'completed', 'claimed', 'declined', 'cancelled');
 CREATE TYPE stock_reservation_scope AS ENUM ('flower', 'wrapper', 'ribbon', 'other');
 CREATE TYPE stock_reservation_status AS ENUM ('reserved', 'consumed', 'released');
+CREATE TYPE discount_channel_scope AS ENUM ('catalog', 'customized', 'custom_order', 'all');
+CREATE TYPE discount_mode AS ENUM ('coupon_code', 'automatic_event', 'occasion_based');
+CREATE TYPE discount_target_scope AS ENUM ('order', 'item');
+CREATE TYPE discount_redemption_status AS ENUM ('reserved', 'applied', 'voided');
 
 -- Users and Authentication
 CREATE TABLE users (
@@ -116,6 +120,9 @@ CREATE TABLE orders (
   address_id INT,
   subtotal DECIMAL(10, 2) NOT NULL,
   shipping_fee DECIMAL(10, 2) NOT NULL,
+  discount_total DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  discount_snapshot JSONB,
+  applied_promo_code TEXT,
   total DECIMAL(10, 2) NOT NULL,
   payment_method VARCHAR(50) NOT NULL,
   payment_status payment_status NOT NULL,
@@ -164,6 +171,9 @@ CREATE TABLE requests (
   estimated_price DECIMAL(10, 2),
   final_price DECIMAL(10, 2),
   shipping_fee DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  discount_total DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  discount_snapshot JSONB,
+  applied_promo_code TEXT,
   delivery_method delivery_method,
   pickup_time VARCHAR(80),
   payment_method VARCHAR(50),
@@ -177,6 +187,48 @@ CREATE TABLE requests (
   third_party_rider_info TEXT,
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE discount_promos (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  code TEXT NOT NULL UNIQUE CHECK (code = upper(code)),
+  name TEXT NOT NULL,
+  description TEXT,
+  discount_percent DECIMAL(5, 2) NOT NULL DEFAULT 0 CHECK (discount_percent >= 0 AND discount_percent <= 100),
+  channel_scope discount_channel_scope NOT NULL DEFAULT 'all',
+  discount_mode discount_mode NOT NULL DEFAULT 'coupon_code',
+  target_scope discount_target_scope NOT NULL DEFAULT 'order',
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  starts_at TIMESTAMPTZ,
+  ends_at TIMESTAMPTZ,
+  usage_limit_total INT CHECK (usage_limit_total IS NULL OR usage_limit_total > 0),
+  usage_limit_per_user INT CHECK (usage_limit_per_user IS NULL OR usage_limit_per_user > 0),
+  minimum_subtotal DECIMAL(10, 2) NOT NULL DEFAULT 0 CHECK (minimum_subtotal >= 0),
+  occasion_targets JSONB NOT NULL DEFAULT '[]'::jsonb,
+  product_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+  category_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+  custom_order_arrangement_targets JSONB NOT NULL DEFAULT '[]'::jsonb,
+  customized_item_targets JSONB,
+  applies_to_sale_items BOOLEAN NOT NULL DEFAULT TRUE,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE discount_redemptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  promo_id UUID NOT NULL REFERENCES discount_promos(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  order_id INT REFERENCES orders(id) ON DELETE SET NULL,
+  request_id INT REFERENCES requests(id) ON DELETE SET NULL,
+  channel_scope discount_channel_scope NOT NULL,
+  discount_amount DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  subtotal_before_discount DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  subtotal_after_discount DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  status discount_redemption_status NOT NULL DEFAULT 'applied',
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  CHECK (((order_id IS NOT NULL)::int + (request_id IS NOT NULL)::int) <= 1)
 );
 
 CREATE TABLE stock_reservations (

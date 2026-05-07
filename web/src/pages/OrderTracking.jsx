@@ -32,6 +32,7 @@ import {
     writeWithOptionalColumns,
 } from '../utils/gcashPayments';
 import { summarizeCancellationItems } from '../utils/orderCancellation';
+import { getDiscountDisplayFields } from '../utils/discountDisplay';
 import {
     DELIVERY_FAILED_ATTEMPT_STATUS,
     getDeliveryFailureReason,
@@ -164,6 +165,7 @@ const OrderTracking = ({ user }) => {
                 qty: item.remainingQuantity,
                 price: item.unitPrice,
             }));
+            const discountFields = getDiscountDisplayFields(foundOrder);
             const transformedOrder = {
                 ...foundOrder,
                 rider: riderDetails,
@@ -182,6 +184,7 @@ const OrderTracking = ({ user }) => {
                 total: itemSummary.hasItems
                     ? (itemSummary.allCancelled ? 0 : (itemSummary.remainingSubtotal + Number(foundOrder.shipping_fee || 0)))
                     : foundOrder.total,
+                ...discountFields,
                 refund_snapshot: parsedOrderNotes.metadata?.refund_snapshot || null,
                 gcash_reference_number: foundOrder.gcash_reference_number || orderNotesGcashReference || null,
                 additional_receipts: normalizedAdditionalReceipts,
@@ -686,6 +689,14 @@ const OrderTracking = ({ user }) => {
         );
     }
 
+    const orderDiscountTotal = Number(order.discount_total || 0);
+    const orderSubtotalBeforeDiscount = orderDiscountTotal > 0
+        ? Number(order.subtotal_before_discount || 0) || Number(order.subtotal || 0) + orderDiscountTotal
+        : Number(order.subtotal || 0);
+    const orderSubtotalAfterDiscount = orderDiscountTotal > 0
+        ? Number(order.subtotal_after_discount || 0) || Math.max(0, orderSubtotalBeforeDiscount - orderDiscountTotal)
+        : Number(order.subtotal || 0);
+
     return (
         <div className="tracking-container">
             <div className="container">
@@ -981,8 +992,20 @@ const OrderTracking = ({ user }) => {
                             <div className="mt-3 pt-3 border-top">
                                 <div className="d-flex justify-content-between mb-2 small text-muted">
                                     <span>Subtotal</span>
-                                    <span>₱{(order.subtotal || 0).toLocaleString()}</span>
+                                    <span>₱{orderSubtotalBeforeDiscount.toLocaleString()}</span>
                                 </div>
+                                {orderDiscountTotal > 0 ? (
+                                    <>
+                                        <div className="d-flex justify-content-between mb-2 small text-success">
+                                            <span>Discount{order.applied_promo_code ? ` (${order.applied_promo_code})` : ''}</span>
+                                            <span>-₱{orderDiscountTotal.toLocaleString()}</span>
+                                        </div>
+                                        <div className="d-flex justify-content-between mb-2 small text-muted">
+                                            <span>Subtotal After Discount</span>
+                                            <span>₱{orderSubtotalAfterDiscount.toLocaleString()}</span>
+                                        </div>
+                                    </>
+                                ) : null}
                                 <div className="d-flex justify-content-between mb-3 small text-muted">
                                         <span>{isPickup ? 'Pickup' : 'Delivery Fee'}</span>
                                     <span>{order.shipping_fee === 0 ? 'FREE' : `₱${(order.shipping_fee || 0).toLocaleString()}`}</span>

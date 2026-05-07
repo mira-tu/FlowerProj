@@ -62,6 +62,408 @@ const parseMaybeJson = (value: unknown) => {
   }
 };
 
+const roundCurrency = (value: unknown) => {
+  const numericValue = typeof value === "number"
+    ? value
+    : Number.parseFloat(String(value ?? "").replace(/[^\d.-]/g, ""));
+  return Math.round(((Number.isFinite(numericValue) ? numericValue : 0) + Number.EPSILON) * 100) / 100;
+};
+
+const normalizePromoCode = (value: unknown) =>
+  String(value ?? "").trim().replace(/\s+/g, "").toUpperCase();
+
+const collectTextValues = (...values: unknown[]) => {
+  const flattened: unknown[] = [];
+  const visit = (value: unknown) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    flattened.push(value);
+  };
+  values.forEach(visit);
+  return flattened
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean);
+};
+
+const normalizeTargetList = (value: unknown) => {
+  const parsed = parseMaybeJson(value);
+  if (value === null || value === undefined) return null;
+  if (Array.isArray(parsed)) return parsed.map((item) => String(item ?? "").trim()).filter(Boolean);
+  if (typeof parsed === "string") return parsed.split(",").map((item) => item.trim()).filter(Boolean);
+  if (parsed && typeof parsed === "object") {
+    return Object.values(parsed as Record<string, unknown>).map((item) => String(item ?? "").trim()).filter(Boolean);
+  }
+  return [] as string[];
+};
+
+const normalizeComparable = (value: unknown) =>
+  String(value ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "-");
+
+const targetListIsUnset = (targets: string[] | null) => targets === null || !Array.isArray(targets) || targets.length === 0;
+
+const targetListHas = (targets: string[] | null, values: unknown[] = []) => {
+  if (targets === null) return true;
+  if (!Array.isArray(targets) || targets.length === 0) return false;
+  const normalizedTargets = new Set(targets.map(normalizeComparable).filter(Boolean));
+  return values.some((value) => normalizedTargets.has(normalizeComparable(value)));
+};
+
+const normalizePromoRow = (promo: Record<string, unknown>) => ({
+  ...promo,
+  id: String(promo.id ?? ""),
+  code: normalizePromoCode(promo.code),
+  name: String(promo.name ?? promo.code ?? "Discount").trim(),
+  discount_percent: Math.max(0, Math.min(100, roundCurrency(promo.discount_percent))),
+  channel_scope: String(promo.channel_scope ?? "all").trim(),
+  discount_mode: String(promo.discount_mode ?? "coupon_code").trim(),
+  target_scope: String(promo.target_scope ?? "order").trim(),
+  is_active: promo.is_active !== false,
+  starts_at: promo.starts_at,
+  ends_at: promo.ends_at,
+  usage_limit_total: promo.usage_limit_total === null || promo.usage_limit_total === undefined
+    ? null
+    : Math.max(0, Number.parseInt(String(promo.usage_limit_total), 10) || 0),
+  usage_limit_per_user: promo.usage_limit_per_user === null || promo.usage_limit_per_user === undefined
+    ? null
+    : Math.max(0, Number.parseInt(String(promo.usage_limit_per_user), 10) || 0),
+  minimum_subtotal: Math.max(0, roundCurrency(promo.minimum_subtotal)),
+  occasion_targets: normalizeTargetList(promo.occasion_targets) || [],
+  custom_order_arrangement_targets: normalizeTargetList(promo.custom_order_arrangement_targets) || [],
+  total_redemptions: 0,
+  user_redemptions: 0,
+});
+
+const getPromoAvailable = (promo: ReturnType<typeof normalizePromoRow>, subtotalBeforeDiscount: number) => {
+  if (!promo.is_active) return false;
+  const nowTime = Date.now();
+  const startsAtTime = promo.starts_at ? new Date(String(promo.starts_at)).getTime() : null;
+  const endsAtTime = promo.ends_at ? new Date(String(promo.ends_at)).getTime() : null;
+  if (startsAtTime && Number.isFinite(startsAtTime) && nowTime < startsAtTime) return false;
+  if (endsAtTime && Number.isFinite(endsAtTime) && nowTime > endsAtTime) return false;
+  if (promo.usage_limit_total && promo.total_redemptions >= promo.usage_limit_total) return false;
+  if (promo.usage_limit_per_user && promo.user_redemptions >= promo.usage_limit_per_user) return false;
+  if (promo.minimum_subtotal > 0 && subtotalBeforeDiscount < promo.minimum_subtotal) return false;
+  return true;
+};
+
+const getPromoModeEligible = (
+  promo: ReturnType<typeof normalizePromoRow>,
+  { enteredCode = "", occasions = [] as string[] } = {},
+) => {
+  if (promo.discount_mode === "coupon_code") return Boolean(enteredCode && promo.code === normalizePromoCode(enteredCode));
+  if (promo.discount_mode === "automatic_event") return true;
+  if (promo.discount_mode === "occasion_based") {
+    if (targetListIsUnset(promo.occasion_targets as string[])) return true;
+    return targetListHas(promo.occasion_targets as string[], occasions);
+  }
+  return false;
+};
+
+const normalizeQuoteLine = (line: Record<string, unknown>, index: number) => {
+  const quantity = Math.max(1, Number.parseInt(String(line.quantity ?? line.qty ?? 1), 10) || 1);
+  const unitPrice = Math.max(0, roundCurrency(line.unitPrice ?? line.price ?? line.amount));
+  const originalUnitPrice = Math.max(unitPrice, roundCurrency(line.originalUnitPrice ?? line.original_price ?? unitPrice));
+  return {
+    key: String(line.key ?? line.id ?? `line-${index}`),
+    name: String(line.name ?? line.label ?? `Item ${index + 1}`).trim(),
+    quantity,
+    originalSubtotal: roundCurrency(originalUnitPrice * quantity),
+    targetKeys: collectTextValues(line.key, line.id, line.name, line.label, line.targetKeys),
+    occasionTargets: collectTextValues(line.occasionTargets),
+    arrangementTargets: collectTextValues(line.arrangementTargets),
+  };
+};
+
+const normalizeQuoteBreakdownLines = (breakdown: Record<string, unknown> = {}) => {
+  const rawLineItems = Array.isArray(breakdown?.line_items) ? breakdown.line_items as Record<string, unknown>[] : [];
+  return rawLineItems.map((item, index) => {
+    const quantity = Math.max(1, Number.parseInt(String(item.quantity ?? item.qty ?? 1), 10) || 1);
+    const explicitAmount = item.amount ?? item.total ?? item.line_total ?? item.lineTotal;
+    const unitAmount = item.unit_price ?? item.unitPrice ?? item.price;
+    const amount = explicitAmount !== undefined && explicitAmount !== null
+      ? roundCurrency(explicitAmount)
+      : roundCurrency(roundCurrency(unitAmount) * quantity);
+    const label = String(item.label ?? item.product_name ?? item.name ?? `Item ${index + 1}`).trim();
+    const type = String(item.type ?? "").trim().toLowerCase();
+    const normalizedType = type || (label.toLowerCase().includes("delivery") ? "delivery" : "extra");
+    return {
+      key: `${label}-${index}`,
+      label,
+      type: normalizedType,
+      arrangementGroup: String(item.arrangement_group ?? item.arrangementGroup ?? "").trim(),
+      amount,
+    };
+  });
+};
+
+const collectQuotePromoContext = (requestData: Record<string, unknown>, quoteBreakdown: Record<string, unknown> | null) => {
+  const items = Array.isArray(requestData?.items) ? requestData.items as Record<string, unknown>[] : [];
+  const quoteLines = normalizeQuoteBreakdownLines(quoteBreakdown || {});
+  const occasions = collectTextValues(
+    requestData?.occasion,
+    requestData?.combined_occasions,
+    items.map((item) => item?.occasion),
+  );
+  const arrangementTargets = collectTextValues(
+    requestData?.arrangementSummary,
+    requestData?.arrangementType,
+    requestData?.arrangementTypes,
+    requestData?.arrangementSelections,
+    items.map((item) => [
+      item?.arrangementSummary,
+      item?.arrangementType,
+      item?.arrangementTypes,
+      item?.arrangementSelections,
+    ]),
+    quoteLines.map((line) => [line.label, line.type, line.arrangementGroup]),
+  );
+  return {
+    occasions: Array.from(new Set(occasions)),
+    arrangementTargets: Array.from(new Set(arrangementTargets)),
+    quoteLines,
+  };
+};
+
+const calculateCustomOrderPromoPricing = async ({
+  adminClient,
+  userId,
+  requestData,
+  quoteBreakdown,
+  finalItemPrice,
+  finalShippingFee,
+}: {
+  adminClient: ReturnType<typeof createClient>;
+  userId: string;
+  requestData: Record<string, unknown>;
+  quoteBreakdown: Record<string, unknown> | null;
+  finalItemPrice: number;
+  finalShippingFee: number;
+}) => {
+  const promoCode = normalizePromoCode(
+    requestData?.applied_promo_code
+      ?? (requestData?.discount_snapshot as Record<string, unknown> | undefined)?.promo_code
+      ?? "",
+  );
+  const { occasions, arrangementTargets, quoteLines } = collectQuotePromoContext(requestData, quoteBreakdown);
+  const nonDeliveryLines = quoteLines.filter((line) => line.type !== "delivery");
+  const lines = (nonDeliveryLines.length ? nonDeliveryLines : [{
+    key: "quote-total",
+    label: String(requestData?.summary_label ?? requestData?.occasion ?? "Custom Order Quote"),
+    type: "arrangement",
+    arrangementGroup: "",
+    amount: finalItemPrice,
+  }]).map((line, index) => normalizeQuoteLine({
+    key: `quote-${line.key || index}`,
+    name: line.label,
+    amount: line.amount,
+    targetKeys: collectTextValues(line.label, line.type, line.arrangementGroup, arrangementTargets),
+    occasionTargets: occasions,
+    arrangementTargets: collectTextValues(line.label, line.type, line.arrangementGroup, arrangementTargets),
+  }, index));
+  const subtotalBeforeDiscount = roundCurrency(lines.reduce((sum, line) => sum + line.originalSubtotal, 0));
+
+  let promos: ReturnType<typeof normalizePromoRow>[] = [];
+  try {
+    const { data: promoRows, error: promoError } = await adminClient
+      .from("discount_promos")
+      .select("*")
+      .in("channel_scope", ["custom_order", "all"]);
+    if (promoError) throw promoError;
+    promos = (promoRows || []).map((promo: Record<string, unknown>) => normalizePromoRow(promo));
+
+    const promoIds = promos.map((promo) => promo.id).filter(Boolean);
+    if (promoIds.length) {
+      const { data: redemptionRows } = await adminClient
+        .from("discount_redemptions")
+        .select("promo_id, user_id, status")
+        .in("promo_id", promoIds)
+        .neq("status", "voided");
+      const usage = new Map<string, { total: number; user: number }>();
+      (redemptionRows || []).forEach((row: Record<string, unknown>) => {
+        const promoId = String(row.promo_id ?? "");
+        const current = usage.get(promoId) || { total: 0, user: 0 };
+        current.total += 1;
+        if (String(row.user_id ?? "") === String(userId)) current.user += 1;
+        usage.set(promoId, current);
+      });
+      promos = promos.map((promo) => ({
+        ...promo,
+        total_redemptions: usage.get(promo.id)?.total || 0,
+        user_redemptions: usage.get(promo.id)?.user || 0,
+      }));
+    }
+  } catch (error) {
+    console.warn("Unable to load discount promos for quote recompute:", error);
+  }
+
+  const candidates = promos.reduce((accumulator, promo) => {
+    if (!(promo.channel_scope === "custom_order" || promo.channel_scope === "all")) return accumulator;
+    if (!getPromoAvailable(promo, subtotalBeforeDiscount)) return accumulator;
+    if (!getPromoModeEligible(promo, { enteredCode: promoCode, occasions })) return accumulator;
+
+    const matchedLines = lines.filter((line) => {
+      const hasArrangementTargets = !targetListIsUnset(promo.custom_order_arrangement_targets as string[]);
+      const hasOccasionTargets = !targetListIsUnset(promo.occasion_targets as string[]);
+      if (!hasArrangementTargets && !hasOccasionTargets) return true;
+      return targetListHas(promo.custom_order_arrangement_targets as string[], [
+        ...line.targetKeys,
+        ...arrangementTargets,
+        ...line.arrangementTargets,
+      ]) || targetListHas(promo.occasion_targets as string[], [
+        ...occasions,
+        ...line.occasionTargets,
+      ]);
+    });
+    const lineBreakdown = matchedLines.map((line) => {
+      const discountAmount = roundCurrency(line.originalSubtotal * (promo.discount_percent / 100));
+      return {
+        key: line.key,
+        name: line.name,
+        quantity: line.quantity,
+        original_subtotal: line.originalSubtotal,
+        discount_amount: discountAmount,
+        final_subtotal: Math.max(0, roundCurrency(line.originalSubtotal - discountAmount)),
+        discount_percent: promo.discount_percent,
+        source: "promo",
+        promo_id: promo.id,
+        promo_code: promo.code,
+      };
+    }).filter((line) => line.discount_amount > 0);
+    const discountTotal = roundCurrency(lineBreakdown.reduce((sum, line) => sum + line.discount_amount, 0));
+    if (discountTotal > 0) {
+      accumulator.push({ promo, discountTotal, lineBreakdown });
+    }
+    return accumulator;
+  }, [] as { promo: ReturnType<typeof normalizePromoRow>; discountTotal: number; lineBreakdown: Record<string, unknown>[] }[]);
+
+  const chosen = candidates.reduce((best, candidate) => {
+    if (!best) return candidate;
+    return candidate.discountTotal > best.discountTotal ? candidate : best;
+  }, null as null | { promo: ReturnType<typeof normalizePromoRow>; discountTotal: number; lineBreakdown: Record<string, unknown>[] });
+  const discountTotal = roundCurrency(chosen?.discountTotal || 0);
+  const subtotalAfterDiscount = Math.max(0, roundCurrency(subtotalBeforeDiscount - discountTotal));
+  const finalTotal = Math.max(0, roundCurrency(subtotalAfterDiscount + finalShippingFee));
+
+  return {
+    chosenPromo: chosen?.promo || null,
+    appliedPromoCode: chosen?.promo?.code || null,
+    discountTotal,
+    subtotalBeforeDiscount,
+    subtotalAfterDiscount,
+    shippingFee: roundCurrency(finalShippingFee),
+    finalTotal,
+    lineBreakdown: chosen?.lineBreakdown || [],
+  };
+};
+
+const buildDiscountSnapshot = (pricing: Awaited<ReturnType<typeof calculateCustomOrderPromoPricing>>) => {
+  if (!pricing || pricing.discountTotal <= 0) return null;
+  return {
+    source: "promo",
+    promo_id: pricing.chosenPromo?.id || null,
+    promo_code: pricing.chosenPromo?.code || null,
+    promo_name: pricing.chosenPromo?.name || null,
+    discount_percent: pricing.chosenPromo?.discount_percent || null,
+    discount_mode: pricing.chosenPromo?.discount_mode || null,
+    target_scope: pricing.chosenPromo?.target_scope || null,
+    channel_scope: "custom_order",
+    discount_total: pricing.discountTotal,
+    subtotal_before_discount: pricing.subtotalBeforeDiscount,
+    subtotal_after_discount: pricing.subtotalAfterDiscount,
+    shipping_fee: pricing.shippingFee,
+    final_total: pricing.finalTotal,
+    line_breakdown: pricing.lineBreakdown,
+    is_estimate: false,
+    final_quote_recomputed: true,
+    applied_at: new Date().toISOString(),
+  };
+};
+
+const voidReservedDiscountRedemptions = async (
+  adminClient: ReturnType<typeof createClient>,
+  requestId: string,
+  exceptPromoId: string | null = null,
+) => {
+  if (!requestId) return;
+
+  let query = adminClient
+    .from("discount_redemptions")
+    .update({
+      status: "voided",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("request_id", requestId)
+    .in("status", ["reserved", "applied"]);
+
+  if (exceptPromoId) {
+    query = query.neq("promo_id", exceptPromoId);
+  }
+
+  const { error } = await query;
+  if (error) {
+    console.warn("Unable to void stale discount redemptions:", error);
+  }
+};
+
+const applyReservedDiscountRedemption = async ({
+  adminClient,
+  requestId,
+  userId,
+  pricing,
+}: {
+  adminClient: ReturnType<typeof createClient>;
+  requestId: string;
+  userId: string;
+  pricing: Awaited<ReturnType<typeof calculateCustomOrderPromoPricing>>;
+}) => {
+  const promoId = pricing?.chosenPromo?.id;
+  if (!requestId || !userId || !promoId || pricing.discountTotal <= 0) return;
+
+  const redemptionPayload = {
+    promo_id: promoId,
+    user_id: userId,
+    request_id: requestId,
+    channel_scope: "custom_order",
+    discount_amount: pricing.discountTotal,
+    subtotal_before_discount: pricing.subtotalBeforeDiscount,
+    subtotal_after_discount: pricing.subtotalAfterDiscount,
+    status: "applied",
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data: existingRedemptions, error: fetchError } = await adminClient
+    .from("discount_redemptions")
+    .select("id")
+    .eq("promo_id", promoId)
+    .eq("request_id", requestId)
+    .in("status", ["reserved", "applied"])
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (fetchError) {
+    console.warn("Unable to inspect discount redemptions:", fetchError);
+  }
+
+  const existingId = Array.isArray(existingRedemptions) && existingRedemptions[0]?.id
+    ? existingRedemptions[0].id
+    : null;
+
+  const { error } = existingId
+    ? await adminClient
+        .from("discount_redemptions")
+        .update(redemptionPayload)
+        .eq("id", existingId)
+    : await adminClient
+        .from("discount_redemptions")
+        .insert([redemptionPayload]);
+
+  if (error) {
+    console.warn("Unable to apply discount redemption:", error);
+  }
+};
+
 const parseMultiDeliveryNotes = (notes: unknown) => {
   if (typeof notes !== "string" || !notes.startsWith(MULTI_DELIVERY_NOTES_PREFIX)) {
     return {
@@ -1596,7 +1998,7 @@ serve(async (req) => {
 
         const { data: existingRequest, error: fetchError } = await adminClient
           .from("requests")
-          .select("data, user_id, request_number, status, status_timestamps")
+          .select("data, user_id, request_number, status, status_timestamps, applied_promo_code")
           .eq("id", id)
           .single();
 
@@ -1606,23 +2008,56 @@ serve(async (req) => {
 
         const existingStatus = String(existingRequest?.status || "").trim().toLowerCase();
         const shouldSetQuotedStatus = !existingStatus || existingStatus === "pending";
+        const currentData = parseMaybeJson(existingRequest?.data) as Record<string, unknown>;
+        const quoteBreakdownForPricing = quoteBreakdown && typeof quoteBreakdown === "object"
+          ? quoteBreakdown as Record<string, unknown>
+          : null;
+        const promoPricing = await calculateCustomOrderPromoPricing({
+          adminClient,
+          userId: String(existingRequest?.user_id ?? ""),
+          requestData: {
+            ...(currentData && typeof currentData === "object" ? currentData : {}),
+            applied_promo_code: existingRequest?.applied_promo_code ?? currentData?.applied_promo_code,
+          },
+          quoteBreakdown: quoteBreakdownForPricing,
+          finalItemPrice,
+          finalShippingFee,
+        });
+        const discountSnapshot = buildDiscountSnapshot(promoPricing);
+        const nextQuoteBreakdown = quoteBreakdownForPricing
+          ? {
+              ...quoteBreakdownForPricing,
+              computed_subtotal: promoPricing.subtotalBeforeDiscount,
+              discount_total: promoPricing.discountTotal,
+              subtotal_after_discount: promoPricing.subtotalAfterDiscount,
+              applied_promo_code: promoPricing.appliedPromoCode,
+              shipping_fee: promoPricing.shippingFee,
+              computed_total: promoPricing.finalTotal,
+            }
+          : currentData?.quote_breakdown;
 
         const updatePayload: Record<string, unknown> = {
-          final_price: finalItemPrice + finalShippingFee,
-          shipping_fee: finalShippingFee,
+          final_price: promoPricing.finalTotal,
+          shipping_fee: promoPricing.shippingFee,
+          discount_total: promoPricing.discountTotal,
+          discount_snapshot: discountSnapshot,
+          applied_promo_code: promoPricing.appliedPromoCode,
+          data: {
+            ...(currentData && typeof currentData === "object" ? currentData : {}),
+            ...(nextQuoteBreakdown ? { quote_breakdown: nextQuoteBreakdown } : {}),
+            subtotal_before_discount: promoPricing.subtotalBeforeDiscount,
+            subtotal_after_discount: promoPricing.subtotalAfterDiscount,
+            discount_total: promoPricing.discountTotal,
+            discount_snapshot: discountSnapshot,
+            applied_promo_code: promoPricing.appliedPromoCode,
+            shipping_fee: promoPricing.shippingFee,
+            final_price: promoPricing.finalTotal,
+          },
         };
 
         if (shouldSetQuotedStatus) {
           updatePayload.status = "quoted";
           updatePayload.status_timestamps = withStatusTimestamp(existingRequest?.status_timestamps, "quoted");
-        }
-
-        if (quoteBreakdown) {
-          const currentData = parseMaybeJson(existingRequest?.data);
-          updatePayload.data = {
-            ...(currentData && typeof currentData === "object" ? currentData : {}),
-            quote_breakdown: quoteBreakdown,
-          };
         }
 
         const { data: request, error: updateError } = await adminClient
@@ -1636,12 +2071,24 @@ serve(async (req) => {
           throw updateError;
         }
 
+        if (promoPricing.chosenPromo && promoPricing.discountTotal > 0) {
+          await voidReservedDiscountRedemptions(adminClient, id, promoPricing.chosenPromo.id);
+          await applyReservedDiscountRedemption({
+            adminClient,
+            requestId: id,
+            userId: String(existingRequest?.user_id ?? request?.user_id ?? ""),
+            pricing: promoPricing,
+          });
+        } else {
+          await voidReservedDiscountRedemptions(adminClient, id);
+        }
+
         if (request?.user_id) {
           const { error: notificationError } = await adminClient.from("notifications").insert([
             {
               user_id: request.user_id,
               title: "You have a new quote!",
-              message: `A quote of PHP ${finalItemPrice.toFixed(2)} has been provided for your request #${request.request_number}. Please review and accept it.`,
+              message: `A quote of PHP ${promoPricing.finalTotal.toFixed(2)} has been provided for your request #${request.request_number}. Please review and accept it.`,
               type: "request_update",
               link: "/profile",
             },
@@ -1749,6 +2196,8 @@ serve(async (req) => {
 
             requestRecord = refreshedRequest;
           }
+
+          await voidReservedDiscountRedemptions(adminClient, id);
         }
 
         const notificationConfig = options?.notification;

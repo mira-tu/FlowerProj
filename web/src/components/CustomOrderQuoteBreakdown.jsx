@@ -4,6 +4,8 @@ import {
     summarizeCustomOrderQuoteBreakdown,
 } from '../utils/customOrderQuoteBreakdown';
 
+const PESO = '\u20b1';
+
 const CustomOrderQuoteBreakdown = ({
     breakdown,
     shippingFee = 0,
@@ -11,7 +13,15 @@ const CustomOrderQuoteBreakdown = ({
     className = '',
     style = {},
 }) => {
-    const { groupedLineItems, lineItems, subtotal, shipping, total } = summarizeCustomOrderQuoteBreakdown(
+    const {
+        groupedLineItems,
+        lineItems,
+        subtotal,
+        discountTotal,
+        subtotalAfterDiscount,
+        shipping,
+        total,
+    } = summarizeCustomOrderQuoteBreakdown(
         breakdown,
         shippingFee,
     );
@@ -56,7 +66,7 @@ const CustomOrderQuoteBreakdown = ({
                                                 </span>
                                                 <span className="small text-dark fw-semibold">
                                                     {item.label}
-                                                    {item.showQuantity ? ` (${item.quantity} x ₱${item.unitAmount.toLocaleString()})` : ''}
+                                                    {item.showQuantity ? ` (${item.quantity} x ${PESO}${item.unitAmount.toLocaleString()})` : ''}
                                                 </span>
                                             </div>
                                             {item.reason ? (
@@ -66,7 +76,7 @@ const CustomOrderQuoteBreakdown = ({
                                             ) : null}
                                         </div>
                                         <span className="small fw-semibold text-dark">
-                                            ₱{item.amount.toLocaleString()}
+                                            {PESO}{item.amount.toLocaleString()}
                                         </span>
                                     </div>
                                 </div>
@@ -79,15 +89,27 @@ const CustomOrderQuoteBreakdown = ({
 
                 <div className="d-flex justify-content-between small border-top pt-2 mt-2">
                     <span>Subtotal</span>
-                    <span className="fw-semibold">₱{subtotal.toLocaleString()}</span>
+                    <span className="fw-semibold">{PESO}{subtotal.toLocaleString()}</span>
                 </div>
+                {discountTotal > 0 ? (
+                    <>
+                        <div className="d-flex justify-content-between small text-success">
+                            <span>Discount{breakdown?.applied_promo_code ? ` (${breakdown.applied_promo_code})` : ''}</span>
+                            <span className="fw-semibold">-{PESO}{discountTotal.toLocaleString()}</span>
+                        </div>
+                        <div className="d-flex justify-content-between small">
+                            <span>Subtotal After Discount</span>
+                            <span className="fw-semibold">{PESO}{subtotalAfterDiscount.toLocaleString()}</span>
+                        </div>
+                    </>
+                ) : null}
                 <div className="d-flex justify-content-between small">
                     <span>Delivery Fee</span>
-                    <span className="fw-semibold">₱{shipping.toLocaleString()}</span>
+                    <span className="fw-semibold">{PESO}{shipping.toLocaleString()}</span>
                 </div>
                 <div className="d-flex justify-content-between fw-bold mt-1" style={{ color: 'var(--shop-pink)' }}>
                     <span>Total</span>
-                    <span>₱{total.toLocaleString()}</span>
+                    <span>{PESO}{total.toLocaleString()}</span>
                 </div>
             </div>
         </div>

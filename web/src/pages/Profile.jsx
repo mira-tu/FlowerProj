@@ -43,6 +43,7 @@ import {
 import { getBouquetSizeDisplay } from '../utils/bouquetSize';
 import { sanitizeNameInput, validateNameField } from '../utils/signupValidation';
 import { handleExpiredSessionError } from '../utils/authSession';
+import { getDiscountDisplayFields } from '../utils/discountDisplay';
 
 const parseJsonObject = (value) => {
     if (!value) return {};
@@ -380,6 +381,7 @@ const Profile = ({ user, logout }) => {
                     qty: item.remainingQuantity,
                     quantity: item.remainingQuantity,
                 }));
+                const discountFields = getDiscountDisplayFields(order, requestData);
 
                 return {
                     id: order.id,
@@ -393,6 +395,7 @@ const Profile = ({ user, logout }) => {
                     amount_received: Number(order.amount_received || requestData?.amount_received || 0),
                     total: computedTotal,
                     subtotal: computedSubtotal,
+                    ...discountFields,
                     shipping_fee: shippingFee,
                     delivery_fee: shippingFee,
                     notes: parsedOrderNotes.note,
@@ -464,6 +467,7 @@ const Profile = ({ user, logout }) => {
                 const computedSubtotal = quoteSummary
                     ? roundCurrency(quoteSummary.subtotal)
                     : (requestItemSummary.hasItems ? requestItemSummary.remainingSubtotal : fallbackTotal);
+                const discountFields = getDiscountDisplayFields(request, requestData);
 
                 return {
                     id: `request-${request.id}`, // Prefix to avoid conflicts
@@ -478,6 +482,7 @@ const Profile = ({ user, logout }) => {
                     amount_received: Number(request.amount_received ?? requestData?.amount_received ?? 0),
                     total: computedTotal,
                     subtotal: computedSubtotal,
+                    ...discountFields,
                     notes: request.notes || requestData.notes,
                     data: requestData,
                     refund_snapshot: refundSnapshot,
@@ -1540,9 +1545,12 @@ const Profile = ({ user, logout }) => {
                                     return (
                                         <>
                                             <CustomOrderQuoteBreakdown
-                                            breakdown={breakdown}
-                                            shippingFee={order.shipping_fee}
-                                            title="Price Breakdown"
+                                                breakdown={{
+                                                    ...breakdown,
+                                                    applied_promo_code: order.applied_promo_code || order.data?.applied_promo_code || breakdown.applied_promo_code,
+                                                }}
+                                                shippingFee={order.shipping_fee}
+                                                title="Price Breakdown"
                                                 className="mt-3 pt-3 border-top"
                                             />
                                             {/*
@@ -1628,6 +1636,12 @@ const Profile = ({ user, logout }) => {
                             </div>
                             <div className="order-card-footer">
                                 <div className="order-total">
+                                    {Number(order.discount_total || 0) > 0 ? (
+                                        <div className="small text-success mb-1">
+                                            Promo {order.applied_promo_code ? `(${order.applied_promo_code}) ` : ''}
+                                            saved ₱{Number(order.discount_total || 0).toLocaleString()}
+                                        </div>
+                                    ) : null}
                                     {order.type ? (
                                         order.type === 'customized' ? ( // Special handling for customized bouquets
                                             <>Request Total: <span>₱{(order.total || 0).toLocaleString()}</span></>

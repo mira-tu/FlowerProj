@@ -13,6 +13,7 @@ import RefundRequestPanel from '../components/RefundRequestPanel';
 import { buildTimelineTimestampMap, formatTimelineTimestamp } from '../utils/timelineTimestamps';
 import { formatCustomOrderV4Currency, getSelectedEstimateFromItem, isCustomOrderV4Item } from '../utils/customOrderV4';
 import { summarizeCustomOrderQuoteBreakdown } from '../utils/customOrderQuoteBreakdown';
+import { getDiscountDisplayFields } from '../utils/discountDisplay';
 import {
     applyRequestItemCancellation,
     getCancellationItemDisplayLabel,
@@ -419,6 +420,7 @@ const OrderBookingTracking = () => {
             requestData: normalizedRequestData,
         });
         const refundSnapshot = normalizedRequestData?.refund_snapshot || null;
+        const discountFields = getDiscountDisplayFields(foundRequest, normalizedRequestData);
 
         const transformedRequest = {
             ...foundRequest,
@@ -445,6 +447,7 @@ const OrderBookingTracking = () => {
             receipt_url: paymentMetadata.receiptUrl,
             gcash_reference_number: paymentMetadata.gcashReferenceNumber || null,
             additional_receipts: paymentMetadata.additionalReceipts,
+            ...discountFields,
         };
         setRequest(transformedRequest);
 
@@ -1715,11 +1718,15 @@ const OrderBookingTracking = () => {
                             {request.requestData?.quote_breakdown && (() => {
                                 const breakdown = request.requestData.quote_breakdown;
                                 const { lineItems } = summarizeCustomOrderQuoteBreakdown(breakdown, request.shipping_fee);
+                                const displayBreakdown = {
+                                    ...breakdown,
+                                    applied_promo_code: request.applied_promo_code || request.requestData?.applied_promo_code || breakdown.applied_promo_code,
+                                };
 
                                 return (
                                     <>
                                         <CustomOrderQuoteBreakdown
-                                            breakdown={breakdown}
+                                            breakdown={displayBreakdown}
                                             shippingFee={request.shipping_fee}
                                             title={lineItems.length ? 'Quote Price Breakdown' : 'Quote Breakdown'}
                                             className="mt-2 mb-3"
@@ -1761,6 +1768,12 @@ const OrderBookingTracking = () => {
                                         {shouldShowFinalPrice ? `₱${request.finalPrice.toLocaleString()}` : 'For Discussion'}
                                     </span>
                                 </div>
+                                {Number(request.discount_total || request.requestData?.discount_total || 0) > 0 ? (
+                                    <div className="small text-success text-end mt-1">
+                                        Promo {request.applied_promo_code || request.requestData?.applied_promo_code ? `(${request.applied_promo_code || request.requestData?.applied_promo_code}) ` : ''}
+                                        saved ₱{Number(request.discount_total || request.requestData?.discount_total || 0).toLocaleString()}
+                                    </div>
+                                ) : null}
                             </div>
                             {request.type === 'booking' && request.status === 'quoted' && (
                                 <div className="mt-4 pt-4 border-top">

@@ -18,6 +18,16 @@ import { reserveRequestStockAllocations, resolveBookingRequestStockReservations 
 import { PICKUP_TIME_OPTIONS, getEarliestPickupDate, isPickupDateSelectable } from '../utils/businessHours';
 import { buildTentativePricingSummary, getTentativeBreakdownFromItem } from '../utils/customOrderTentativePricing';
 import { fetchCustomOrderCatalog } from '../utils/customOrderCatalog';
+import {
+    PROMO_CHANNELS,
+    buildDiscountFields,
+    buildDiscountSnapshot,
+    calculatePromoPricing,
+    fetchDiscountPromos,
+    getPromoValidationMessage,
+    normalizePromoCode,
+    recordDiscountRedemption,
+} from '../utils/promoEngine';
 
 const pickupTimes = PICKUP_TIME_OPTIONS;
 const DEFAULT_SHIPPING_FEE = 100;
@@ -222,6 +232,15 @@ const BookingCheckout = ({ user }) => {
     const [multiAddressEnabled, setMultiAddressEnabled] = useState(false);
     const [deliveryAssignments, setDeliveryAssignments] = useState([]);
     const [catalogArrangements, setCatalogArrangements] = useState([]);
+    const [promoCodeInput, setPromoCodeInput] = useState('');
+    const [appliedPromoCode, setAppliedPromoCode] = useState('');
+    const [promoState, setPromoState] = useState({
+        promos: [],
+        loading: false,
+        unavailable: false,
+        message: '',
+        type: '',
+    });
 
     const showInfoModal = (title, message, linkTo = '', linkText = '') => {
         setInfoModal({ show: true, title, message, linkTo, linkText });
@@ -280,6 +299,44 @@ const BookingCheckout = ({ user }) => {
             isMounted = false;
         };
     }, []);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadPromos = async () => {
+            setPromoState((current) => ({ ...current, loading: true }));
+            try {
+                const result = await fetchDiscountPromos(supabase, {
+                    channelScope: PROMO_CHANNELS.CUSTOM_ORDER,
+                });
+                if (isMounted) {
+                    setPromoState({
+                        promos: result.promos,
+                        loading: false,
+                        unavailable: result.unavailable,
+                        message: result.unavailable ? 'Discount promos are not available until the database migration is applied.' : '',
+                        type: result.unavailable ? 'warning' : '',
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading custom order discount promos:', error);
+                if (isMounted) {
+                    setPromoState({
+                        promos: [],
+                        loading: false,
+                        unavailable: false,
+                        message: 'Discount promos could not be loaded right now.',
+                        type: 'error',
+                    });
+                }
+            }
+        };
+
+        loadPromos();
+        return () => {
+            isMounted = false;
+        };
+    }, [user?.id]);
 
     useEffect(() => {
         const fetchBarangayFees = async () => {
@@ -364,6 +421,138 @@ const BookingCheckout = ({ user }) => {
         [estimatedInquiryTotal, tentativeInquiryBreakdowns]
     );
     const customOrderReviewShippingFee = 0;
+    const customOrderArrangementTargets = useMemo(() => Array.from(new Set(
+        inquiryItems.flatMap((item) => [
+            item.arrangementSummary,
+            item.arrangementType,
+            ...(Array.isArray(item.arrangementTypes) ? item.arrangementTypes : []),
+            ...(Array.isArray(item.arrangementSelections)
+                ? item.arrangementSelections.flatMap((selection) => [
+                    selection?.arrangement_label,
+                    selection?.arrangementLabel,
+                    selection?.arrangement_type,
+                    selection?.arrangementType,
+                    selection?.label,
+                    selection?.value,
+                ])
+                : []),
+        ].filter(Boolean))
+    )), [inquiryItems]);
+    const estimatedDiscountSubtotal = hasEstimatedInquiryTotal
+        ? estimatedInquiryTotal
+        : (
+            combinedPricingSummary.subtotalMax
+            || combinedPricingSummary.subtotalMin
+            || 0
+        );
+    const promoLines = useMemo(() => {
+        const lines = inquiryItems.map((item, index) => {
+            const tentativeBreakdown = tentativeInquiryBreakdowns[index];
+            const estimate = getSelectedEstimateFromItem(item)?.estimatedPrice
+                || item.estimatedPrice
+                || tentativeBreakdown?.subtotalMax
+                || tentativeBreakdown?.subtotalMin
+                || 0;
+            const arrangementTargets = [
+                item.arrangementSummary,
+                item.arrangementType,
+                ...(Array.isArray(item.arrangementTypes) ? item.arrangementTypes : []),
+                ...(Array.isArray(item.arrangementSelections)
+                    ? item.arrangementSelections.flatMap((selection) => [
+                        selection?.arrangement_label,
+                        selection?.arrangementLabel,
+                        selection?.arrangement_type,
+                        selection?.arrangementType,
+                        selection?.label,
+                        selection?.value,
+                    ])
+                    : []),
+            ].filter(Boolean);
+
+            return {
+                key: `custom-order-${item.id || index}-${index}`,
+                id: item.id || index,
+                name: item.name || item.occasion || `Custom Order ${index + 1}`,
+                quantity: 1,
+                unitPrice: estimate,
+                originalUnitPrice: estimate,
+                targetKeys: [
+                    item.id,
+                    item.occasion,
+                    item.name,
+                    ...arrangementTargets,
+                ].filter(Boolean),
+                occasionTargets: [item.occasion].filter(Boolean),
+                arrangementTargets,
+            };
+        });
+
+        if (!lines.some((line) => Number(line.unitPrice || 0) > 0) && estimatedDiscountSubtotal > 0) {
+            return [{
+                key: 'custom-order-estimate',
+                id: 'custom-order-estimate',
+                name: inquirySummary.summaryLabel,
+                quantity: 1,
+                unitPrice: estimatedDiscountSubtotal,
+                originalUnitPrice: estimatedDiscountSubtotal,
+                targetKeys: [inquirySummary.summaryLabel, ...customOrderArrangementTargets],
+                occasionTargets: inquirySummary.combinedOccasions,
+                arrangementTargets: customOrderArrangementTargets,
+            }];
+        }
+
+        return lines;
+    }, [customOrderArrangementTargets, estimatedDiscountSubtotal, inquiryItems, inquirySummary, tentativeInquiryBreakdowns]);
+    const promoPricing = useMemo(() => calculatePromoPricing({
+        lines: promoLines,
+        promos: promoState.promos,
+        channelScope: PROMO_CHANNELS.CUSTOM_ORDER,
+        enteredCode: appliedPromoCode,
+        shippingFee: customOrderReviewShippingFee,
+        occasions: inquirySummary.combinedOccasions,
+        arrangementTargets: customOrderArrangementTargets,
+    }), [appliedPromoCode, customOrderArrangementTargets, inquirySummary.combinedOccasions, promoLines, promoState.promos]);
+    const estimatedDiscountTotal = promoPricing.discountTotal;
+    const estimatedSubtotalAfterDiscount = promoPricing.subtotalAfterDiscount;
+    const promoFeedbackMessage = appliedPromoCode
+        ? getPromoValidationMessage(promoPricing.validation)
+        : (
+            promoPricing.chosenPromo
+                ? `${promoPricing.chosenPromo.name || promoPricing.chosenPromo.code} estimated automatically.`
+                : ''
+        );
+    const promoFeedbackType = appliedPromoCode && promoPricing.validation?.status !== 'applied'
+        ? 'error'
+        : (promoFeedbackMessage ? 'success' : '');
+    const estimatedDiscountSnapshot = useMemo(() => {
+        const snapshot = buildDiscountSnapshot(promoPricing);
+        return snapshot
+            ? {
+                ...snapshot,
+                is_estimate: true,
+                final_quote_recomputed: false,
+            }
+            : null;
+    }, [promoPricing]);
+    const handleApplyPromo = () => {
+        const normalizedCode = normalizePromoCode(promoCodeInput);
+        if (!normalizedCode) {
+            setPromoState((current) => ({
+                ...current,
+                message: 'Enter a discount code first.',
+                type: 'error',
+            }));
+            return;
+        }
+        setAppliedPromoCode(normalizedCode);
+        setPromoCodeInput(normalizedCode);
+    };
+
+    const handleRemovePromo = () => {
+        setAppliedPromoCode('');
+        setPromoCodeInput('');
+        setPromoState((current) => ({ ...current, message: '', type: '' }));
+    };
 
     const handleSubmitInquiry = async () => {
         if (!user) {
@@ -465,6 +654,8 @@ const BookingCheckout = ({ user }) => {
                 payment_status: 'to_pay',
                 image_url: firstItemImage,
                 notes: commonNotes || null,
+                ...buildDiscountFields(promoPricing),
+                discount_snapshot: estimatedDiscountSnapshot,
                 data: {
                     items: uploadedItems,
                     requestVariant: uploadedItems.some((item) => item.custom_order_version === 4)
@@ -491,10 +682,18 @@ const BookingCheckout = ({ user }) => {
                     selectedFlowers: combinedSelectedFlowers,
                     flowers: combinedSelectedFlowers.join(', ') || null,
                     estimated_total: hasEstimatedInquiryTotal ? estimatedInquiryTotal : null,
+                    estimated_discount_total: estimatedDiscountTotal,
+                    discount_total: estimatedDiscountTotal,
+                    discount_snapshot: estimatedDiscountSnapshot,
+                    applied_promo_code: promoPricing.appliedPromoCode,
+                    subtotal_before_discount: promoPricing.subtotalBeforeDiscount,
+                    subtotal_after_discount: estimatedSubtotalAfterDiscount,
                     tentative_pricing: combinedPricingSummary.hasAnyEstimate ? {
                         has_complete_estimate: combinedPricingSummary.hasCompleteEstimate,
                         subtotal_min: combinedPricingSummary.subtotalMin,
                         subtotal_max: combinedPricingSummary.subtotalMax,
+                        discount_total: estimatedDiscountTotal,
+                        subtotal_after_discount: estimatedSubtotalAfterDiscount,
                     } : null,
                     colorPreference: combinedColorPreference || firstItem.colorPreference || null,
                     specialInstructions: commonNotes || firstItem.specialInstructions || null,
@@ -519,6 +718,18 @@ const BookingCheckout = ({ user }) => {
                 .select('id')
                 .single();
             if (error) throw error;
+
+            try {
+                await recordDiscountRedemption(supabase, {
+                    pricing: promoPricing,
+                    userId: user.id,
+                    requestId: insertedRequest.id,
+                    channelScope: PROMO_CHANNELS.CUSTOM_ORDER,
+                    status: 'reserved',
+                });
+            } catch (redemptionError) {
+                console.error('Error reserving custom order discount redemption:', redemptionError);
+            }
 
             if (stockAllocations.length > 0 && insertedRequest?.id) {
                 const reservationResult = await reserveRequestStockAllocations({
@@ -793,6 +1004,55 @@ const BookingCheckout = ({ user }) => {
                                     <span>{combinedPricingSummary.hasCompleteEstimate ? combinedPricingSummary.formattedSubtotalRange : 'To be quoted'}</span>
                                 </div>
                             )}
+                            <div className="mb-3">
+                                <label className="form-label small fw-bold mb-2">Discount Code</label>
+                                <div className="d-flex gap-2">
+                                    <input
+                                        type="text"
+                                        className="form-control"
+                                        value={promoCodeInput}
+                                        onChange={(event) => setPromoCodeInput(normalizePromoCode(event.target.value))}
+                                        placeholder="Enter code"
+                                        disabled={isProcessing || promoState.loading}
+                                    />
+                                    {appliedPromoCode ? (
+                                        <button
+                                            type="button"
+                                            className="btn btn-outline-secondary"
+                                            onClick={handleRemovePromo}
+                                            disabled={isProcessing}
+                                        >
+                                            Remove
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            className="btn btn-outline-primary"
+                                            onClick={handleApplyPromo}
+                                            disabled={isProcessing || promoState.loading}
+                                        >
+                                            Apply
+                                        </button>
+                                    )}
+                                </div>
+                                {(promoFeedbackMessage || promoState.message) && (
+                                    <div className={`small mt-2 ${promoFeedbackType === 'error' || promoState.type === 'error' ? 'text-danger' : promoState.type === 'warning' ? 'text-muted' : 'text-success'}`}>
+                                        <i className={`fas ${promoFeedbackType === 'error' || promoState.type === 'error' ? 'fa-exclamation-circle' : 'fa-tag'} me-1`}></i>
+                                        {promoFeedbackMessage || promoState.message}
+                                    </div>
+                                )}
+                            </div>
+                            {estimatedDiscountTotal > 0 && (
+                                <>
+                                    <div className="summary-row text-success">
+                                        <span>Estimated discount{promoPricing.chosenPromo?.code ? ` (${promoPricing.chosenPromo.code})` : ''}</span>
+                                        <span>-{formatCustomOrderV4Currency(estimatedDiscountTotal)}</span>
+                                    </div>
+                                    <div className="small text-muted mb-2">
+                                        This is a tentative discount. The final discount will be recomputed from the admin quote.
+                                    </div>
+                                </>
+                            )}
                             <div className="summary-row">
                                 <span>{deliveryMethod === 'pickup' ? 'Pickup' : 'Delivery Fee'}</span>
                                 <span>{deliveryMethod === 'pickup' ? 'FREE' : 'Set after review'}</span>
@@ -801,7 +1061,9 @@ const BookingCheckout = ({ user }) => {
                             <div className="summary-row total">
                                 <span>Tentative Total</span>
                                 <span className="fw-bold fs-5">
-                                    {combinedPricingSummary.hasCompleteEstimate
+                                    {estimatedDiscountTotal > 0 && promoPricing.finalTotal > 0
+                                        ? `Estimate: ${formatCustomOrderV4Currency(promoPricing.finalTotal)}`
+                                        : combinedPricingSummary.hasCompleteEstimate
                                         ? combinedPricingSummary.formattedTotalRange
                                         : hasEstimatedInquiryTotal
                                             ? `Guide: ${formatCustomOrderV4Currency(estimatedInquiryTotal)}`

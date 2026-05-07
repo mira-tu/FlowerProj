@@ -20,6 +20,15 @@ import {
     normalizeCustomOrderQuoteLineItems,
     summarizeCustomOrderQuoteBreakdown,
 } from '../utils/customOrderQuoteBreakdown';
+import {
+    PROMO_CHANNELS,
+    applyReservedDiscountRedemption,
+    buildDiscountFields,
+    buildDiscountSnapshot,
+    calculatePromoPricing,
+    fetchDiscountPromos,
+    voidReservedDiscountRedemptions,
+} from '../utils/promoEngine';
 
 const ADMIN_WORKFLOW_FUNCTION = 'manage-admin-workflows';
 
@@ -1374,13 +1383,143 @@ const completeOrderDeliveryStopDirect = async (orderId, unitKey, options = {}) =
     };
 };
 
+const collectTextValues = (...values) => {
+    const flattened = [];
+    const visit = (value) => {
+        if (Array.isArray(value)) {
+            value.forEach(visit);
+            return;
+        }
+        flattened.push(value);
+    };
+    values.forEach(visit);
+    return flattened
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean);
+};
+
+const collectCustomOrderPromoContext = (requestData = {}, quoteBreakdown = null) => {
+    const items = Array.isArray(requestData?.items) ? requestData.items : [];
+    const quoteLines = normalizeCustomOrderQuoteLineItems(quoteBreakdown || {});
+    const occasions = collectTextValues(
+        requestData?.occasion,
+        requestData?.combined_occasions,
+        items.map((item) => item?.occasion)
+    );
+    const arrangementTargets = collectTextValues(
+        requestData?.arrangementSummary,
+        requestData?.arrangementType,
+        requestData?.arrangementTypes,
+        requestData?.combined_arrangements,
+        requestData?.arrangementSelections?.map?.((selection) => [
+            selection?.arrangement_label,
+            selection?.arrangementLabel,
+            selection?.arrangement_type,
+            selection?.arrangementType,
+            selection?.label,
+            selection?.value,
+        ]),
+        items.map((item) => [
+            item?.arrangementSummary,
+            item?.arrangementType,
+            item?.arrangementTypes,
+            item?.arrangementSelections?.map?.((selection) => [
+                selection?.arrangement_label,
+                selection?.arrangementLabel,
+                selection?.arrangement_type,
+                selection?.arrangementType,
+                selection?.label,
+                selection?.value,
+            ]),
+        ]),
+        quoteLines.map((line) => [line?.label, line?.type, line?.arrangementGroup])
+    );
+
+    return {
+        occasions: Array.from(new Set(occasions)),
+        arrangementTargets: Array.from(new Set(arrangementTargets)),
+        quoteLines,
+    };
+};
+
+const buildCustomOrderQuotePromoLines = ({ quoteBreakdown, finalItemPrice, requestData }) => {
+    const { quoteLines, occasions, arrangementTargets } = collectCustomOrderPromoContext(requestData, quoteBreakdown);
+    const nonDeliveryQuoteLines = quoteLines.filter((line) => line.type !== 'delivery');
+
+    if (nonDeliveryQuoteLines.length) {
+        return nonDeliveryQuoteLines.map((line, index) => ({
+            key: `quote-${line.key || index}`,
+            id: line.key || index,
+            name: line.label || `Quote Item ${index + 1}`,
+            quantity: 1,
+            unitPrice: line.amount,
+            originalUnitPrice: line.amount,
+            targetKeys: collectTextValues(line.label, line.type, line.arrangementGroup, arrangementTargets),
+            occasionTargets: occasions,
+            arrangementTargets: collectTextValues(line.label, line.type, line.arrangementGroup, arrangementTargets),
+        }));
+    }
+
+    return [{
+        key: 'quote-total',
+        id: 'quote-total',
+        name: requestData?.summary_label || requestData?.occasion || 'Custom Order Quote',
+        quantity: 1,
+        unitPrice: finalItemPrice,
+        originalUnitPrice: finalItemPrice,
+        targetKeys: collectTextValues(requestData?.summary_label, requestData?.occasion, arrangementTargets),
+        occasionTargets: occasions,
+        arrangementTargets,
+    }];
+};
+
+const resolveCustomOrderQuotePromoPricing = async ({
+    existingRequest,
+    finalItemPrice,
+    finalShippingFee,
+    quoteBreakdown,
+}) => {
+    const requestData = parseJsonObject(existingRequest?.data);
+    const promoCode = existingRequest?.applied_promo_code
+        || requestData?.applied_promo_code
+        || requestData?.discount_snapshot?.promo_code
+        || requestData?.discountSnapshot?.promoCode
+        || '';
+    const { occasions, arrangementTargets } = collectCustomOrderPromoContext(requestData, quoteBreakdown);
+    const lines = buildCustomOrderQuotePromoLines({
+        quoteBreakdown,
+        finalItemPrice,
+        requestData,
+    });
+
+    let promos = [];
+    try {
+        const result = await fetchDiscountPromos(supabase, {
+            channelScope: PROMO_CHANNELS.CUSTOM_ORDER,
+        });
+        promos = result.promos || [];
+    } catch (error) {
+        console.warn('Unable to load custom order promos for quote recompute:', error?.message || error);
+    }
+
+    return calculatePromoPricing({
+        lines,
+        promos,
+        channelScope: PROMO_CHANNELS.CUSTOM_ORDER,
+        enteredCode: promoCode,
+        shippingFee: finalShippingFee,
+        occasions,
+        arrangementTargets,
+    });
+};
+
 const provideQuoteDirect = async (id, price, shippingFee = 0, quoteBreakdown = null) => {
     const finalItemPrice = parseFloat(price) || 0;
     const finalShippingFee = parseFloat(shippingFee) || 0;
 
     const { data: existingRequest, error: fetchError } = await supabase
         .from('requests')
-        .select('data, user_id, request_number, status, status_timestamps')
+        .select('data, user_id, request_number, status, status_timestamps, applied_promo_code')
         .eq('id', id)
         .single();
 
@@ -1390,10 +1529,26 @@ const provideQuoteDirect = async (id, price, shippingFee = 0, quoteBreakdown = n
 
     const existingStatus = String(existingRequest?.status || '').trim().toLowerCase();
     const shouldSetQuotedStatus = !existingStatus || existingStatus === 'pending';
+    const promoPricing = await resolveCustomOrderQuotePromoPricing({
+        existingRequest,
+        finalItemPrice,
+        finalShippingFee,
+        quoteBreakdown,
+    });
+    const discountSnapshot = buildDiscountSnapshot(promoPricing)
+        ? {
+            ...buildDiscountSnapshot(promoPricing),
+            is_estimate: false,
+            final_quote_recomputed: true,
+        }
+        : null;
+    const discountFields = buildDiscountFields(promoPricing);
 
     const updatePayload = {
-        final_price: finalItemPrice + finalShippingFee,
+        final_price: promoPricing.finalTotal,
         shipping_fee: finalShippingFee,
+        ...discountFields,
+        discount_snapshot: discountSnapshot,
     };
 
     if (shouldSetQuotedStatus) {
@@ -1401,12 +1556,23 @@ const provideQuoteDirect = async (id, price, shippingFee = 0, quoteBreakdown = n
         updatePayload.status_timestamps = withStatusTimestamp(existingRequest?.status_timestamps, 'quoted');
     }
 
-    if (quoteBreakdown) {
-        updatePayload.data = {
-            ...parseJsonObject(existingRequest?.data),
-            quote_breakdown: quoteBreakdown,
-        };
-    }
+    const currentData = parseJsonObject(existingRequest?.data);
+    updatePayload.data = {
+        ...currentData,
+        quote_breakdown: quoteBreakdown ? {
+            ...quoteBreakdown,
+            computed_subtotal: promoPricing.subtotalBeforeDiscount,
+            discount_total: promoPricing.discountTotal,
+            subtotal_after_discount: promoPricing.subtotalAfterDiscount,
+            computed_total: promoPricing.finalTotal,
+        } : currentData?.quote_breakdown,
+        discount_total: promoPricing.discountTotal,
+        discount_snapshot: discountSnapshot,
+        applied_promo_code: promoPricing.appliedPromoCode,
+        final_price: promoPricing.finalTotal,
+        subtotal_before_discount: promoPricing.subtotalBeforeDiscount,
+        subtotal_after_discount: promoPricing.subtotalAfterDiscount,
+    };
 
     const { data: request, error } = await supabase
         .from('requests')
@@ -1419,13 +1585,28 @@ const provideQuoteDirect = async (id, price, shippingFee = 0, quoteBreakdown = n
         throw error;
     }
 
+    try {
+        if (promoPricing.chosenPromo) {
+            await applyReservedDiscountRedemption(supabase, {
+                pricing: promoPricing,
+                userId: request.user_id,
+                requestId: id,
+                channelScope: PROMO_CHANNELS.CUSTOM_ORDER,
+            });
+        } else {
+            await voidReservedDiscountRedemptions(supabase, { requestId: id });
+        }
+    } catch (redemptionError) {
+        console.error('Failed to update custom order promo redemption:', redemptionError);
+    }
+
     if (request?.user_id) {
         const { error: notificationError } = await supabase
             .from('notifications')
             .insert([{
                 user_id: request.user_id,
                 title: 'You have a new quote!',
-                message: `A quote of PHP ${finalItemPrice.toFixed(2)} has been provided for your request #${request.request_number}. Please review and accept it.`,
+                message: `A quote of PHP ${Number(request.final_price || promoPricing.finalTotal).toFixed(2)} has been provided for your request #${request.request_number}. Please review and accept it.`,
                 type: 'request_update',
                 link: '/profile',
             }]);
@@ -1707,6 +1888,9 @@ const ORDER_QUERY_OPTION_FALLBACKS = [
     ['amount_received', 'includeAmountReceived', 'amount_received'],
     ['additional_receipts', 'includeAdditionalReceipts', 'additional_receipts'],
     ['assigned_rider', 'includeAssignedRider', 'assigned_rider'],
+    ['discount_total', 'includeDiscountTotal', 'discount_total'],
+    ['discount_snapshot', 'includeDiscountSnapshot', 'discount_snapshot'],
+    ['applied_promo_code', 'includeAppliedPromoCode', 'applied_promo_code'],
 ];
 
 const ORDER_EMBEDDED_USER_FALLBACKS = [
@@ -1730,6 +1914,9 @@ const REQUEST_QUERY_OPTION_FALLBACKS = [
     ['additional_receipts', 'includeAdditionalReceipts', 'additional_receipts'],
     ['assigned_rider', 'includeAssignedRider', 'assigned_rider'],
     ['status_timestamps', 'includeStatusTimestamps', 'status_timestamps'],
+    ['discount_total', 'includeDiscountTotal', 'discount_total'],
+    ['discount_snapshot', 'includeDiscountSnapshot', 'discount_snapshot'],
+    ['applied_promo_code', 'includeAppliedPromoCode', 'applied_promo_code'],
 ];
 
 const REQUEST_EMBEDDED_USER_FALLBACKS = [
@@ -1781,6 +1968,9 @@ const buildAdminRequestSelectColumns = (options = {}) => {
         ...(options.includeAdditionalReceipts !== false ? ['additional_receipts'] : []),
         ...(options.includeAssignedRider !== false ? ['assigned_rider'] : []),
         ...(options.includeStatusTimestamps !== false ? ['status_timestamps'] : []),
+        ...(options.includeDiscountTotal !== false ? ['discount_total'] : []),
+        ...(options.includeDiscountSnapshot !== false ? ['discount_snapshot'] : []),
+        ...(options.includeAppliedPromoCode !== false ? ['applied_promo_code'] : []),
     ];
 
     if (options.includeUsers !== false) {
@@ -2997,6 +3187,11 @@ const updateRequestStatusDirect = async (id, status, options = {}) => {
 
     if (shouldReleaseStock) {
         const released = await syncRequestStockAllocationState(id, current?.data, 'release');
+        try {
+            await voidReservedDiscountRedemptions(supabase, { requestId: id });
+        } catch (redemptionError) {
+            console.error('Failed to void reserved discount redemption for request:', redemptionError);
+        }
         if (released) {
             const { data: refreshedRequest, error: refreshError } = await supabase
                 .from('requests')
@@ -4173,6 +4368,9 @@ export const adminAPI = {
             includeAmountReceived = true,
             includeAdditionalReceipts = true,
             includeAssignedRider = true,
+            includeDiscountTotal = true,
+            includeDiscountSnapshot = true,
+            includeAppliedPromoCode = true,
             includeUsers = true,
             includeUserEmail = true,
             includeUserPhone = true,
@@ -4199,6 +4397,9 @@ export const adminAPI = {
                 'total',
                 'subtotal',
                 'shipping_fee',
+                ...(includeDiscountTotal ? ['discount_total'] : []),
+                ...(includeDiscountSnapshot ? ['discount_snapshot'] : []),
+                ...(includeAppliedPromoCode ? ['applied_promo_code'] : []),
                 ...(includeCancellationReason ? ['cancellation_reason'] : []),
                 'delivery_method',
                 ...(includeNotes ? ['notes'] : []),

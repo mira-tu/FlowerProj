@@ -28,6 +28,7 @@ import {
     writeWithOptionalColumns,
 } from '../utils/gcashPayments';
 import { summarizeCancellationItems } from '../utils/orderCancellation';
+import { getDiscountDisplayFields } from '../utils/discountDisplay';
 import {
     buildRefundReasonFromCancelledEntity,
     canRequestRefundAfterCancellation,
@@ -207,6 +208,7 @@ const OrderCustomizedTracking = ({ user }) => {
             });
             const refundSnapshot = foundRequest.data?.refund_snapshot || null;
 
+            const discountFields = getDiscountDisplayFields(foundRequest, foundRequest.data || {});
             const transformedRequest = {
                 ...foundRequest,
                 rider: riderDetails,
@@ -246,6 +248,7 @@ const OrderCustomizedTracking = ({ user }) => {
                 receipt_url: paymentMetadata.receiptUrl,
                 gcash_reference_number: paymentMetadata.gcashReferenceNumber || null,
                 additional_receipts: paymentMetadata.additionalReceipts,
+                ...discountFields,
             };
             setRequest(transformedRequest);
 
@@ -810,6 +813,17 @@ const OrderCustomizedTracking = ({ user }) => {
         );
     }
 
+    const requestDiscountTotal = Number(request.discount_total || request.requestData?.discount_total || 0);
+    const requestSubtotalBeforeDiscount = requestDiscountTotal > 0
+        ? Number(request.subtotal_before_discount || request.requestData?.subtotal_before_discount || 0)
+            || Number(request.requestData?.subtotal || 0) + requestDiscountTotal
+        : Number(request.requestData?.subtotal || 0);
+    const requestSubtotalAfterDiscount = requestDiscountTotal > 0
+        ? Number(request.subtotal_after_discount || request.requestData?.subtotal_after_discount || 0)
+            || Math.max(0, requestSubtotalBeforeDiscount - requestDiscountTotal)
+        : Number(request.requestData?.subtotal || 0);
+    const requestAppliedPromoCode = request.applied_promo_code || request.requestData?.applied_promo_code || '';
+
     return (
         <div className="tracking-container">
             <div className="container">
@@ -1147,8 +1161,20 @@ const OrderCustomizedTracking = ({ user }) => {
                             <div className="mt-4 pt-3 border-top">
                                 <div className="d-flex justify-content-between mb-2 small text-muted">
                                     <span>Subtotal</span>
-                                    <span>{request.requestData.subtotal ? `₱${request.requestData.subtotal.toLocaleString()}` : 'N/A'}</span>
+                                    <span>{requestSubtotalBeforeDiscount ? `₱${requestSubtotalBeforeDiscount.toLocaleString()}` : 'N/A'}</span>
                                 </div>
+                                {requestDiscountTotal > 0 ? (
+                                    <>
+                                        <div className="d-flex justify-content-between mb-2 small text-success">
+                                            <span>Discount{requestAppliedPromoCode ? ` (${requestAppliedPromoCode})` : ''}</span>
+                                            <span>-₱{requestDiscountTotal.toLocaleString()}</span>
+                                        </div>
+                                        <div className="d-flex justify-content-between mb-2 small text-muted">
+                                            <span>Subtotal After Discount</span>
+                                            <span>₱{requestSubtotalAfterDiscount.toLocaleString()}</span>
+                                        </div>
+                                    </>
+                                ) : null}
                                 <div className="d-flex justify-content-between mb-3 small text-muted">
                                     <span>Delivery Fee</span>
                                     <span>

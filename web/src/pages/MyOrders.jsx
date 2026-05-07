@@ -33,6 +33,7 @@ import {
     hasActiveRefundRequest,
 } from '../utils/customerRefunds';
 import { getBouquetSizeDisplay } from '../utils/bouquetSize';
+import { getDiscountDisplayFields } from '../utils/discountDisplay';
 import '../styles/Shop.css';
 
 const orderTabs = [
@@ -223,6 +224,7 @@ const MyOrders = () => {
                 const computedTotal = preferredSummary.hasItems
                     ? (preferredSummary.allCancelled ? 0 : roundCurrency(computedSubtotal + shippingFee))
                     : parseFloat(order.total || 0);
+                const discountFields = getDiscountDisplayFields(order, requestData);
 
                 return {
                     id: order.id,
@@ -235,6 +237,7 @@ const MyOrders = () => {
                     amount_received: Number(order.amount_received || requestData?.amount_received || 0),
                     total: computedTotal,
                     subtotal: computedSubtotal,
+                    ...discountFields,
                     shipping_fee: shippingFee,
                     notes: parsedOrderNotes.note,
                     notesMetadata: parsedOrderNotes.metadata || null,
@@ -294,6 +297,7 @@ const MyOrders = () => {
                 const computedTotal = requestItemSummary.hasItems
                     ? (requestItemSummary.allCancelled ? 0 : roundCurrency(requestItemSummary.remainingSubtotal + shippingFee))
                     : fallbackTotal;
+                const discountFields = getDiscountDisplayFields(request, requestData);
                 return {
                     id: `request-${request.id}`, // Prefix to avoid conflicts
                     request_id: request.id,
@@ -307,6 +311,7 @@ const MyOrders = () => {
                     amount_received: Number(request.amount_received ?? requestData?.amount_received ?? 0),
                     total: computedTotal,
                     subtotal: requestItemSummary.hasItems ? requestItemSummary.remainingSubtotal : fallbackTotal,
+                    ...discountFields,
                     shipping_fee: shippingFee,
                     notes: request.notes,
                     data: requestData,
@@ -1618,6 +1623,12 @@ const MyOrders = () => {
                                 </div>
                                 <div className="order-card-footer">
                                     <div className="order-total">
+                                        {Number(order.discount_total || 0) > 0 ? (
+                                            <div className="small text-success mb-1">
+                                                Promo {order.applied_promo_code ? `(${order.applied_promo_code}) ` : ''}
+                                                saved ₱{Number(order.discount_total || 0).toLocaleString()}
+                                            </div>
+                                        ) : null}
                                         {order.type ? 'Request Total' : 'Order Total'}: <span>₱{(order.total || order.price || 0).toLocaleString()}</span>
                                     </div>
                                     <div className="order-actions">

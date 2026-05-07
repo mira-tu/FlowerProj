@@ -167,14 +167,22 @@ export const summarizeCustomOrderQuoteBreakdown = (breakdown = {}, fallbackShipp
   const shipping = hasValue(breakdown?.shipping_fee ?? breakdown?.shippingFee)
     ? parseMoney(breakdown?.shipping_fee ?? breakdown?.shippingFee)
     : (derivedShipping || parseMoney(fallbackShipping));
+  const discountTotal = hasValue(breakdown?.discount_total ?? breakdown?.discountTotal)
+    ? parseMoney(breakdown?.discount_total ?? breakdown?.discountTotal)
+    : 0;
+  const subtotalAfterDiscount = hasValue(breakdown?.subtotal_after_discount ?? breakdown?.subtotalAfterDiscount)
+    ? parseMoney(breakdown?.subtotal_after_discount ?? breakdown?.subtotalAfterDiscount)
+    : Math.max(0, subtotal - discountTotal);
   const total = hasValue(breakdown?.computed_total ?? breakdown?.total)
     ? parseMoney(breakdown?.computed_total ?? breakdown?.total)
-    : subtotal + shipping;
+    : subtotalAfterDiscount + shipping;
 
   return {
     lineItems,
     groupedLineItems: groupCustomOrderQuoteLineItems(lineItems.filter((item) => item.type !== 'delivery')),
     subtotal,
+    discountTotal,
+    subtotalAfterDiscount,
     shipping,
     total,
   };

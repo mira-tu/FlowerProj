@@ -19,6 +19,7 @@ import Toast from 'react-native-toast-message';
 import { adminAPI, BASE_URL } from '../../../config/api';
 import { supabase } from '../../../config/supabase';
 import styles from '../../AdminDashboard.styles';
+import PromoManager from '../components/PromoManager';
 import ProductCard from '../components/ProductCard';
 
 const STOCK_CATEGORY_TABS = [
@@ -781,6 +782,15 @@ const StockTab = () => {
           <Text style={styles.addButtonText}>{savingPromo ? 'Saving...' : 'Save Studio Promo'}</Text>
         </TouchableOpacity>
       </View>
+
+      <PromoManager
+        channelScope="customized"
+        title="Customizer Studio Promos"
+        customizedTargetOptions={stockItems.map((item) => ({
+          id: String(item.id),
+          label: `${getStockDisplayName(item)}${item.category ? ` - ${item.category}` : ''}`,
+        }))}
+      />
 
       <TouchableOpacity style={styles.addButton} onPress={() => { resetForm(); setModalVisible(true); }}>
         <Ionicons name="add" size={20} color="#fff" />

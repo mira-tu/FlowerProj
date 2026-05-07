@@ -18,6 +18,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../../../config/supabase';
 import styles from '../../AdminDashboard.styles';
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal';
+import PromoManager from '../components/PromoManager';
 import {
   buildCustomOrderItemId,
   buildCustomOrderOptionValue,
@@ -642,6 +643,19 @@ const CustomOrderTab = () => {
           <Text style={styles.customOrderAdminSummaryLabel}>Occasions</Text>
         </View>
       </View>
+
+      <PromoManager
+        channelScope="custom_order"
+        title="Custom Order Promos"
+        arrangementOptions={(catalog.arrangements || []).map((item) => ({
+          id: item.value || item.id || item.label,
+          label: item.label || item.value,
+        }))}
+        occasionOptions={(catalog.occasions || []).map((item) => ({
+          id: item.value || item.id || item.label,
+          label: item.label || item.value,
+        }))}
+      />
 
       <View style={[styles.riderSearchContainer, { marginHorizontal: 4, marginBottom: 14 }]}>
         <Ionicons name="search" size={20} color="#999" style={styles.riderSearchIcon} />
