@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Platform,
   StyleSheet,
   Switch,
   Text,
@@ -12,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../../config/supabase';
+import ConfirmDeleteModal from './ConfirmDeleteModal';
 import {
   fetchDiscountPromos,
   generatePromoCode,
@@ -20,6 +20,7 @@ import {
 } from '../../../utils/promoEngine';
 
 const PLACEHOLDER_TEXT_COLOR = '#9ca3af';
+const CUSTOMER_TARGETING_UI_ENABLED = false;
 
 const MODE_OPTIONS = [
   { value: 'coupon_code', label: 'Coupon' },
@@ -169,6 +170,8 @@ const PromoManager = ({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [promoToDelete, setPromoToDelete] = useState(null);
+  const [deletingPromo, setDeletingPromo] = useState(false);
   const [customers, setCustomers] = useState([]);
   const [customersLoading, setCustomersLoading] = useState(false);
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
@@ -238,7 +241,9 @@ const PromoManager = ({
   }, [loadPromos]);
 
   useEffect(() => {
-    loadCustomers();
+    if (CUSTOMER_TARGETING_UI_ENABLED) {
+      loadCustomers();
+    }
   }, [loadCustomers]);
 
   const updateForm = (patch) => setForm((current) => ({ ...current, ...patch }));
@@ -269,8 +274,8 @@ const PromoManager = ({
       customized_item_targets: toArray(normalized.customized_item_targets),
       custom_order_arrangement_targets: toArray(normalized.custom_order_arrangement_targets),
       occasion_targets: toArray(normalized.occasion_targets),
-      customerTargetKind: toArray(normalized.eligible_user_ids).length ? 'selected' : 'all',
-      eligible_user_ids: toArray(normalized.eligible_user_ids),
+      customerTargetKind: CUSTOMER_TARGETING_UI_ENABLED && toArray(normalized.eligible_user_ids).length ? 'selected' : 'all',
+      eligible_user_ids: CUSTOMER_TARGETING_UI_ENABLED ? toArray(normalized.eligible_user_ids) : [],
     });
   };
 
@@ -339,7 +344,7 @@ const PromoManager = ({
     if (startsAt && endsAt && new Date(endsAt).getTime() < new Date(startsAt).getTime()) {
       throw new Error('End date cannot be before start date.');
     }
-    if (form.customerTargetKind === 'selected' && !toArray(form.eligible_user_ids).length) {
+    if (CUSTOMER_TARGETING_UI_ENABLED && form.customerTargetKind === 'selected' && !toArray(form.eligible_user_ids).length) {
       throw new Error('Select at least one eligible customer or switch back to All customers.');
     }
 
@@ -362,7 +367,7 @@ const PromoManager = ({
       category_ids: form.targetKind === 'categories' ? toArray(form.category_ids) : [],
       custom_order_arrangement_targets: form.targetKind === 'arrangements' ? toArray(form.custom_order_arrangement_targets) : [],
       customized_item_targets: form.targetKind === 'customized_items' ? toArray(form.customized_item_targets) : null,
-      eligible_user_ids: form.customerTargetKind === 'selected' ? toArray(form.eligible_user_ids) : [],
+      eligible_user_ids: CUSTOMER_TARGETING_UI_ENABLED && form.customerTargetKind === 'selected' ? toArray(form.eligible_user_ids) : [],
       applies_to_sale_items: form.applies_to_sale_items !== false,
     };
   };
@@ -401,36 +406,24 @@ const PromoManager = ({
   };
 
   const deletePromo = (promo) => {
-    const runDelete = async () => {
-      try {
-        const { error } = await supabase.from('discount_promos').delete().eq('id', promo.id);
-        if (error) throw error;
-        if (form.id === promo.id) resetForm();
-        await loadPromos();
-      } catch (error) {
-        console.error('Error deleting promo:', error);
-        Alert.alert('Error', error.message || 'Unable to delete this promo.');
-      }
-    };
+    setPromoToDelete(promo);
+  };
 
-    if (Platform.OS === 'web') {
-      const confirmed = typeof window === 'undefined'
-        ? true
-        : window.confirm(`Delete ${promo.code}? Existing order snapshots will stay intact.`);
-      if (confirmed) {
-        runDelete();
-      }
-      return;
+  const confirmDeletePromo = async () => {
+    if (!promoToDelete) return;
+    setDeletingPromo(true);
+    try {
+      const { error } = await supabase.from('discount_promos').delete().eq('id', promoToDelete.id);
+      if (error) throw error;
+      if (form.id === promoToDelete.id) resetForm();
+      setPromoToDelete(null);
+      await loadPromos();
+    } catch (error) {
+      console.error('Error deleting promo:', error);
+      Alert.alert('Error', error.message || 'Unable to delete this promo.');
+    } finally {
+      setDeletingPromo(false);
     }
-
-    Alert.alert('Delete promo?', `Delete ${promo.code}? Existing order snapshots will stay intact.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: runDelete,
-      },
-    ]);
   };
 
   return (
@@ -552,63 +545,67 @@ const PromoManager = ({
           </View>
         ) : null}
 
-        <Text style={localStyles.label}>Eligible customers</Text>
-        <View style={localStyles.chipRow}>
-          <TouchableOpacity
-            style={[localStyles.chip, form.customerTargetKind !== 'selected' && localStyles.chipActive]}
-            onPress={() => setCustomerTargetKind('all')}
-          >
-            <Text style={[localStyles.chipText, form.customerTargetKind !== 'selected' && localStyles.chipTextActive]}>
-              All customers
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[localStyles.chip, form.customerTargetKind === 'selected' && localStyles.chipActive]}
-            onPress={() => setCustomerTargetKind('selected')}
-          >
-            <Text style={[localStyles.chipText, form.customerTargetKind === 'selected' && localStyles.chipTextActive]}>
-              Selected customers
-            </Text>
-          </TouchableOpacity>
-        </View>
+        {CUSTOMER_TARGETING_UI_ENABLED ? (
+          <>
+            <Text style={localStyles.label}>Eligible customers</Text>
+            <View style={localStyles.chipRow}>
+              <TouchableOpacity
+                style={[localStyles.chip, form.customerTargetKind !== 'selected' && localStyles.chipActive]}
+                onPress={() => setCustomerTargetKind('all')}
+              >
+                <Text style={[localStyles.chipText, form.customerTargetKind !== 'selected' && localStyles.chipTextActive]}>
+                  All customers
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[localStyles.chip, form.customerTargetKind === 'selected' && localStyles.chipActive]}
+                onPress={() => setCustomerTargetKind('selected')}
+              >
+                <Text style={[localStyles.chipText, form.customerTargetKind === 'selected' && localStyles.chipTextActive]}>
+                  Selected customers
+                </Text>
+              </TouchableOpacity>
+            </View>
 
-        {form.customerTargetKind === 'selected' ? (
-          <View style={localStyles.customerTargetBox}>
-            <TextInput
-              style={[localStyles.input, localStyles.customerSearchInput]}
-              value={customerSearchQuery}
-              onChangeText={setCustomerSearchQuery}
-              placeholder="Search customers by name, email, or phone"
-              placeholderTextColor={PLACEHOLDER_TEXT_COLOR}
-            />
-            <Text style={localStyles.customerTargetSummary}>
-              {selectedCustomerIds.length ? `${selectedCustomerIds.length} selected` : 'Select at least one customer'}
-            </Text>
-            {customersLoading ? (
-              <Text style={localStyles.emptyText}>Loading customers...</Text>
-            ) : (
-              <View style={localStyles.customerChipWrap}>
-                {filteredCustomers.slice(0, 50).map((customer) => {
-                  const value = toText(customer.id);
-                  const selected = selectedCustomerIds.includes(value);
-                  return (
-                    <TouchableOpacity
-                      key={value}
-                      style={[localStyles.targetChip, selected && localStyles.targetChipSelected]}
-                      onPress={() => toggleEligibleCustomer(value)}
-                    >
-                      <Text style={[localStyles.targetChipText, selected && localStyles.targetChipTextSelected]}>
-                        {getCustomerLabel(customer)}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-                {!filteredCustomers.length ? (
-                  <Text style={localStyles.emptyText}>No customers found.</Text>
-                ) : null}
+            {form.customerTargetKind === 'selected' ? (
+              <View style={localStyles.customerTargetBox}>
+                <TextInput
+                  style={[localStyles.input, localStyles.customerSearchInput]}
+                  value={customerSearchQuery}
+                  onChangeText={setCustomerSearchQuery}
+                  placeholder="Search customers by name, email, or phone"
+                  placeholderTextColor={PLACEHOLDER_TEXT_COLOR}
+                />
+                <Text style={localStyles.customerTargetSummary}>
+                  {selectedCustomerIds.length ? `${selectedCustomerIds.length} selected` : 'Select at least one customer'}
+                </Text>
+                {customersLoading ? (
+                  <Text style={localStyles.emptyText}>Loading customers...</Text>
+                ) : (
+                  <View style={localStyles.customerChipWrap}>
+                    {filteredCustomers.slice(0, 50).map((customer) => {
+                      const value = toText(customer.id);
+                      const selected = selectedCustomerIds.includes(value);
+                      return (
+                        <TouchableOpacity
+                          key={value}
+                          style={[localStyles.targetChip, selected && localStyles.targetChipSelected]}
+                          onPress={() => toggleEligibleCustomer(value)}
+                        >
+                          <Text style={[localStyles.targetChipText, selected && localStyles.targetChipTextSelected]}>
+                            {getCustomerLabel(customer)}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                    {!filteredCustomers.length ? (
+                      <Text style={localStyles.emptyText}>No customers found.</Text>
+                    ) : null}
+                  </View>
+                )}
               </View>
-            )}
-          </View>
+            ) : null}
+          </>
         ) : null}
 
         <View style={localStyles.row}>
@@ -705,9 +702,11 @@ const PromoManager = ({
               <Text style={localStyles.promoMeta}>
                 Used {promo.total_redemptions || 0}{promo.usage_limit_total ? `/${promo.usage_limit_total}` : ''} times
               </Text>
-              <Text style={localStyles.promoMeta}>
-                {toArray(promo.eligible_user_ids).length ? `${toArray(promo.eligible_user_ids).length} selected customers` : 'All customers'}
-              </Text>
+              {CUSTOMER_TARGETING_UI_ENABLED ? (
+                <Text style={localStyles.promoMeta}>
+                  {toArray(promo.eligible_user_ids).length ? `${toArray(promo.eligible_user_ids).length} selected customers` : 'All customers'}
+                </Text>
+              ) : null}
             </View>
             <View style={localStyles.promoActions}>
               <TouchableOpacity style={localStyles.smallIconButton} onPress={() => beginEdit(promo)}>
@@ -725,6 +724,18 @@ const PromoManager = ({
           <Text style={localStyles.emptyText}>{loading ? 'Loading promos...' : 'No promos yet.'}</Text>
         )}
       </View>
+
+      <ConfirmDeleteModal
+        visible={Boolean(promoToDelete)}
+        onClose={() => {
+          if (!deletingPromo) setPromoToDelete(null);
+        }}
+        onConfirm={confirmDeletePromo}
+        title="Delete promo?"
+        message={`Delete ${promoToDelete?.code || 'this promo'}? Existing order snapshots will stay intact.`}
+        confirmText={deletingPromo ? 'Deleting...' : 'Delete'}
+        confirmDisabled={deletingPromo}
+      />
     </View>
   );
 };
