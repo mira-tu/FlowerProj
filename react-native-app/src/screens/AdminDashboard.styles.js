@@ -2716,9 +2716,17 @@ const styles = StyleSheet.create({
     maxWidth: 400,
     overflow: 'hidden',
   },
-  timelineScrollView: {
-    maxHeight: 500,
+  timelineScrollArea: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  timelineScrollContent: {
     padding: 24,
+    paddingBottom: 28,
+  },
+  timelineScrollView: {
+    padding: 24,
+    paddingBottom: 28,
   },
   timelineStepContainer: {
     position: 'relative',
@@ -2793,6 +2801,7 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     borderTopWidth: 1,
     borderColor: '#E5E7EB',
+    gap: 10,
   },
   timelineCancelButton: {
     flexDirection: 'row',
@@ -2801,7 +2810,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 8,
-    backgroundColor: '#FEE2E2', // red-50
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
   },
   timelineCancelButtonSelected: {
     backgroundColor: '#EF4444', // red-500
@@ -2809,6 +2820,31 @@ const styles = StyleSheet.create({
   timelineCancelButtonText: {
     color: '#EF4444',
     fontWeight: '600',
+  },
+  timelineExceptionNote: {
+    backgroundColor: '#FFF7ED',
+    borderColor: '#FDBA74',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: -4,
+    marginBottom: 12,
+  },
+  timelineExceptionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  timelineExceptionTitle: {
+    color: '#C2410C',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  timelineExceptionText: {
+    color: '#9A3412',
+    fontSize: 13,
+    lineHeight: 18,
   },
   eoDeliveryTypeBadge: {
     flexDirection: 'row',

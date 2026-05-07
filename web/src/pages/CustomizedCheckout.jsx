@@ -37,7 +37,7 @@ import {
 } from '../utils/promoEngine';
 
 const paymentMethods = [
-    { id: 'gcash', name: 'GCash', description: 'Pay via GCash e-wallet', icon: 'fa-wallet' },
+    { id: 'gcash', name: 'InstaPay', description: 'Pay via G-cash, Maya, GoTyme Ph, and other e-wallet.', icon: 'fa-wallet' },
 ];
 
 const pickupTimes = PICKUP_TIME_OPTIONS;
@@ -622,7 +622,7 @@ const CustomizedCheckout = ({ user }) => {
         }
 
         if (selectedPayment === 'gcash' && !normalizedGcashReference) {
-            setInfoModal({ show: true, title: 'Notice', message: 'Please enter your GCash transaction number before submitting your request.' });
+            setInfoModal({ show: true, title: 'Notice', message: 'Please enter your e-wallet transaction number before submitting your request.' });
             return;
         }
 
@@ -1029,14 +1029,14 @@ const CustomizedCheckout = ({ user }) => {
                                     <i className="fas fa-wallet"></i>
                                 </div>
                                 <div className="payment-info">
-                                    <h6>GCash</h6>
-                                    <p>Pay via GCash e-wallet</p>
+                                    <h6>InstaPay</h6>
+                                    <p>Pay via G-cash, Maya, GoTyme Ph, and other e-wallet.</p>
                                 </div>
                             </div>
 
                             <div className="mt-3">
                                 <GCashConfirmationSection
-                                    title="Confirm Your GCash Payment"
+                                    title="Confirm Your E-wallet Payment"
                                     amount={total}
                                     onViewQr={() => setShowQRModal(true)}
                                     referenceNumber={gcashReferenceNumber}
@@ -1046,7 +1046,7 @@ const CustomizedCheckout = ({ user }) => {
                                     onReceiptUpload={handleReceiptUpload}
                                     onRemoveReceipt={clearReceiptSelection}
                                     receiptInputId="customized-checkout-gcash-receipt"
-                                    helperText="Upload your Customizer Studio payment receipt together with the GCash transaction number so our staff can confirm it."
+                                    helperText="Upload your Customizer Studio payment receipt together with the e-wallet transaction number so our staff can confirm it."
                                     disabled={isProcessing}
                                 />
                             </div>

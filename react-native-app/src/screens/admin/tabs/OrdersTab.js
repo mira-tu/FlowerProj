@@ -69,6 +69,21 @@ const parseJsonObject = (value) => {
   return typeof value === 'object' ? value : {};
 };
 
+const getDeliveryFailureReasonText = (record = {}) => {
+  const timestamps = parseJsonObject(record?.status_timestamps || record?.statusTimestamps);
+  return String(
+    timestamps?.delivery_failed_attempt_reason
+    || timestamps?.deliveryFailureReason
+    || record?.delivery_failed_attempt_reason
+    || record?.deliveryFailureReason
+    || ''
+  ).trim();
+};
+
+const getTimelineStatusForDisplay = (status) => (
+  status === DELIVERY_FAILED_ATTEMPT_STATUS ? 'out_for_delivery' : status
+);
+
 const getOrderStopSourceItems = (order = {}) => {
   const requestData = parseJsonObject(order?.request_data);
   const orderItems = Array.isArray(order?.items)
@@ -554,7 +569,6 @@ const deliveryStepperStatuses = [
     { id: 'processing', label: 'Processing', description: 'Being prepared' },
     { id: 'ready_for_delivery', label: 'Ready for Delivery', description: 'Packed and queued' },
     { id: 'out_for_delivery', label: 'Out for Delivery', description: 'On the way' },
-    { id: DELIVERY_FAILED_ATTEMPT_STATUS, label: 'Failed Delivery Attempt', description: 'Attempt failed; ready to retry' },
     { id: 'completed', label: 'Completed', description: 'Delivered successfully' }
   ];
 
@@ -1936,6 +1950,7 @@ const deliveryStepperStatuses = [
   const assignRiderModalMaxHeight = Math.max(420, Math.min(screenHeight - 36, 760));
   const assignRiderStopListMaxHeight = Math.max(120, Math.min(screenHeight * 0.22, 220));
   const assignRiderListMaxHeight = Math.max(180, Math.min(screenHeight * 0.34, 320));
+  const statusTimelineModalMaxHeight = Math.max(420, Math.min(screenHeight - 36, 720));
 
   if (loading && !refreshing) {
     return (
@@ -2567,20 +2582,27 @@ const deliveryStepperStatuses = [
 
       <Modal visible={statusModalVisible} transparent animationType="fade" onRequestClose={closeStatusModal}>
         <View style={styles.statusModalBackdrop}>
-          <View style={styles.timelineModalContainer}>
+          <View style={[styles.timelineModalContainer, { maxHeight: statusTimelineModalMaxHeight }]}>
             <View style={styles.statusModalHeader}>
               <Text style={styles.statusModalTitle}>Change Order Status</Text>
             </View>
 
-            <ScrollView contentContainerStyle={styles.timelineScrollView}>
+            <ScrollView
+              style={styles.timelineScrollArea}
+              contentContainerStyle={styles.timelineScrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator
+            >
               {orderToUpdate && <Text style={styles.timelineOrderNumber}>Order #{orderToUpdate.order_number}</Text>}
               {(() => {
                 if (!orderToUpdate) return null;
                 const isDelivery = orderToUpdate.delivery_method === 'delivery';
                 const stepperStatuses = isDelivery ? deliveryStepperStatuses : pickupStepperStatuses;
                 const getStepperIndex = (status) => stepperStatuses.findIndex(s => s.id === status);
-                const selectedIndex = getStepperIndex(selectedStatus);
-                const currentStatusIndex = getStepperIndex(orderToUpdate.status);
+                const displaySelectedStatus = getTimelineStatusForDisplay(selectedStatus);
+                const selectedIndex = getStepperIndex(displaySelectedStatus);
+                const isFailedAttemptRecord = isDelivery && orderToUpdate.status === DELIVERY_FAILED_ATTEMPT_STATUS;
+                const failedAttemptReason = getDeliveryFailureReasonText(orderToUpdate);
 
                 return (
                   <>
@@ -2633,6 +2655,17 @@ const deliveryStepperStatuses = [
                         </View>
                       );
                     })}
+                    {isFailedAttemptRecord ? (
+                      <View style={styles.timelineExceptionNote}>
+                        <View style={styles.timelineExceptionHeader}>
+                          <Ionicons name="warning-outline" size={16} color="#F97316" />
+                          <Text style={styles.timelineExceptionTitle}>Previous delivery attempt failed</Text>
+                        </View>
+                        <Text style={styles.timelineExceptionText}>
+                          {failedAttemptReason || 'No reason was recorded for this failed attempt.'}
+                        </Text>
+                      </View>
+                    ) : null}
                     <View style={styles.timelineActions}>
                       {orderToUpdate?.delivery_method === 'delivery' && orderToUpdate?.status === DELIVERY_FAILED_ATTEMPT_STATUS ? (
                         <TouchableOpacity

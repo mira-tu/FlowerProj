@@ -97,7 +97,7 @@ const CustomOrderQuotePaymentModal = ({
         }
 
         if (!normalizedGcashReference) {
-            setErrorMessage('Please enter your GCash transaction number before confirming.');
+            setErrorMessage('Please enter your e-wallet transaction number before confirming.');
             return;
         }
 
@@ -224,7 +224,7 @@ const CustomOrderQuotePaymentModal = ({
                         onReceiptUpload={handleReceiptUpload}
                         onRemoveReceipt={clearReceiptSelection}
                         receiptInputId="custom-order-quote-gcash-receipt"
-                        helperText="We need both the screenshot and the GCash transaction number before we can mark this quote as paid for review."
+                        helperText="We need both the screenshot and the e-wallet transaction number before we can mark this quote as paid for review."
                         actionLabel="Submit for Confirmation"
                         onAction={handleSubmit}
                         actionDisabled={isProcessing || !receiptFile || !normalizeGcashReferenceNumber(gcashReferenceNumber)}

@@ -1683,6 +1683,34 @@ const normalizeRequestData = (request) => {
   return typeof rawData === 'object' ? rawData : {};
 };
 
+const parseJsonObject = (value) => {
+  if (!value) return {};
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (error) {
+      return {};
+    }
+  }
+  return typeof value === 'object' ? value : {};
+};
+
+const getDeliveryFailureReasonText = (record = {}) => {
+  const timestamps = parseJsonObject(record?.status_timestamps || record?.statusTimestamps);
+  return String(
+    timestamps?.delivery_failed_attempt_reason
+    || timestamps?.deliveryFailureReason
+    || record?.delivery_failed_attempt_reason
+    || record?.deliveryFailureReason
+    || ''
+  ).trim();
+};
+
+const getTimelineStatusForDisplay = (status) => (
+  status === DELIVERY_FAILED_ATTEMPT_STATUS ? 'out_for_delivery' : status
+);
+
 const firstNonEmpty = (...values) => {
   for (const value of values) {
     if (value === null || value === undefined) continue;
@@ -3272,6 +3300,7 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
   const assignRiderListMaxHeight = Math.max(180, Math.min(screenHeight * 0.34, 320));
   const deliveryStopModalMaxHeight = Math.max(460, Math.min(screenHeight - 36, 780));
   const deliveryStopListMaxHeight = Math.max(180, Math.min(screenHeight * 0.32, 280));
+  const statusTimelineModalMaxHeight = Math.max(420, Math.min(screenHeight - 36, 720));
 
   const filteredRequests = React.useMemo(() => {
     let result = riderScopedRequests;
@@ -3412,7 +3441,6 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
     { id: 'processing', label: 'Processing', description: 'Being prepared' },
     { id: 'ready_for_delivery', label: 'Ready for Delivery', description: 'Packed and queued' },
     { id: 'out_for_delivery', label: 'Out for Delivery', description: 'On the way' },
-    { id: DELIVERY_FAILED_ATTEMPT_STATUS, label: 'Failed Delivery Attempt', description: 'Attempt failed; ready to retry' },
     { id: 'completed', label: 'Completed', description: 'Delivered successfully' }
   ];
 
@@ -6171,18 +6199,27 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
 
       < Modal visible={requestStatusModalVisible} transparent animationType="fade" onRequestClose={closeRequestStatusModal}>
         <View style={styles.statusModalBackdrop}>
-          <View style={styles.timelineModalContainer}>
+          <View style={[styles.timelineModalContainer, { maxHeight: statusTimelineModalMaxHeight }]}>
             <View style={styles.statusModalHeader}>
               <Text style={styles.statusModalTitle}>Change Request Status</Text>
             </View>
 
-            <ScrollView contentContainerStyle={styles.timelineScrollView}>
+            <ScrollView
+              style={styles.timelineScrollArea}
+              contentContainerStyle={styles.timelineScrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator
+            >
 
               {(() => {
                 if (!requestToUpdate) return null;
-                const stepperStatuses = requestToUpdate.delivery_method === 'pickup' ? requestPickupStepperStatuses : requestDeliveryStepperStatuses;
+                const isDelivery = requestToUpdate.delivery_method !== 'pickup';
+                const stepperStatuses = isDelivery ? requestDeliveryStepperStatuses : requestPickupStepperStatuses;
                 const getStepperIndex = (status) => stepperStatuses.findIndex(s => s.id === status);
-                const selectedIndex = getStepperIndex(selectedRequestStatus);
+                const displaySelectedStatus = getTimelineStatusForDisplay(selectedRequestStatus);
+                const selectedIndex = getStepperIndex(displaySelectedStatus);
+                const isFailedAttemptRecord = isDelivery && requestToUpdate.status === DELIVERY_FAILED_ATTEMPT_STATUS;
+                const failedAttemptReason = getDeliveryFailureReasonText(requestToUpdate);
 
                 return (
                   <>
@@ -6235,6 +6272,17 @@ const RequestsTab = ({ currentUser, handleSelectCustomerForMessage, focusedEntit
                         </View>
                       );
                     })}
+                    {isFailedAttemptRecord ? (
+                      <View style={styles.timelineExceptionNote}>
+                        <View style={styles.timelineExceptionHeader}>
+                          <Ionicons name="warning-outline" size={16} color="#F97316" />
+                          <Text style={styles.timelineExceptionTitle}>Previous delivery attempt failed</Text>
+                        </View>
+                        <Text style={styles.timelineExceptionText}>
+                          {failedAttemptReason || 'No reason was recorded for this failed attempt.'}
+                        </Text>
+                      </View>
+                    ) : null}
                     <View style={styles.timelineActions}>
                       {requestToUpdate?.delivery_method === 'delivery' && requestToUpdate?.status === DELIVERY_FAILED_ATTEMPT_STATUS ? (
                         <TouchableOpacity

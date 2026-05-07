@@ -119,7 +119,7 @@ const TrackingPaymentDetails = ({
                             style={{ color: 'var(--shop-pink)', fontSize: '0.8rem' }}
                             onClick={() => setShowQR(true)}
                         >
-                            <i className="fas fa-qrcode me-1"></i>View GCash QR
+                            <i className="fas fa-qrcode me-1"></i>View QR PH Code
                         </button>
                     </div>
                     <div className="d-flex flex-column gap-2">
@@ -145,7 +145,7 @@ const TrackingPaymentDetails = ({
                         onReceiptUpload={(event) => setAdditionalFile(event.target.files?.[0] || null)}
                         onRemoveReceipt={() => setAdditionalFile(null)}
                         receiptInputId="tracking-main-gcash-receipt"
-                        helperText="We will review this GCash payment manually. Please upload the receipt screenshot and the exact transaction number."
+                        helperText="We will review this e-wallet payment manually. Please upload the receipt screenshot and the exact transaction number."
                         actionLabel="Upload Receipt"
                         onAction={onUploadReceipt}
                         actionDisabled={!additionalFile || !String(uploadReferenceNumber || '').trim() || uploadingReceipt}
@@ -178,7 +178,7 @@ const TrackingPaymentDetails = ({
                             onReceiptUpload={(event) => setAdditionalFile(event.target.files?.[0] || null)}
                             onRemoveReceipt={() => setAdditionalFile(null)}
                             receiptInputId="tracking-balance-gcash-receipt"
-                            helperText="Each balance upload needs its own GCash transaction number so staff can verify it separately."
+                            helperText="Each balance upload needs its own e-wallet transaction number so staff can verify it separately."
                             actionLabel="Upload Balance Receipt"
                             onAction={onUploadReceipt}
                             actionDisabled={!additionalFile || !String(uploadReferenceNumber || '').trim() || uploadingReceipt}

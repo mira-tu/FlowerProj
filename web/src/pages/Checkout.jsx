@@ -36,7 +36,7 @@ import {
 
 const paymentMethods = [
     { id: 'cod', name: 'Cash on Delivery', description: 'Pay when you receive', icon: 'fa-money-bill-wave' },
-    { id: 'gcash', name: 'GCash', description: 'Pay via GCash e-wallet', icon: 'fa-wallet' },
+    { id: 'gcash', name: 'InstaPay', description: 'Pay via G-cash, Maya, GoTyme Ph, and other e-wallet.', icon: 'fa-wallet' },
 ];
 
 const pickupTimes = PICKUP_TIME_OPTIONS;
@@ -903,7 +903,7 @@ const Checkout = ({ setCart, user, products = [] }) => {
                             {selectedPayment === 'gcash' && (
                                 <div className="mt-3">
                                     <GCashConfirmationSection
-                                        title="Confirm Your GCash Payment"
+                                        title="Confirm Your E-wallet Payment"
                                         amount={total}
                                         onViewQr={() => setShowQRModal(true)}
                                         referenceNumber={gcashReferenceNumber}
@@ -913,7 +913,7 @@ const Checkout = ({ setCart, user, products = [] }) => {
                                         onReceiptUpload={handleReceiptUpload}
                                         onRemoveReceipt={clearReceiptSelection}
                                         receiptInputId="checkout-gcash-receipt"
-                                        helperText="We manually verify GCash payments, so please upload a clear receipt and the exact transaction number before placing your order."
+                                        helperText="We manually verify e-wallet payments, so please upload a clear receipt and the exact transaction number before placing your order."
                                         disabled={isProcessing}
                                     />
                                 </div>

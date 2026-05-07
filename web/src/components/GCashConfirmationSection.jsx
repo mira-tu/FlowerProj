@@ -3,17 +3,17 @@ import React from 'react';
 const buildDefaultSteps = (amount) => {
     const numericAmount = Number(amount);
     return [
-        'Open your GCash app and scan the Qr Ph code.',
+        'Open your G-cash app or other e-wallets.',
         Number.isFinite(numericAmount) && numericAmount > 0
             ? `Send exactly ₱${numericAmount.toLocaleString()} to Jocerry's Flower Shop.`
             : 'Send the amount shown in your order or quote summary.',
         'Take a screenshot of the successful payment confirmation.',
-        'Enter the GCash transaction number and upload the screenshot for manual verification.',
+        'Enter the e-wallet transaction number and upload the screenshot for manual verification.',
     ];
 };
 
 const GCashConfirmationSection = ({
-    title = 'GCash Payment Confirmation',
+    title = 'E-wallet Payment Confirmation',
     amount = null,
     onViewQr,
     referenceNumber,
@@ -26,7 +26,7 @@ const GCashConfirmationSection = ({
     steps = null,
     receiptLabel = 'Upload Payment Receipt',
     receiptInputId = 'gcash-receipt-upload',
-    referenceLabel = 'GCash Transaction Number',
+    referenceLabel = 'E-wallet Transaction Number',
     referencePlaceholder = 'Enter your transaction number',
     actionLabel = '',
     onAction = null,
@@ -47,7 +47,7 @@ const GCashConfirmationSection = ({
                         {title}
                     </h6>
                     <p className="text-muted small mb-0">
-                        Follow the steps below, then submit your receipt and GCash transaction number for confirmation.
+                        Follow the steps below, then submit your receipt and e-wallet transaction number for confirmation.
                     </p>
                 </div>
                 {typeof onViewQr === 'function' && (
@@ -58,7 +58,7 @@ const GCashConfirmationSection = ({
                         disabled={disabled}
                     >
                         <i className="fas fa-qrcode me-2"></i>
-                        View Qr Ph code
+                        View QR PH code
                     </button>
                 )}
             </div>
@@ -88,7 +88,7 @@ const GCashConfirmationSection = ({
                         disabled={disabled}
                     />
                     <small className="text-muted d-block mt-1">
-                        Example: the transaction number shown in your GCash confirmation.
+                        Example: the transaction number shown in your e-wallet confirmation.
                     </small>
                 </div>
                 <div className="col-md-6">
