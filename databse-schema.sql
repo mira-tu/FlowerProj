@@ -209,6 +209,7 @@ CREATE TABLE discount_promos (
   category_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
   custom_order_arrangement_targets JSONB NOT NULL DEFAULT '[]'::jsonb,
   customized_item_targets JSONB,
+  eligible_user_ids JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(eligible_user_ids) = 'array'),
   applies_to_sale_items BOOLEAN NOT NULL DEFAULT TRUE,
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,

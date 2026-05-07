@@ -503,6 +503,9 @@ const CatalogueTab = () => {
         data={filteredProducts}
         renderItem={renderProduct}
         keyExtractor={(item) => item.id.toString()}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="none"
+        removeClippedSubviews={false}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ec4899']} />
         }

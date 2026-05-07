@@ -1510,6 +1510,7 @@ const resolveCustomOrderQuotePromoPricing = async ({
         shippingFee: finalShippingFee,
         occasions,
         arrangementTargets,
+        currentUserId: request?.user_id,
     });
 };
 

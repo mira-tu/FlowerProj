@@ -47,6 +47,12 @@ const targetListHas = (targets, values = []) => {
   const normalizedTargets = new Set(targets.map(normalizeComparable).filter(Boolean));
   return values.some((value) => normalizedTargets.has(normalizeComparable(value)));
 };
+const promoMatchesCustomer = (promo, currentUserId = null) => {
+  if (targetListIsUnset(promo.eligible_user_ids)) return true;
+  const normalizedUserId = String(currentUserId || '').trim();
+  if (!normalizedUserId) return false;
+  return targetListHas(promo.eligible_user_ids, [normalizedUserId]);
+};
 
 const isMissingPromoInfrastructureError = (error) => {
   const code = String(error?.code || '').toLowerCase();
@@ -84,6 +90,7 @@ export const normalizePromo = (promo = {}) => ({
   category_ids: normalizeTargetList(promo.category_ids) || [],
   custom_order_arrangement_targets: normalizeTargetList(promo.custom_order_arrangement_targets) || [],
   customized_item_targets: normalizeTargetList(promo.customized_item_targets),
+  eligible_user_ids: normalizeTargetList(promo.eligible_user_ids) || [],
   applies_to_sale_items: promo.applies_to_sale_items !== false,
   total_redemptions: Number.parseInt(promo.total_redemptions, 10) || 0,
   user_redemptions: Number.parseInt(promo.user_redemptions, 10) || 0,
@@ -206,6 +213,7 @@ export const calculatePromoPricing = ({
   shippingFee = 0,
   occasions = [],
   arrangementTargets = [],
+  currentUserId = null,
   now = new Date(),
 } = {}) => {
   const normalizedLines = (Array.isArray(lines) ? lines : []).map(normalizeLine);
@@ -215,6 +223,7 @@ export const calculatePromoPricing = ({
 
   normalizedPromos.forEach((promo) => {
     if (!promoMatchesChannel(promo, channelScope)) return;
+    if (!promoMatchesCustomer(promo, currentUserId)) return;
     if (!getPromoAvailability(promo, { now, subtotalBeforeDiscount })) return;
     if (!getPromoModeEligible(promo, { enteredCode, channelScope, occasions })) return;
 

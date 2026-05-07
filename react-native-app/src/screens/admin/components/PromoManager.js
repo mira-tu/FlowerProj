@@ -27,11 +27,6 @@ const MODE_OPTIONS = [
   { value: 'occasion_based', label: 'Occasion' },
 ];
 
-const TARGET_SCOPE_OPTIONS = [
-  { value: 'order', label: 'Order' },
-  { value: 'item', label: 'Item' },
-];
-
 const CHANNEL_LABELS = {
   catalog: 'Catalogue',
   customized: 'Customizer Studio',
@@ -60,6 +55,8 @@ const blankForm = (channelScope) => ({
   customized_item_targets: [],
   custom_order_arrangement_targets: [],
   occasion_targets: [],
+  customerTargetKind: 'all',
+  eligible_user_ids: [],
 });
 
 const toText = (value) => String(value ?? '').trim();
@@ -104,6 +101,12 @@ const parseDateOrNull = (value) => {
 
 const getOptionValue = (option) => toText(option?.value ?? option?.id ?? option?.name ?? option?.label);
 const getOptionLabel = (option) => toText(option?.label ?? option?.name ?? option?.category_name ?? option?.value ?? option?.id);
+const getCustomerLabel = (customer = {}) => {
+  const name = toText(customer.name);
+  const email = toText(customer.email);
+  if (name && email) return `${name} (${email})`;
+  return name || email || `Customer ${toText(customer.id).slice(0, 8)}`;
+};
 
 const inferTargetKind = (promo, channelScope) => {
   if (channelScope === 'catalog') {
@@ -166,6 +169,9 @@ const PromoManager = ({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [customers, setCustomers] = useState([]);
+  const [customersLoading, setCustomersLoading] = useState(false);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [form, setForm] = useState(() => blankForm(channelScope));
 
   const targetChoices = useMemo(() => buildTargetChoices({
@@ -178,6 +184,15 @@ const PromoManager = ({
   }), [arrangementOptions, categoryOptions, channelScope, customizedTargetOptions, occasionOptions, productOptions]);
 
   const selectedOptions = targetChoices[form.targetKind]?.options || [];
+  const selectedCustomerIds = toArray(form.eligible_user_ids);
+  const filteredCustomers = useMemo(() => {
+    const query = customerSearchQuery.trim().toLowerCase();
+    if (!query) return customers;
+    return customers.filter((customer) => (
+      getCustomerLabel(customer).toLowerCase().includes(query)
+      || toText(customer.phone).toLowerCase().includes(query)
+    ));
+  }, [customerSearchQuery, customers]);
   const selectedValues = (() => {
     if (form.targetKind === 'products') return form.product_ids;
     if (form.targetKind === 'categories') return form.category_ids;
@@ -200,20 +215,44 @@ const PromoManager = ({
     }
   }, [channelScope]);
 
+  const loadCustomers = useCallback(async () => {
+    setCustomersLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('id, name, email, phone')
+        .eq('role', 'customer')
+        .order('name', { ascending: true });
+      if (error) throw error;
+      setCustomers(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Error loading promo customer targets:', error);
+      setCustomers([]);
+    } finally {
+      setCustomersLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadPromos();
   }, [loadPromos]);
+
+  useEffect(() => {
+    loadCustomers();
+  }, [loadCustomers]);
 
   const updateForm = (patch) => setForm((current) => ({ ...current, ...patch }));
 
   const resetForm = () => {
     setEditing(false);
+    setCustomerSearchQuery('');
     setForm(blankForm(channelScope));
   };
 
   const beginEdit = (promo) => {
     const normalized = normalizePromo(promo);
     setEditing(true);
+    setCustomerSearchQuery('');
     setForm({
       ...blankForm(channelScope),
       ...normalized,
@@ -223,12 +262,15 @@ const PromoManager = ({
       usage_limit_total: normalized.usage_limit_total === null ? '' : toText(normalized.usage_limit_total),
       usage_limit_per_user: normalized.usage_limit_per_user === null ? '' : toText(normalized.usage_limit_per_user),
       minimum_subtotal: normalized.minimum_subtotal ? toText(normalized.minimum_subtotal) : '',
+      target_scope: 'order',
       targetKind: inferTargetKind(normalized, channelScope),
       product_ids: toArray(normalized.product_ids),
       category_ids: toArray(normalized.category_ids),
       customized_item_targets: toArray(normalized.customized_item_targets),
       custom_order_arrangement_targets: toArray(normalized.custom_order_arrangement_targets),
       occasion_targets: toArray(normalized.occasion_targets),
+      customerTargetKind: toArray(normalized.eligible_user_ids).length ? 'selected' : 'all',
+      eligible_user_ids: toArray(normalized.eligible_user_ids),
     });
   };
 
@@ -263,6 +305,25 @@ const PromoManager = ({
     });
   };
 
+  const setCustomerTargetKind = (customerTargetKind) => {
+    updateForm({
+      customerTargetKind,
+      eligible_user_ids: customerTargetKind === 'selected' ? selectedCustomerIds : [],
+    });
+  };
+
+  const toggleEligibleCustomer = (customerId) => {
+    const value = toText(customerId);
+    if (!value) return;
+    setForm((current) => {
+      const currentValues = toArray(current.eligible_user_ids);
+      const nextValues = currentValues.includes(value)
+        ? currentValues.filter((item) => item !== value)
+        : [...currentValues, value];
+      return { ...current, eligible_user_ids: nextValues };
+    });
+  };
+
   const buildPayload = () => {
     const code = normalizePromoCode(form.code || generatePromoCode(form.name || 'PROMO'));
     const discountPercent = parseNumberOrNull(form.discount_percent);
@@ -278,6 +339,9 @@ const PromoManager = ({
     if (startsAt && endsAt && new Date(endsAt).getTime() < new Date(startsAt).getTime()) {
       throw new Error('End date cannot be before start date.');
     }
+    if (form.customerTargetKind === 'selected' && !toArray(form.eligible_user_ids).length) {
+      throw new Error('Select at least one eligible customer or switch back to All customers.');
+    }
 
     return {
       code,
@@ -286,7 +350,7 @@ const PromoManager = ({
       discount_percent: discountPercent,
       channel_scope: channelScope,
       discount_mode: form.discount_mode,
-      target_scope: form.target_scope,
+      target_scope: 'order',
       is_active: form.is_active !== false,
       starts_at: startsAt,
       ends_at: endsAt,
@@ -298,6 +362,7 @@ const PromoManager = ({
       category_ids: form.targetKind === 'categories' ? toArray(form.category_ids) : [],
       custom_order_arrangement_targets: form.targetKind === 'arrangements' ? toArray(form.custom_order_arrangement_targets) : [],
       customized_item_targets: form.targetKind === 'customized_items' ? toArray(form.customized_item_targets) : null,
+      eligible_user_ids: form.customerTargetKind === 'selected' ? toArray(form.eligible_user_ids) : [],
       applies_to_sale_items: form.applies_to_sale_items !== false,
     };
   };
@@ -452,21 +517,6 @@ const PromoManager = ({
           ))}
         </View>
 
-        <Text style={localStyles.label}>Scope</Text>
-        <View style={localStyles.chipRow}>
-          {TARGET_SCOPE_OPTIONS.map((option) => (
-            <TouchableOpacity
-              key={option.value}
-              style={[localStyles.chip, form.target_scope === option.value && localStyles.chipActive]}
-              onPress={() => updateForm({ target_scope: option.value })}
-            >
-              <Text style={[localStyles.chipText, form.target_scope === option.value && localStyles.chipTextActive]}>
-                {option.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
         <Text style={localStyles.label}>Targets</Text>
         <View style={localStyles.chipRow}>
           {Object.entries(targetChoices).map(([key, config]) => (
@@ -499,6 +549,65 @@ const PromoManager = ({
                 </TouchableOpacity>
               );
             })}
+          </View>
+        ) : null}
+
+        <Text style={localStyles.label}>Eligible customers</Text>
+        <View style={localStyles.chipRow}>
+          <TouchableOpacity
+            style={[localStyles.chip, form.customerTargetKind !== 'selected' && localStyles.chipActive]}
+            onPress={() => setCustomerTargetKind('all')}
+          >
+            <Text style={[localStyles.chipText, form.customerTargetKind !== 'selected' && localStyles.chipTextActive]}>
+              All customers
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[localStyles.chip, form.customerTargetKind === 'selected' && localStyles.chipActive]}
+            onPress={() => setCustomerTargetKind('selected')}
+          >
+            <Text style={[localStyles.chipText, form.customerTargetKind === 'selected' && localStyles.chipTextActive]}>
+              Selected customers
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {form.customerTargetKind === 'selected' ? (
+          <View style={localStyles.customerTargetBox}>
+            <TextInput
+              style={[localStyles.input, localStyles.customerSearchInput]}
+              value={customerSearchQuery}
+              onChangeText={setCustomerSearchQuery}
+              placeholder="Search customers by name, email, or phone"
+              placeholderTextColor={PLACEHOLDER_TEXT_COLOR}
+            />
+            <Text style={localStyles.customerTargetSummary}>
+              {selectedCustomerIds.length ? `${selectedCustomerIds.length} selected` : 'Select at least one customer'}
+            </Text>
+            {customersLoading ? (
+              <Text style={localStyles.emptyText}>Loading customers...</Text>
+            ) : (
+              <View style={localStyles.customerChipWrap}>
+                {filteredCustomers.slice(0, 50).map((customer) => {
+                  const value = toText(customer.id);
+                  const selected = selectedCustomerIds.includes(value);
+                  return (
+                    <TouchableOpacity
+                      key={value}
+                      style={[localStyles.targetChip, selected && localStyles.targetChipSelected]}
+                      onPress={() => toggleEligibleCustomer(value)}
+                    >
+                      <Text style={[localStyles.targetChipText, selected && localStyles.targetChipTextSelected]}>
+                        {getCustomerLabel(customer)}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                {!filteredCustomers.length ? (
+                  <Text style={localStyles.emptyText}>No customers found.</Text>
+                ) : null}
+              </View>
+            )}
           </View>
         ) : null}
 
@@ -595,6 +704,9 @@ const PromoManager = ({
               <Text style={localStyles.promoName}>{promo.name} - {promo.discount_percent}% - {promo.discount_mode.replace(/_/g, ' ')}</Text>
               <Text style={localStyles.promoMeta}>
                 Used {promo.total_redemptions || 0}{promo.usage_limit_total ? `/${promo.usage_limit_total}` : ''} times
+              </Text>
+              <Text style={localStyles.promoMeta}>
+                {toArray(promo.eligible_user_ids).length ? `${toArray(promo.eligible_user_ids).length} selected customers` : 'All customers'}
               </Text>
             </View>
             <View style={localStyles.promoActions}>
@@ -744,6 +856,27 @@ const localStyles = StyleSheet.create({
     flexWrap: 'wrap',
     marginBottom: 12,
     padding: 8,
+  },
+  customerTargetBox: {
+    backgroundColor: '#f9fafb',
+    borderColor: '#e5e7eb',
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 8,
+  },
+  customerSearchInput: {
+    backgroundColor: '#fff',
+    marginBottom: 8,
+  },
+  customerTargetSummary: {
+    color: '#6b7280',
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  customerChipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
   },
   targetChip: {
     backgroundColor: '#fff',

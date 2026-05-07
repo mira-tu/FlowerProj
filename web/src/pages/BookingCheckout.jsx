@@ -511,7 +511,8 @@ const BookingCheckout = ({ user }) => {
         shippingFee: customOrderReviewShippingFee,
         occasions: inquirySummary.combinedOccasions,
         arrangementTargets: customOrderArrangementTargets,
-    }), [appliedPromoCode, customOrderArrangementTargets, inquirySummary.combinedOccasions, promoLines, promoState.promos]);
+        currentUserId: user?.id,
+    }), [appliedPromoCode, customOrderArrangementTargets, inquirySummary.combinedOccasions, promoLines, promoState.promos, user?.id]);
     const estimatedDiscountTotal = promoPricing.discountTotal;
     const estimatedSubtotalAfterDiscount = promoPricing.subtotalAfterDiscount;
     const promoFeedbackMessage = appliedPromoCode
