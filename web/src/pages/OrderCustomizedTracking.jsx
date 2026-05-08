@@ -823,6 +823,7 @@ const OrderCustomizedTracking = ({ user }) => {
             || Math.max(0, requestSubtotalBeforeDiscount - requestDiscountTotal)
         : Number(request.requestData?.subtotal || 0);
     const requestAppliedPromoCode = request.applied_promo_code || request.requestData?.applied_promo_code || '';
+    const requestDiscountLabel = request.discount_label || request.requestData?.discount_label || '';
 
     return (
         <div className="tracking-container">
@@ -1166,7 +1167,7 @@ const OrderCustomizedTracking = ({ user }) => {
                                 {requestDiscountTotal > 0 ? (
                                     <>
                                         <div className="d-flex justify-content-between mb-2 small text-success">
-                                            <span>Discount{requestAppliedPromoCode ? ` (${requestAppliedPromoCode})` : ''}</span>
+                                            <span>Discount{requestAppliedPromoCode ? ` (${requestAppliedPromoCode})` : ''}{requestDiscountLabel ? ` - ${requestDiscountLabel}` : ''}</span>
                                             <span>-₱{requestDiscountTotal.toLocaleString()}</span>
                                         </div>
                                         <div className="d-flex justify-content-between mb-2 small text-muted">

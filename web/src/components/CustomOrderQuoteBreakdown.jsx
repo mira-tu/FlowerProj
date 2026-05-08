@@ -3,6 +3,7 @@ import {
     getCustomOrderQuoteTypeLabel,
     summarizeCustomOrderQuoteBreakdown,
 } from '../utils/customOrderQuoteBreakdown';
+import { getPromoDiscountLabel } from '../utils/discountDisplay';
 
 const PESO = '\u20b1';
 
@@ -25,6 +26,7 @@ const CustomOrderQuoteBreakdown = ({
         breakdown,
         shippingFee,
     );
+    const discountLabel = breakdown?.discount_label || getPromoDiscountLabel(breakdown?.discount_snapshot || breakdown);
 
     return (
         <div className={className} style={style}>
@@ -94,7 +96,7 @@ const CustomOrderQuoteBreakdown = ({
                 {discountTotal > 0 ? (
                     <>
                         <div className="d-flex justify-content-between small text-success">
-                            <span>Discount{breakdown?.applied_promo_code ? ` (${breakdown.applied_promo_code})` : ''}</span>
+                            <span>Discount{breakdown?.applied_promo_code ? ` (${breakdown.applied_promo_code})` : ''}{discountLabel ? ` - ${discountLabel}` : ''}</span>
                             <span className="fw-semibold">-{PESO}{discountTotal.toLocaleString()}</span>
                         </div>
                         <div className="d-flex justify-content-between small">

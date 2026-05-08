@@ -524,8 +524,7 @@ const CustomizedCheckout = ({ user }) => {
         channelScope: PROMO_CHANNELS.CUSTOMIZED,
         enteredCode: appliedPromoCode,
         shippingFee,
-        currentUserId: user?.id,
-    }), [appliedPromoCode, promoLines, promoState.promos, shippingFee, user?.id]);
+    }), [appliedPromoCode, promoLines, promoState.promos, shippingFee]);
     const subtotal = promoPricing.subtotalBeforeDiscount || currentItemSubtotal;
     const discountTotal = promoPricing.discountTotal;
     const subtotalAfterDiscount = promoPricing.subtotalAfterDiscount;

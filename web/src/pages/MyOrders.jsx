@@ -1626,6 +1626,7 @@ const MyOrders = () => {
                                         {Number(order.discount_total || 0) > 0 ? (
                                             <div className="small text-success mb-1">
                                                 Promo {order.applied_promo_code ? `(${order.applied_promo_code}) ` : ''}
+                                                {order.discount_label ? `${order.discount_label} ` : ''}
                                                 saved ₱{Number(order.discount_total || 0).toLocaleString()}
                                             </div>
                                         ) : null}

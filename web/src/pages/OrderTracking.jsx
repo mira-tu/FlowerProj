@@ -997,7 +997,7 @@ const OrderTracking = ({ user }) => {
                                 {orderDiscountTotal > 0 ? (
                                     <>
                                         <div className="d-flex justify-content-between mb-2 small text-success">
-                                            <span>Discount{order.applied_promo_code ? ` (${order.applied_promo_code})` : ''}</span>
+                                            <span>Discount{order.applied_promo_code ? ` (${order.applied_promo_code})` : ''}{order.discount_label ? ` - ${order.discount_label}` : ''}</span>
                                             <span>-₱{orderDiscountTotal.toLocaleString()}</span>
                                         </div>
                                         <div className="d-flex justify-content-between mb-2 small text-muted">

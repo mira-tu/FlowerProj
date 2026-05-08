@@ -83,12 +83,9 @@ const targetListHas = (targets, values = []) => {
 
 const targetListIsUnset = (targets) => targets === null || !Array.isArray(targets) || targets.length === 0;
 
-const promoMatchesCustomer = (promo, currentUserId = null) => {
-    if (targetListIsUnset(promo.eligible_user_ids)) return true;
-    const normalizedUserId = String(currentUserId || '').trim();
-    if (!normalizedUserId) return false;
-    return targetListHas(promo.eligible_user_ids, [normalizedUserId]);
-};
+const normalizeDiscountType = (value) => (
+    String(value || '').trim().toLowerCase() === 'amount' ? 'amount' : 'percent'
+);
 
 const isMissingPromoInfrastructureError = (error) => {
     const code = String(error?.code || '').toLowerCase();
@@ -112,7 +109,9 @@ export const normalizePromo = (promo = {}) => ({
     code: normalizePromoCode(promo.code),
     name: String(promo.name || promo.code || 'Discount').trim(),
     description: String(promo.description || '').trim(),
+    discount_type: normalizeDiscountType(promo.discount_type),
     discount_percent: Math.max(0, Math.min(100, toFiniteNumber(promo.discount_percent))),
+    discount_amount: Math.max(0, roundCurrency(promo.discount_amount)),
     channel_scope: String(promo.channel_scope || 'all').trim(),
     discount_mode: String(promo.discount_mode || 'coupon_code').trim(),
     target_scope: String(promo.target_scope || 'order').trim(),
@@ -129,7 +128,6 @@ export const normalizePromo = (promo = {}) => ({
     category_ids: normalizeTargetList(promo.category_ids) || [],
     custom_order_arrangement_targets: normalizeTargetList(promo.custom_order_arrangement_targets) || [],
     customized_item_targets: normalizeTargetList(promo.customized_item_targets),
-    eligible_user_ids: normalizeTargetList(promo.eligible_user_ids) || [],
     applies_to_sale_items: promo.applies_to_sale_items !== false,
     total_redemptions: Number.parseInt(promo.total_redemptions, 10) || 0,
     user_redemptions: Number.parseInt(promo.user_redemptions, 10) || 0,
@@ -320,11 +318,60 @@ const lineMatchesPromoTargets = (line, promo, { channelScope, occasions = [], ar
 };
 
 const buildLineBreakdown = (lines, promo, { channelScope, occasions, arrangementTargets } = {}) => {
+    const discountType = normalizeDiscountType(promo.discount_type);
     const discountPercent = Math.max(0, Math.min(100, toFiniteNumber(promo.discount_percent)));
+    const fixedDiscountAmount = Math.max(0, roundCurrency(promo.discount_amount));
     const matchingLines = lines.filter((line) => {
         if (!promo.applies_to_sale_items && line.hasBuiltInDiscount) return false;
         return lineMatchesPromoTargets(line, promo, { channelScope, occasions, arrangementTargets });
     });
+    const eligibleSubtotal = roundCurrency(matchingLines.reduce((sum, line) => sum + line.originalSubtotal, 0));
+
+    if (eligibleSubtotal <= 0) {
+        return {
+            breakdown: [],
+            discountTotal: 0,
+            eligibleSubtotal,
+        };
+    }
+
+    if (discountType === 'amount') {
+        const cappedDiscountAmount = Math.min(fixedDiscountAmount, eligibleSubtotal);
+        let remainingDiscount = cappedDiscountAmount;
+        let remainingSubtotal = eligibleSubtotal;
+        const breakdown = matchingLines.map((line, index) => {
+            const isLastLine = index === matchingLines.length - 1;
+            const discountAmount = isLastLine
+                ? remainingDiscount
+                : roundCurrency(Math.min(
+                    line.originalSubtotal,
+                    remainingDiscount * (line.originalSubtotal / Math.max(remainingSubtotal, line.originalSubtotal))
+                ));
+            remainingDiscount = Math.max(0, roundCurrency(remainingDiscount - discountAmount));
+            remainingSubtotal = Math.max(0, roundCurrency(remainingSubtotal - line.originalSubtotal));
+
+            return {
+                key: line.key,
+                name: line.name,
+                quantity: line.quantity,
+                original_subtotal: line.originalSubtotal,
+                discount_amount: discountAmount,
+                final_subtotal: Math.max(0, roundCurrency(line.originalSubtotal - discountAmount)),
+                discount_percent: null,
+                discount_type: discountType,
+                promo_discount_amount: fixedDiscountAmount,
+                source: 'promo',
+                promo_id: promo.id,
+                promo_code: promo.code,
+            };
+        }).filter((line) => line.discount_amount > 0);
+
+        return {
+            breakdown,
+            discountTotal: roundCurrency(breakdown.reduce((sum, line) => sum + line.discount_amount, 0)),
+            eligibleSubtotal,
+        };
+    }
 
     const breakdown = matchingLines.map((line) => {
         const discountAmount = roundCurrency(line.originalSubtotal * (discountPercent / 100));
@@ -338,6 +385,8 @@ const buildLineBreakdown = (lines, promo, { channelScope, occasions, arrangement
             discount_amount: discountAmount,
             final_subtotal: finalSubtotal,
             discount_percent: discountPercent,
+            discount_type: discountType,
+            promo_discount_amount: null,
             source: 'promo',
             promo_id: promo.id,
             promo_code: promo.code,
@@ -347,7 +396,7 @@ const buildLineBreakdown = (lines, promo, { channelScope, occasions, arrangement
     return {
         breakdown,
         discountTotal: roundCurrency(breakdown.reduce((sum, line) => sum + line.discount_amount, 0)),
-        eligibleSubtotal: roundCurrency(matchingLines.reduce((sum, line) => sum + line.originalSubtotal, 0)),
+        eligibleSubtotal,
     };
 };
 
@@ -379,6 +428,8 @@ const buildBuiltInCandidate = (lines) => {
             discount_amount: line.builtInDiscountAmount,
             final_subtotal: line.currentSubtotal,
             discount_percent: line.builtInDiscountPercent,
+            discount_type: 'percent',
+            promo_discount_amount: null,
             source: 'built_in_product_discount',
             promo_id: BUILT_IN_PROMO_ID,
             promo_code: null,
@@ -405,7 +456,6 @@ export const calculatePromoPricing = ({
     shippingFee = 0,
     occasions = [],
     arrangementTargets = [],
-    currentUserId = null,
     now = new Date(),
 } = {}) => {
     const normalizedLines = (Array.isArray(lines) ? lines : []).map(normalizeLine);
@@ -420,7 +470,6 @@ export const calculatePromoPricing = ({
 
     normalizedPromos.forEach((promo) => {
         if (!promoMatchesChannel(promo, channelScope)) return;
-        if (!promoMatchesCustomer(promo, currentUserId)) return;
         if (getPromoAvailability(promo, { now, subtotalBeforeDiscount }) !== 'available') return;
         if (!getPromoModeEligible(promo, { enteredCode: normalizedCode, channelScope, occasions })) return;
 
@@ -450,7 +499,6 @@ export const calculatePromoPricing = ({
         lines: normalizedLines,
         eligiblePromos: normalizedPromos.filter((promo) => (
             promoMatchesChannel(promo, channelScope)
-            && promoMatchesCustomer(promo, currentUserId)
             && getPromoAvailability(promo, { now, subtotalBeforeDiscount }) === 'available'
         )),
         chosenCandidate,
@@ -470,7 +518,6 @@ export const calculatePromoPricing = ({
             subtotalBeforeDiscount,
             now,
             occasions,
-            currentUserId,
         }),
     };
 };
@@ -483,7 +530,6 @@ export const getEnteredPromoValidation = ({
     subtotalBeforeDiscount = 0,
     now = new Date(),
     occasions = [],
-    currentUserId = null,
 } = {}) => {
     const normalizedCode = normalizePromoCode(enteredCode);
     if (!normalizedCode) return null;
@@ -494,7 +540,6 @@ export const getEnteredPromoValidation = ({
 
     if (!promo) return { status: 'invalid', promo: null };
     if (!promoMatchesChannel(promo, channelScope)) return { status: 'ineligible', promo };
-    if (!promoMatchesCustomer(promo, currentUserId)) return { status: 'customer_ineligible', promo };
 
     const availability = getPromoAvailability(promo, { now, subtotalBeforeDiscount });
     if (availability !== 'available') return { status: availability, promo };
@@ -530,8 +575,6 @@ export const getPromoValidationMessage = (validation) => {
             return 'You have already used that discount code.';
         case 'minimum':
             return `That discount requires a minimum subtotal of PHP ${roundCurrency(validation.promo?.minimum_subtotal).toLocaleString()}.`;
-        case 'customer_ineligible':
-            return 'That discount code is only available to selected customers.';
         case 'ineligible':
             return 'That discount code is not eligible for these items.';
         case 'not_best':
@@ -551,7 +594,9 @@ export const buildDiscountSnapshot = (pricing) => {
         promo_id: pricing.chosenPromo?.id || null,
         promo_code: pricing.chosenPromo?.code || null,
         promo_name: pricing.chosenPromo?.name || pricing.chosenCandidate?.label || null,
+        discount_type: pricing.chosenPromo?.discount_type || null,
         discount_percent: pricing.chosenPromo?.discount_percent || null,
+        discount_amount: pricing.chosenPromo?.discount_amount || null,
         discount_mode: pricing.chosenPromo?.discount_mode || null,
         target_scope: pricing.chosenPromo?.target_scope || null,
         channel_scope: pricing.channelScope,

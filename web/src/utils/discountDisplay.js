@@ -17,6 +17,25 @@ const toNumber = (value, fallback = 0) => {
     return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const formatNumber = (value) => (
+    toNumber(value).toLocaleString(undefined, { maximumFractionDigits: 2 })
+);
+
+export const getPromoDiscountLabel = (source = {}) => {
+    const discountType = String(source?.discount_type ?? source?.discountType ?? '').trim().toLowerCase();
+    const discountAmount = toNumber(source?.discount_amount ?? source?.discountAmount ?? 0);
+    if (discountType === 'amount' && discountAmount > 0) {
+        return `PHP ${formatNumber(discountAmount)} off`;
+    }
+
+    const discountPercent = toNumber(source?.discount_percent ?? source?.discountPercent ?? 0);
+    if (discountPercent > 0) {
+        return `${formatNumber(discountPercent)}%`;
+    }
+
+    return '';
+};
+
 export const getDiscountSnapshot = (record = {}, nestedData = null) => (
     parseMaybeJson(record?.discount_snapshot)
     || parseMaybeJson(nestedData?.discount_snapshot)
@@ -51,13 +70,16 @@ export const getDiscountDisplayFields = (record = {}, nestedData = null) => {
         ?? null,
         0
     );
+    const discountLabel = getPromoDiscountLabel(snapshot)
+        || getPromoDiscountLabel(data)
+        || getPromoDiscountLabel(record);
 
     return {
         discount_total: discountTotal,
         discount_snapshot: snapshot,
         applied_promo_code: appliedPromoCode || null,
+        discount_label: discountLabel || null,
         subtotal_before_discount: subtotalBeforeDiscount,
         subtotal_after_discount: subtotalAfterDiscount,
     };
 };
-

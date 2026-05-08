@@ -302,8 +302,7 @@ const Checkout = ({ setCart, user, products = [] }) => {
         channelScope: PROMO_CHANNELS.CATALOG,
         enteredCode: appliedPromoCode,
         shippingFee,
-        currentUserId: user?.id,
-    }), [appliedPromoCode, promoLines, promoState.promos, shippingFee, user?.id]);
+    }), [appliedPromoCode, promoLines, promoState.promos, shippingFee]);
     const subtotal = promoPricing.subtotalBeforeDiscount || currentItemSubtotal;
     const discountTotal = promoPricing.discountTotal;
     const subtotalAfterDiscount = promoPricing.subtotalAfterDiscount;

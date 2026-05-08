@@ -1510,7 +1510,6 @@ const resolveCustomOrderQuotePromoPricing = async ({
         shippingFee: finalShippingFee,
         occasions,
         arrangementTargets,
-        currentUserId: request?.user_id,
     });
 };
 
@@ -1564,12 +1563,18 @@ const provideQuoteDirect = async (id, price, shippingFee = 0, quoteBreakdown = n
             ...quoteBreakdown,
             computed_subtotal: promoPricing.subtotalBeforeDiscount,
             discount_total: promoPricing.discountTotal,
+            discount_type: promoPricing.chosenPromo?.discount_type || null,
+            discount_percent: promoPricing.chosenPromo?.discount_percent || null,
+            discount_amount: promoPricing.chosenPromo?.discount_amount || null,
             subtotal_after_discount: promoPricing.subtotalAfterDiscount,
             computed_total: promoPricing.finalTotal,
         } : currentData?.quote_breakdown,
         discount_total: promoPricing.discountTotal,
         discount_snapshot: discountSnapshot,
         applied_promo_code: promoPricing.appliedPromoCode,
+        discount_type: promoPricing.chosenPromo?.discount_type || null,
+        discount_percent: promoPricing.chosenPromo?.discount_percent || null,
+        discount_amount: promoPricing.chosenPromo?.discount_amount || null,
         final_price: promoPricing.finalTotal,
         subtotal_before_discount: promoPricing.subtotalBeforeDiscount,
         subtotal_after_discount: promoPricing.subtotalAfterDiscount,

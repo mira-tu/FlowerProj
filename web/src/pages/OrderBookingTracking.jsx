@@ -1771,6 +1771,7 @@ const OrderBookingTracking = () => {
                                 {Number(request.discount_total || request.requestData?.discount_total || 0) > 0 ? (
                                     <div className="small text-success text-end mt-1">
                                         Promo {request.applied_promo_code || request.requestData?.applied_promo_code ? `(${request.applied_promo_code || request.requestData?.applied_promo_code}) ` : ''}
+                                        {request.discount_label || request.requestData?.discount_label ? `${request.discount_label || request.requestData?.discount_label} ` : ''}
                                         saved ₱{Number(request.discount_total || request.requestData?.discount_total || 0).toLocaleString()}
                                     </div>
                                 ) : null}

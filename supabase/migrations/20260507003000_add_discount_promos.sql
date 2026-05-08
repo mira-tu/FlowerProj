@@ -59,7 +59,9 @@ create table if not exists public.discount_promos (
   code text not null unique,
   name text not null,
   description text,
+  discount_type text not null default 'percent' check (discount_type in ('percent', 'amount')),
   discount_percent numeric(5, 2) not null default 0 check (discount_percent >= 0 and discount_percent <= 100),
+  discount_amount numeric(10, 2) not null default 0 check (discount_amount >= 0),
   channel_scope public.discount_channel_scope not null default 'all',
   discount_mode public.discount_mode not null default 'coupon_code',
   target_scope public.discount_target_scope not null default 'order',
@@ -135,7 +137,17 @@ language plpgsql
 as $$
 begin
   new.code := upper(regexp_replace(coalesce(new.code, ''), '\s+', '', 'g'));
+  new.discount_type := case
+    when lower(coalesce(new.discount_type, 'percent')) = 'amount' then 'amount'
+    else 'percent'
+  end;
   new.discount_percent := greatest(0, least(100, coalesce(new.discount_percent, 0)));
+  new.discount_amount := greatest(0, coalesce(new.discount_amount, 0));
+  if new.discount_type = 'amount' then
+    new.discount_percent := 0;
+  else
+    new.discount_amount := 0;
+  end if;
   new.minimum_subtotal := greatest(0, coalesce(new.minimum_subtotal, 0));
   new.updated_at := timezone('utc', now());
   return new;

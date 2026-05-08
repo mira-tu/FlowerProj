@@ -20,12 +20,16 @@ import {
 } from '../../../utils/promoEngine';
 
 const PLACEHOLDER_TEXT_COLOR = '#9ca3af';
-const CUSTOMER_TARGETING_UI_ENABLED = false;
 
 const MODE_OPTIONS = [
   { value: 'coupon_code', label: 'Coupon' },
   { value: 'automatic_event', label: 'Event' },
   { value: 'occasion_based', label: 'Occasion' },
+];
+
+const DISCOUNT_TYPE_OPTIONS = [
+  { value: 'percent', label: 'Percent' },
+  { value: 'amount', label: 'Fixed amount' },
 ];
 
 const CHANNEL_LABELS = {
@@ -39,7 +43,9 @@ const blankForm = (channelScope) => ({
   code: generatePromoCode(CHANNEL_LABELS[channelScope] || 'PROMO'),
   name: '',
   description: '',
+  discount_type: 'percent',
   discount_percent: '',
+  discount_amount: '',
   channel_scope: channelScope,
   discount_mode: channelScope === 'custom_order' ? 'occasion_based' : 'coupon_code',
   target_scope: 'order',
@@ -56,8 +62,6 @@ const blankForm = (channelScope) => ({
   customized_item_targets: [],
   custom_order_arrangement_targets: [],
   occasion_targets: [],
-  customerTargetKind: 'all',
-  eligible_user_ids: [],
 });
 
 const toText = (value) => String(value ?? '').trim();
@@ -77,12 +81,12 @@ const parseIntegerOrNull = (value) => {
 
 const sanitizeDateInput = (value) => String(value ?? '').replace(/[^0-9-]/g, '').slice(0, 10);
 
-const parseDateOrNull = (value) => {
+const parseDateOrNull = (value, label = 'Date') => {
   const normalized = toText(value);
   if (!normalized) return null;
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-    throw new Error('Dates must use YYYY-MM-DD format.');
+    throw new Error(`${label} must use YYYY-MM-DD format.`);
   }
 
   const parsed = new Date(normalized);
@@ -94,19 +98,59 @@ const parseDateOrNull = (value) => {
     || parsed.getUTCMonth() + 1 !== month
     || parsed.getUTCDate() !== day
   ) {
-    throw new Error('Enter a valid calendar date.');
+    throw new Error(`${label} must be a valid calendar date.`);
   }
 
   return parsed.toISOString();
 };
 
+const createValidationError = (fieldErrors, fallbackMessage) => {
+  const message = fallbackMessage || Object.values(fieldErrors).find(Boolean) || 'Please review the highlighted promo fields.';
+  const error = new Error(message);
+  error.isValidationError = true;
+  error.fieldErrors = fieldErrors;
+  return error;
+};
+
+const isSchemaCacheMissingColumnError = (error, columns = []) => {
+  const code = toText(error?.code).toLowerCase();
+  const message = `${toText(error?.message)} ${toText(error?.details)} ${toText(error?.hint)}`.toLowerCase();
+  return (code === 'pgrst204' || message.includes('schema cache') || message.includes('could not find'))
+    && columns.some((column) => message.includes(column.toLowerCase()));
+};
+
+const canRetryWithLegacyPercentPayload = (error, payload = {}) => (
+  normalizeDiscountType(payload.discount_type) === 'percent'
+  && isSchemaCacheMissingColumnError(error, ['discount_type', 'discount_amount'])
+);
+
+const toLegacyPercentPromoPayload = (payload = {}) => {
+  const { discount_type: _discountType, discount_amount: _discountAmount, ...legacyPayload } = payload;
+  return legacyPayload;
+};
+
+const getPromoSaveErrorMessage = (error, payload = {}) => {
+  if (isSchemaCacheMissingColumnError(error, ['discount_type', 'discount_amount'])) {
+    if (normalizeDiscountType(payload.discount_type) === 'amount') {
+      return 'Fixed amount promos need the latest promo database update before they can be saved. Please ask an admin to update the database, then try again.';
+    }
+    return 'The promo database update is not active yet. This promo could not be saved; please update the database and try again.';
+  }
+  return error?.message || 'Unable to save this promo.';
+};
+
 const getOptionValue = (option) => toText(option?.value ?? option?.id ?? option?.name ?? option?.label);
 const getOptionLabel = (option) => toText(option?.label ?? option?.name ?? option?.category_name ?? option?.value ?? option?.id);
-const getCustomerLabel = (customer = {}) => {
-  const name = toText(customer.name);
-  const email = toText(customer.email);
-  if (name && email) return `${name} (${email})`;
-  return name || email || `Customer ${toText(customer.id).slice(0, 8)}`;
+const normalizeDiscountType = (value) => (toText(value).toLowerCase() === 'amount' ? 'amount' : 'percent');
+const formatPeso = (value) => {
+  const amount = parseNumberOrNull(value) || 0;
+  return `PHP ${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+};
+const getPromoDiscountLabel = (promo = {}) => {
+  if (normalizeDiscountType(promo.discount_type) === 'amount') {
+    return `${formatPeso(promo.discount_amount)} off`;
+  }
+  return `${parseNumberOrNull(promo.discount_percent) || 0}%`;
 };
 
 const inferTargetKind = (promo, channelScope) => {
@@ -172,10 +216,9 @@ const PromoManager = ({
   const [editing, setEditing] = useState(false);
   const [promoToDelete, setPromoToDelete] = useState(null);
   const [deletingPromo, setDeletingPromo] = useState(false);
-  const [customers, setCustomers] = useState([]);
-  const [customersLoading, setCustomersLoading] = useState(false);
-  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [form, setForm] = useState(() => blankForm(channelScope));
+  const [formError, setFormError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
 
   const targetChoices = useMemo(() => buildTargetChoices({
     channelScope,
@@ -187,15 +230,6 @@ const PromoManager = ({
   }), [arrangementOptions, categoryOptions, channelScope, customizedTargetOptions, occasionOptions, productOptions]);
 
   const selectedOptions = targetChoices[form.targetKind]?.options || [];
-  const selectedCustomerIds = toArray(form.eligible_user_ids);
-  const filteredCustomers = useMemo(() => {
-    const query = customerSearchQuery.trim().toLowerCase();
-    if (!query) return customers;
-    return customers.filter((customer) => (
-      getCustomerLabel(customer).toLowerCase().includes(query)
-      || toText(customer.phone).toLowerCase().includes(query)
-    ));
-  }, [customerSearchQuery, customers]);
   const selectedValues = (() => {
     if (form.targetKind === 'products') return form.product_ids;
     if (form.targetKind === 'categories') return form.category_ids;
@@ -218,50 +252,45 @@ const PromoManager = ({
     }
   }, [channelScope]);
 
-  const loadCustomers = useCallback(async () => {
-    setCustomersLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('id, name, email, phone')
-        .eq('role', 'customer')
-        .order('name', { ascending: true });
-      if (error) throw error;
-      setCustomers(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error('Error loading promo customer targets:', error);
-      setCustomers([]);
-    } finally {
-      setCustomersLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
     loadPromos();
   }, [loadPromos]);
 
-  useEffect(() => {
-    if (CUSTOMER_TARGETING_UI_ENABLED) {
-      loadCustomers();
-    }
-  }, [loadCustomers]);
-
-  const updateForm = (patch) => setForm((current) => ({ ...current, ...patch }));
+  const updateForm = (patch) => {
+    setForm((current) => ({ ...current, ...patch }));
+    setFormError('');
+    setFieldErrors((current) => {
+      const nextErrors = { ...current };
+      const fieldsToClear = new Set(Object.keys(patch));
+      if (Object.prototype.hasOwnProperty.call(patch, 'discount_type')) {
+        fieldsToClear.add('discount_percent');
+        fieldsToClear.add('discount_amount');
+      }
+      fieldsToClear.forEach((fieldName) => {
+        delete nextErrors[fieldName];
+      });
+      return nextErrors;
+    });
+  };
 
   const resetForm = () => {
     setEditing(false);
-    setCustomerSearchQuery('');
+    setFormError('');
+    setFieldErrors({});
     setForm(blankForm(channelScope));
   };
 
   const beginEdit = (promo) => {
     const normalized = normalizePromo(promo);
     setEditing(true);
-    setCustomerSearchQuery('');
+    setFormError('');
+    setFieldErrors({});
     setForm({
       ...blankForm(channelScope),
       ...normalized,
+      discount_type: normalizeDiscountType(normalized.discount_type),
       discount_percent: toText(normalized.discount_percent),
+      discount_amount: normalized.discount_amount ? toText(normalized.discount_amount) : '',
       starts_at: normalized.starts_at ? toText(normalized.starts_at).slice(0, 10) : '',
       ends_at: normalized.ends_at ? toText(normalized.ends_at).slice(0, 10) : '',
       usage_limit_total: normalized.usage_limit_total === null ? '' : toText(normalized.usage_limit_total),
@@ -274,8 +303,6 @@ const PromoManager = ({
       customized_item_targets: toArray(normalized.customized_item_targets),
       custom_order_arrangement_targets: toArray(normalized.custom_order_arrangement_targets),
       occasion_targets: toArray(normalized.occasion_targets),
-      customerTargetKind: CUSTOMER_TARGETING_UI_ENABLED && toArray(normalized.eligible_user_ids).length ? 'selected' : 'all',
-      eligible_user_ids: CUSTOMER_TARGETING_UI_ENABLED ? toArray(normalized.eligible_user_ids) : [],
     });
   };
 
@@ -310,49 +337,46 @@ const PromoManager = ({
     });
   };
 
-  const setCustomerTargetKind = (customerTargetKind) => {
-    updateForm({
-      customerTargetKind,
-      eligible_user_ids: customerTargetKind === 'selected' ? selectedCustomerIds : [],
-    });
-  };
-
-  const toggleEligibleCustomer = (customerId) => {
-    const value = toText(customerId);
-    if (!value) return;
-    setForm((current) => {
-      const currentValues = toArray(current.eligible_user_ids);
-      const nextValues = currentValues.includes(value)
-        ? currentValues.filter((item) => item !== value)
-        : [...currentValues, value];
-      return { ...current, eligible_user_ids: nextValues };
-    });
-  };
-
   const buildPayload = () => {
     const code = normalizePromoCode(form.code || generatePromoCode(form.name || 'PROMO'));
+    const discountType = normalizeDiscountType(form.discount_type);
     const discountPercent = parseNumberOrNull(form.discount_percent);
+    const discountAmount = parseNumberOrNull(form.discount_amount);
     const minimumSubtotal = parseNumberOrNull(form.minimum_subtotal) || 0;
-    const startsAt = parseDateOrNull(form.starts_at);
-    const endsAt = parseDateOrNull(form.ends_at);
 
-    if (!code) throw new Error('Promo code is required.');
-    if (!toText(form.name)) throw new Error('Promo name is required.');
-    if (!discountPercent || discountPercent <= 0 || discountPercent > 100) {
-      throw new Error('Discount percent must be between 1 and 100.');
+    if (!code) {
+      throw createValidationError({ code: 'Promo code is required.' });
+    }
+    if (!toText(form.name)) {
+      throw createValidationError({ name: 'Promo name is required.' });
+    }
+    if (discountType === 'percent' && (!discountPercent || discountPercent <= 0 || discountPercent > 100)) {
+      throw createValidationError({ discount_percent: 'Discount percent must be between 1 and 100.' });
+    }
+    if (discountType === 'amount' && (!discountAmount || discountAmount <= 0)) {
+      throw createValidationError({ discount_amount: 'Discount amount must be greater than 0.' });
+    }
+
+    let startsAt = null;
+    let endsAt = null;
+    try {
+      startsAt = parseDateOrNull(form.starts_at, 'Start date');
+      endsAt = parseDateOrNull(form.ends_at, 'End date');
+    } catch (error) {
+      const fieldName = toText(error.message).toLowerCase().startsWith('end') ? 'ends_at' : 'starts_at';
+      throw createValidationError({ [fieldName]: error.message });
     }
     if (startsAt && endsAt && new Date(endsAt).getTime() < new Date(startsAt).getTime()) {
-      throw new Error('End date cannot be before start date.');
-    }
-    if (CUSTOMER_TARGETING_UI_ENABLED && form.customerTargetKind === 'selected' && !toArray(form.eligible_user_ids).length) {
-      throw new Error('Select at least one eligible customer or switch back to All customers.');
+      throw createValidationError({ ends_at: 'End date cannot be before start date.' });
     }
 
     return {
       code,
       name: toText(form.name),
       description: toText(form.description) || null,
-      discount_percent: discountPercent,
+      discount_type: discountType,
+      discount_percent: discountType === 'percent' ? discountPercent : 0,
+      discount_amount: discountType === 'amount' ? discountAmount : 0,
       channel_scope: channelScope,
       discount_mode: form.discount_mode,
       target_scope: 'order',
@@ -367,25 +391,43 @@ const PromoManager = ({
       category_ids: form.targetKind === 'categories' ? toArray(form.category_ids) : [],
       custom_order_arrangement_targets: form.targetKind === 'arrangements' ? toArray(form.custom_order_arrangement_targets) : [],
       customized_item_targets: form.targetKind === 'customized_items' ? toArray(form.customized_item_targets) : null,
-      eligible_user_ids: CUSTOMER_TARGETING_UI_ENABLED && form.customerTargetKind === 'selected' ? toArray(form.eligible_user_ids) : [],
       applies_to_sale_items: form.applies_to_sale_items !== false,
     };
   };
 
+  const savePromoPayload = async (payload) => {
+    const request = form.id
+      ? supabase.from('discount_promos').update(payload).eq('id', form.id)
+      : supabase.from('discount_promos').insert([payload]);
+    return request;
+  };
+
   const savePromo = async () => {
     setSaving(true);
+    setFormError('');
+    setFieldErrors({});
+    let payload = null;
     try {
-      const payload = buildPayload();
-      const request = form.id
-        ? supabase.from('discount_promos').update(payload).eq('id', form.id)
-        : supabase.from('discount_promos').insert([payload]);
-      const { error } = await request;
-      if (error) throw error;
+      payload = buildPayload();
+      const { error } = await savePromoPayload(payload);
+      if (error) {
+        if (canRetryWithLegacyPercentPayload(error, payload)) {
+          const { error: retryError } = await savePromoPayload(toLegacyPercentPromoPayload(payload));
+          if (retryError) throw retryError;
+        } else {
+          throw error;
+        }
+      }
       resetForm();
       await loadPromos();
     } catch (error) {
       console.error('Error saving discount promo:', error);
-      Alert.alert('Promo not saved', error.message || 'Unable to save this promo.');
+      const message = error?.isValidationError
+        ? error.message
+        : getPromoSaveErrorMessage(error, payload || {});
+      setFormError(message);
+      setFieldErrors(error?.fieldErrors || {});
+      Alert.alert('Promo not saved', message);
     } finally {
       setSaving(false);
     }
@@ -431,7 +473,7 @@ const PromoManager = ({
       <View style={localStyles.headerRow}>
         <View style={localStyles.headerText}>
           <Text style={localStyles.title}>{title || `${CHANNEL_LABELS[channelScope] || 'Promo'} Promos`}</Text>
-          <Text style={localStyles.subtitle}>Percent coupons, event promos, usage limits, and targeting.</Text>
+          <Text style={localStyles.subtitle}>Percent or fixed-amount coupons, event promos, usage limits, and targeting.</Text>
         </View>
         <TouchableOpacity style={localStyles.iconButton} onPress={loadPromos} disabled={loading}>
           {loading ? <ActivityIndicator size="small" color="#ec4899" /> : <Ionicons name="refresh" size={18} color="#ec4899" />}
@@ -439,11 +481,18 @@ const PromoManager = ({
       </View>
 
       <View style={localStyles.formGrid}>
+        {formError ? (
+          <View style={localStyles.formErrorBox}>
+            <Ionicons name="alert-circle" size={16} color="#be123c" />
+            <Text style={localStyles.formErrorText}>{formError}</Text>
+          </View>
+        ) : null}
+
         <View style={localStyles.inputGroup}>
           <Text style={localStyles.label}>Code</Text>
           <View style={localStyles.codeRow}>
             <TextInput
-              style={[localStyles.input, localStyles.codeInput]}
+              style={[localStyles.input, localStyles.codeInput, fieldErrors.code && localStyles.inputError]}
               value={form.code}
               onChangeText={(text) => updateForm({ code: normalizePromoCode(text) })}
               placeholder="PROMO2026"
@@ -457,30 +506,65 @@ const PromoManager = ({
               <Ionicons name="sparkles" size={16} color="#be185d" />
             </TouchableOpacity>
           </View>
+          {fieldErrors.code ? <Text style={localStyles.fieldErrorText}>{fieldErrors.code}</Text> : null}
         </View>
 
         <View style={localStyles.inputGroup}>
           <Text style={localStyles.label}>Name</Text>
           <TextInput
-            style={localStyles.input}
+            style={[localStyles.input, fieldErrors.name && localStyles.inputError]}
             value={form.name}
             onChangeText={(text) => updateForm({ name: text })}
             placeholder="Mother's Day 10%"
             placeholderTextColor={PLACEHOLDER_TEXT_COLOR}
           />
+          {fieldErrors.name ? <Text style={localStyles.fieldErrorText}>{fieldErrors.name}</Text> : null}
+        </View>
+
+        <Text style={localStyles.label}>Discount type</Text>
+        <View style={localStyles.chipRow}>
+          {DISCOUNT_TYPE_OPTIONS.map((option) => (
+            <TouchableOpacity
+              key={option.value}
+              style={[localStyles.chip, normalizeDiscountType(form.discount_type) === option.value && localStyles.chipActive]}
+              onPress={() => updateForm({ discount_type: option.value })}
+            >
+              <Text style={[localStyles.chipText, normalizeDiscountType(form.discount_type) === option.value && localStyles.chipTextActive]}>
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
         <View style={localStyles.row}>
           <View style={[localStyles.inputGroup, localStyles.half]}>
-            <Text style={localStyles.label}>Percent</Text>
-            <TextInput
-              style={localStyles.input}
-              value={form.discount_percent}
-              onChangeText={(text) => updateForm({ discount_percent: text.replace(/[^0-9.]/g, '') })}
-              keyboardType="numeric"
-              placeholder="10"
-              placeholderTextColor={PLACEHOLDER_TEXT_COLOR}
-            />
+            {normalizeDiscountType(form.discount_type) === 'amount' ? (
+              <>
+                <Text style={localStyles.label}>Amount (PHP)</Text>
+                <TextInput
+                  style={[localStyles.input, fieldErrors.discount_amount && localStyles.inputError]}
+                  value={form.discount_amount}
+                  onChangeText={(text) => updateForm({ discount_amount: text.replace(/[^0-9.]/g, '') })}
+                  keyboardType="numeric"
+                  placeholder="100"
+                  placeholderTextColor={PLACEHOLDER_TEXT_COLOR}
+                />
+                {fieldErrors.discount_amount ? <Text style={localStyles.fieldErrorText}>{fieldErrors.discount_amount}</Text> : null}
+              </>
+            ) : (
+              <>
+                <Text style={localStyles.label}>Percent</Text>
+                <TextInput
+                  style={[localStyles.input, fieldErrors.discount_percent && localStyles.inputError]}
+                  value={form.discount_percent}
+                  onChangeText={(text) => updateForm({ discount_percent: text.replace(/[^0-9.]/g, '') })}
+                  keyboardType="numeric"
+                  placeholder="10"
+                  placeholderTextColor={PLACEHOLDER_TEXT_COLOR}
+                />
+                {fieldErrors.discount_percent ? <Text style={localStyles.fieldErrorText}>{fieldErrors.discount_percent}</Text> : null}
+              </>
+            )}
           </View>
           <View style={[localStyles.inputGroup, localStyles.half]}>
             <Text style={localStyles.label}>Minimum subtotal</Text>
@@ -545,91 +629,30 @@ const PromoManager = ({
           </View>
         ) : null}
 
-        {CUSTOMER_TARGETING_UI_ENABLED ? (
-          <>
-            <Text style={localStyles.label}>Eligible customers</Text>
-            <View style={localStyles.chipRow}>
-              <TouchableOpacity
-                style={[localStyles.chip, form.customerTargetKind !== 'selected' && localStyles.chipActive]}
-                onPress={() => setCustomerTargetKind('all')}
-              >
-                <Text style={[localStyles.chipText, form.customerTargetKind !== 'selected' && localStyles.chipTextActive]}>
-                  All customers
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[localStyles.chip, form.customerTargetKind === 'selected' && localStyles.chipActive]}
-                onPress={() => setCustomerTargetKind('selected')}
-              >
-                <Text style={[localStyles.chipText, form.customerTargetKind === 'selected' && localStyles.chipTextActive]}>
-                  Selected customers
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {form.customerTargetKind === 'selected' ? (
-              <View style={localStyles.customerTargetBox}>
-                <TextInput
-                  style={[localStyles.input, localStyles.customerSearchInput]}
-                  value={customerSearchQuery}
-                  onChangeText={setCustomerSearchQuery}
-                  placeholder="Search customers by name, email, or phone"
-                  placeholderTextColor={PLACEHOLDER_TEXT_COLOR}
-                />
-                <Text style={localStyles.customerTargetSummary}>
-                  {selectedCustomerIds.length ? `${selectedCustomerIds.length} selected` : 'Select at least one customer'}
-                </Text>
-                {customersLoading ? (
-                  <Text style={localStyles.emptyText}>Loading customers...</Text>
-                ) : (
-                  <View style={localStyles.customerChipWrap}>
-                    {filteredCustomers.slice(0, 50).map((customer) => {
-                      const value = toText(customer.id);
-                      const selected = selectedCustomerIds.includes(value);
-                      return (
-                        <TouchableOpacity
-                          key={value}
-                          style={[localStyles.targetChip, selected && localStyles.targetChipSelected]}
-                          onPress={() => toggleEligibleCustomer(value)}
-                        >
-                          <Text style={[localStyles.targetChipText, selected && localStyles.targetChipTextSelected]}>
-                            {getCustomerLabel(customer)}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                    {!filteredCustomers.length ? (
-                      <Text style={localStyles.emptyText}>No customers found.</Text>
-                    ) : null}
-                  </View>
-                )}
-              </View>
-            ) : null}
-          </>
-        ) : null}
-
         <View style={localStyles.row}>
           <View style={[localStyles.inputGroup, localStyles.half]}>
             <Text style={localStyles.label}>Starts</Text>
             <TextInput
-              style={localStyles.input}
+              style={[localStyles.input, fieldErrors.starts_at && localStyles.inputError]}
               value={form.starts_at}
               onChangeText={(text) => updateForm({ starts_at: sanitizeDateInput(text) })}
               placeholder="YYYY-MM-DD"
               placeholderTextColor={PLACEHOLDER_TEXT_COLOR}
               keyboardType="numbers-and-punctuation"
             />
+            {fieldErrors.starts_at ? <Text style={localStyles.fieldErrorText}>{fieldErrors.starts_at}</Text> : null}
           </View>
           <View style={[localStyles.inputGroup, localStyles.half]}>
             <Text style={localStyles.label}>Ends</Text>
             <TextInput
-              style={localStyles.input}
+              style={[localStyles.input, fieldErrors.ends_at && localStyles.inputError]}
               value={form.ends_at}
               onChangeText={(text) => updateForm({ ends_at: sanitizeDateInput(text) })}
               placeholder="YYYY-MM-DD"
               placeholderTextColor={PLACEHOLDER_TEXT_COLOR}
               keyboardType="numbers-and-punctuation"
             />
+            {fieldErrors.ends_at ? <Text style={localStyles.fieldErrorText}>{fieldErrors.ends_at}</Text> : null}
           </View>
         </View>
 
@@ -658,12 +681,12 @@ const PromoManager = ({
           </View>
         </View>
 
-        <Text style={localStyles.label}>Description</Text>
+        <Text style={localStyles.label}>Admin note</Text>
         <TextInput
           style={[localStyles.input, localStyles.multiline]}
           value={form.description}
           onChangeText={(text) => updateForm({ description: text })}
-          placeholder="Optional admin note or customer-facing label"
+          placeholder="Optional internal note"
           placeholderTextColor={PLACEHOLDER_TEXT_COLOR}
           multiline
         />
@@ -683,6 +706,13 @@ const PromoManager = ({
           </View>
         ) : null}
 
+        {formError ? (
+          <View style={[localStyles.formErrorBox, localStyles.actionErrorBox]}>
+            <Ionicons name="alert-circle" size={16} color="#be123c" />
+            <Text style={localStyles.formErrorText}>{formError}</Text>
+          </View>
+        ) : null}
+
         <View style={localStyles.actionsRow}>
           <TouchableOpacity style={[localStyles.actionButton, localStyles.secondaryButton]} onPress={resetForm} disabled={saving}>
             <Text style={localStyles.secondaryButtonText}>{editing ? 'Cancel edit' : 'Clear'}</Text>
@@ -698,15 +728,10 @@ const PromoManager = ({
           <View key={promo.id} style={localStyles.promoRow}>
             <View style={localStyles.promoInfo}>
               <Text style={localStyles.promoCode}>{promo.code}</Text>
-              <Text style={localStyles.promoName}>{promo.name} - {promo.discount_percent}% - {promo.discount_mode.replace(/_/g, ' ')}</Text>
+              <Text style={localStyles.promoName}>{promo.name} - {getPromoDiscountLabel(promo)} - {promo.discount_mode.replace(/_/g, ' ')}</Text>
               <Text style={localStyles.promoMeta}>
                 Used {promo.total_redemptions || 0}{promo.usage_limit_total ? `/${promo.usage_limit_total}` : ''} times
               </Text>
-              {CUSTOMER_TARGETING_UI_ENABLED ? (
-                <Text style={localStyles.promoMeta}>
-                  {toArray(promo.eligible_user_ids).length ? `${toArray(promo.eligible_user_ids).length} selected customers` : 'All customers'}
-                </Text>
-              ) : null}
             </View>
             <View style={localStyles.promoActions}>
               <TouchableOpacity style={localStyles.smallIconButton} onPress={() => beginEdit(promo)}>
@@ -780,6 +805,28 @@ const localStyles = StyleSheet.create({
   formGrid: {
     marginTop: 2,
   },
+  formErrorBox: {
+    alignItems: 'flex-start',
+    backgroundColor: '#fff1f2',
+    borderColor: '#fecdd3',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    marginBottom: 12,
+    padding: 10,
+  },
+  formErrorText: {
+    color: '#9f1239',
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
+    marginLeft: 7,
+  },
+  actionErrorBox: {
+    marginBottom: 10,
+    marginTop: 2,
+  },
   inputGroup: {
     marginBottom: 10,
   },
@@ -800,6 +847,16 @@ const localStyles = StyleSheet.create({
     minHeight: 42,
     paddingHorizontal: 12,
     paddingVertical: 9,
+  },
+  inputError: {
+    backgroundColor: '#fff7f7',
+    borderColor: '#fb7185',
+  },
+  fieldErrorText: {
+    color: '#be123c',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 4,
   },
   multiline: {
     minHeight: 72,
@@ -867,27 +924,6 @@ const localStyles = StyleSheet.create({
     flexWrap: 'wrap',
     marginBottom: 12,
     padding: 8,
-  },
-  customerTargetBox: {
-    backgroundColor: '#f9fafb',
-    borderColor: '#e5e7eb',
-    borderRadius: 8,
-    borderWidth: 1,
-    marginBottom: 12,
-    padding: 8,
-  },
-  customerSearchInput: {
-    backgroundColor: '#fff',
-    marginBottom: 8,
-  },
-  customerTargetSummary: {
-    color: '#6b7280',
-    fontSize: 12,
-    marginBottom: 6,
-  },
-  customerChipWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
   },
   targetChip: {
     backgroundColor: '#fff',
