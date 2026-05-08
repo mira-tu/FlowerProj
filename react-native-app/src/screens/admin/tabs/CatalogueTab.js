@@ -499,71 +499,75 @@ const CatalogueTab = () => {
         ) : null}
       </View>
 
-      <FlatList
-        data={filteredProducts}
-        renderItem={renderProduct}
-        keyExtractor={(item) => item.id.toString()}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="none"
-        removeClippedSubviews={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ec4899']} />
-        }
-        contentContainerStyle={styles.listContent}
-        ListHeaderComponent={(
-          <View style={{ marginBottom: 12 }}>
-            <TouchableOpacity
-              style={{
-                alignItems: 'center',
-                backgroundColor: '#fdf2f8',
-                borderColor: '#f9a8d4',
-                borderRadius: 8,
-                borderWidth: 1,
-                flexDirection: 'row',
-                justifyContent: 'space-between',
-                paddingHorizontal: 14,
-                paddingVertical: 12,
-              }}
-              onPress={() => setCataloguePromosExpanded((expanded) => !expanded)}
-              activeOpacity={0.85}
-            >
-              <View style={{ alignItems: 'center', flexDirection: 'row', flex: 1 }}>
-                <Ionicons name="pricetags-outline" size={19} color="#be185d" />
-                <Text style={{ color: '#be185d', fontSize: 15, fontWeight: '800', marginLeft: 8 }}>
-                  Discount Promos
-                </Text>
-              </View>
-              <Ionicons
-                name={cataloguePromosExpanded ? 'chevron-up' : 'chevron-down'}
-                size={20}
-                color="#be185d"
-              />
-            </TouchableOpacity>
+      <TouchableOpacity
+        style={{
+          alignItems: 'center',
+          backgroundColor: '#fdf2f8',
+          borderColor: '#f9a8d4',
+          borderRadius: 8,
+          borderWidth: 1,
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          marginBottom: 12,
+          paddingHorizontal: 14,
+          paddingVertical: 12,
+        }}
+        onPress={() => setCataloguePromosExpanded((expanded) => !expanded)}
+        activeOpacity={0.85}
+      >
+        <View style={{ alignItems: 'center', flexDirection: 'row', flex: 1 }}>
+          <Ionicons name="pricetags-outline" size={19} color="#be185d" />
+          <Text style={{ color: '#be185d', fontSize: 15, fontWeight: '800', marginLeft: 8 }}>
+            Discount Promos
+          </Text>
+        </View>
+        <Ionicons
+          name={cataloguePromosExpanded ? 'chevron-up' : 'chevron-down'}
+          size={20}
+          color="#be185d"
+        />
+      </TouchableOpacity>
 
-            {cataloguePromosExpanded ? (
-              <View style={{ marginTop: 10 }}>
-                <PromoManager
-                  channelScope="catalog"
-                  title="Catalogue Promos"
-                  productOptions={products.map((product) => ({
-                    id: String(product.id),
-                    label: product.name,
-                  }))}
-                  categoryOptions={categories
-                    .filter((category) => category.id !== 0)
-                    .map((category) => ({
-                      id: String(category.id),
-                      label: category.name,
-                    }))}
-                />
-              </View>
-            ) : null}
-          </View>
-        )}
-        ListEmptyComponent={
-          <Text style={styles.emptyText}>No products found</Text>
-        }
-      />
+      {cataloguePromosExpanded ? (
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={[styles.listContent, { paddingTop: 0 }]}
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode="none"
+          showsVerticalScrollIndicator={false}
+        >
+          <PromoManager
+            channelScope="catalog"
+            title="Catalogue Promos"
+            productOptions={products.map((product) => ({
+              id: String(product.id),
+              label: product.name,
+            }))}
+            categoryOptions={categories
+              .filter((category) => category.id !== 0)
+              .map((category) => ({
+                id: String(category.id),
+                label: category.name,
+              }))}
+          />
+        </ScrollView>
+      ) : (
+        <FlatList
+          data={filteredProducts}
+          renderItem={renderProduct}
+          keyExtractor={(item) => item.id.toString()}
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode="none"
+          removeClippedSubviews={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ec4899']} />
+          }
+          contentContainerStyle={styles.listContent}
+          ListEmptyComponent={
+            <Text style={styles.emptyText}>No products found</Text>
+          }
+        />
+      )}
 
       {/* Add/Edit Modal */}
       <Modal visible={modalVisible} animationType="slide" transparent>
