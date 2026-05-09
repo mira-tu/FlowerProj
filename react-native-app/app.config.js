@@ -56,10 +56,10 @@ module.exports = {
       supabaseUrl: SUPABASE_URL,
       supabaseAnonKey: SUPABASE_ANON_KEY,
       eas: {
-        projectId: '9f8fb287-9932-40fb-967d-5d529c921786',
+        projectId: 'dfb3bfbd-931d-414a-9513-5ddb7fc84750',
       },
     },
-    owner: 'miraken',
+    owner: 'neneth',
     icon: './assets/icon.png',
   },
 };
