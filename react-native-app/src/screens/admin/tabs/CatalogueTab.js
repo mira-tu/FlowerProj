@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   Image,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   RefreshControl,
   ScrollView,
   Text,
@@ -422,6 +424,17 @@ const CatalogueTab = () => {
     );
   };
 
+  const cataloguePromoProductOptions = useMemo(() => products.map((product) => ({
+    id: String(product.id),
+    label: product.name,
+  })), [products]);
+  const cataloguePromoCategoryOptions = useMemo(() => categories
+    .filter((category) => category.id !== 0)
+    .map((category) => ({
+      id: String(category.id),
+      label: category.name,
+    })), [categories]);
+
   if (loading && !refreshing) {
     return (
       <View style={styles.loadingContainer}>
@@ -440,65 +453,6 @@ const CatalogueTab = () => {
 
   return (
     <View style={styles.tabContent}>
-      <TouchableOpacity
-        style={styles.addButton}
-        onPress={() => {
-          resetForm();
-          setModalVisible(true);
-        }}
-      >
-        <Ionicons name="add" size={20} color="#fff" />
-        <Text style={styles.addButtonText}>Add Product</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={[styles.addButton, { backgroundColor: '#6b7280', marginTop: -5 }]}
-        onPress={() => setManageCategoriesVisible(true)}
-      >
-        <Ionicons name="list" size={20} color="#fff" />
-        <Text style={styles.addButtonText}>Manage Categories</Text>
-      </TouchableOpacity>
-
-      {/* Category Filter Container */}
-      <View style={styles.filterContainer}>
-        <Text style={styles.filterLabel}>Filter by Category:</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
-          {categories.map((cat) => (
-            <TouchableOpacity
-              key={cat.id}
-              style={[
-                styles.categoryChip,
-                selectedCategory === cat.name && styles.categoryChipActive
-              ]}
-              onPress={() => setSelectedCategory(cat.name)}
-            >
-              <Text style={[
-                styles.categoryChipText,
-                selectedCategory === cat.name && styles.categoryChipTextActive
-              ]}>
-                {cat.name}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-
-      <View style={styles.riderSearchContainer}>
-        <Ionicons name="search" size={20} color="#999" style={styles.riderSearchIcon} />
-        <TextInput
-          style={styles.riderSearchInput}
-          placeholder="Search catalogue..."
-          placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-        {searchQuery ? (
-          <TouchableOpacity onPress={() => setSearchQuery('')}>
-            <Ionicons name="close-circle" size={18} color="#9ca3af" />
-          </TouchableOpacity>
-        ) : null}
-      </View>
-
       <TouchableOpacity
         style={{
           alignItems: 'center',
@@ -529,44 +483,104 @@ const CatalogueTab = () => {
       </TouchableOpacity>
 
       {cataloguePromosExpanded ? (
-        <ScrollView
+        <KeyboardAvoidingView
           style={{ flex: 1 }}
-          contentContainerStyle={[styles.listContent, { paddingTop: 0 }]}
-          keyboardShouldPersistTaps="always"
-          keyboardDismissMode="none"
-          showsVerticalScrollIndicator={false}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
-          <PromoManager
-            channelScope="catalog"
-            title="Catalogue Promos"
-            productOptions={products.map((product) => ({
-              id: String(product.id),
-              label: product.name,
-            }))}
-            categoryOptions={categories
-              .filter((category) => category.id !== 0)
-              .map((category) => ({
-                id: String(category.id),
-                label: category.name,
-              }))}
-          />
-        </ScrollView>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={[styles.listContent, { paddingTop: 0, paddingBottom: 32 }]}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'none'}
+            nestedScrollEnabled
+            showsVerticalScrollIndicator={false}
+          >
+            <PromoManager
+              channelScope="catalog"
+              title="Catalogue Promos"
+              productOptions={cataloguePromoProductOptions}
+              categoryOptions={cataloguePromoCategoryOptions}
+            />
+          </ScrollView>
+        </KeyboardAvoidingView>
       ) : (
-        <FlatList
-          data={filteredProducts}
-          renderItem={renderProduct}
-          keyExtractor={(item) => item.id.toString()}
-          keyboardShouldPersistTaps="always"
-          keyboardDismissMode="none"
-          removeClippedSubviews={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ec4899']} />
-          }
-          contentContainerStyle={styles.listContent}
-          ListEmptyComponent={
-            <Text style={styles.emptyText}>No products found</Text>
-          }
-        />
+        <>
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={() => {
+              resetForm();
+              setModalVisible(true);
+            }}
+          >
+            <Ionicons name="add" size={20} color="#fff" />
+            <Text style={styles.addButtonText}>Add Product</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.addButton, { backgroundColor: '#6b7280', marginTop: -5 }]}
+            onPress={() => setManageCategoriesVisible(true)}
+          >
+            <Ionicons name="list" size={20} color="#fff" />
+            <Text style={styles.addButtonText}>Manage Categories</Text>
+          </TouchableOpacity>
+
+          {/* Category Filter Container */}
+          <View style={styles.filterContainer}>
+            <Text style={styles.filterLabel}>Filter by Category:</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
+              {categories.map((cat) => (
+                <TouchableOpacity
+                  key={cat.id}
+                  style={[
+                    styles.categoryChip,
+                    selectedCategory === cat.name && styles.categoryChipActive
+                  ]}
+                  onPress={() => setSelectedCategory(cat.name)}
+                >
+                  <Text style={[
+                    styles.categoryChipText,
+                    selectedCategory === cat.name && styles.categoryChipTextActive
+                  ]}>
+                    {cat.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+
+          <View style={styles.riderSearchContainer}>
+            <Ionicons name="search" size={20} color="#999" style={styles.riderSearchIcon} />
+            <TextInput
+              style={styles.riderSearchInput}
+              placeholder="Search catalogue..."
+              placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery ? (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <Ionicons name="close-circle" size={18} color="#9ca3af" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          <FlatList
+            data={filteredProducts}
+            renderItem={renderProduct}
+            keyExtractor={(item) => item.id.toString()}
+            keyboardShouldPersistTaps="always"
+            keyboardDismissMode="none"
+            removeClippedSubviews={false}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ec4899']} />
+            }
+            contentContainerStyle={styles.listContent}
+            ListEmptyComponent={
+              <Text style={styles.emptyText}>No products found</Text>
+            }
+          />
+        </>
       )}
 
       {/* Add/Edit Modal */}
