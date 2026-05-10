@@ -202,12 +202,12 @@ const AdminDashboard = () => {
       && EMPLOYEE_RESTRICTED_TABS.has(activeTab);
 
     if (isRestrictedEmployeeTab) {
-      return <CatalogueTab />;
+      return <CatalogueTab handleSelectCustomerForMessage={handleSelectCustomerForMessage} />;
     }
 
     switch (activeTab) {
       case 'catalogue':
-        return <CatalogueTab />;
+        return <CatalogueTab handleSelectCustomerForMessage={handleSelectCustomerForMessage} />;
       case 'orders':
         return (
           <OrdersTab
@@ -219,7 +219,7 @@ const AdminDashboard = () => {
           />
         );
       case 'stock':
-        return <StockTab />;
+        return <StockTab handleSelectCustomerForMessage={handleSelectCustomerForMessage} />;
       case 'requests':
         return (
           <RequestsTab
@@ -256,13 +256,13 @@ const AdminDashboard = () => {
       case 'about':
         return <AboutTab />;
       case 'customOrder':
-        return <CustomOrderTab />;
+        return <CustomOrderTab handleSelectCustomerForMessage={handleSelectCustomerForMessage} />;
       case 'contact':
         return <ContactTab />;
       case 'employees':
         return <EmployeesTab />;
       default:
-        return <CatalogueTab />;
+        return <CatalogueTab handleSelectCustomerForMessage={handleSelectCustomerForMessage} />;
     }
   };
 

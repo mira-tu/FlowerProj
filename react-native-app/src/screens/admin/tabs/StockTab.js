@@ -193,7 +193,7 @@ const withStockRetry = async (task) => {
   throw lastError || new Error('Failed to fetch stock data.');
 };
 
-const StockTab = () => {
+const StockTab = ({ handleSelectCustomerForMessage } = {}) => {
   const [activeStockTab, setActiveStockTab] = useState('Ribbons');
   const [ribbonScopeFilter, setRibbonScopeFilter] = useState('classic_bouquet');
   const [searchQuery, setSearchQuery] = useState('');
@@ -790,6 +790,7 @@ const StockTab = () => {
           id: String(item.id),
           label: `${getStockDisplayName(item)}${item.category ? ` - ${item.category}` : ''}`,
         }))}
+        onMessageCustomer={handleSelectCustomerForMessage}
       />
 
       <TouchableOpacity style={styles.addButton} onPress={() => { resetForm(); setModalVisible(true); }}>

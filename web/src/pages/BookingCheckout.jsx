@@ -308,6 +308,7 @@ const BookingCheckout = ({ user }) => {
             try {
                 const result = await fetchDiscountPromos(supabase, {
                     channelScope: PROMO_CHANNELS.CUSTOM_ORDER,
+                    customerId: user?.id,
                 });
                 if (isMounted) {
                     setPromoState({
@@ -507,11 +508,12 @@ const BookingCheckout = ({ user }) => {
         lines: promoLines,
         promos: promoState.promos,
         channelScope: PROMO_CHANNELS.CUSTOM_ORDER,
+        customerId: user?.id,
         enteredCode: appliedPromoCode,
         shippingFee: customOrderReviewShippingFee,
         occasions: inquirySummary.combinedOccasions,
         arrangementTargets: customOrderArrangementTargets,
-    }), [appliedPromoCode, customOrderArrangementTargets, inquirySummary.combinedOccasions, promoLines, promoState.promos]);
+    }), [appliedPromoCode, customOrderArrangementTargets, inquirySummary.combinedOccasions, promoLines, promoState.promos, user?.id]);
     const estimatedDiscountTotal = promoPricing.discountTotal;
     const estimatedSubtotalAfterDiscount = promoPricing.subtotalAfterDiscount;
     const promoFeedbackMessage = appliedPromoCode

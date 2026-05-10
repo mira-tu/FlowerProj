@@ -134,6 +134,9 @@ const MessagingTab = ({ currentUser, customerToMessage, setCustomerToMessage, se
                     email: customerToMessage.email,
                 },
             };
+            if (customerToMessage.initialMessage) {
+                setNewMessage(customerToMessage.initialMessage);
+            }
             fetchMessages(customerConversation, currentUser);
             setCustomerToMessage(null); // Reset after processing
         }

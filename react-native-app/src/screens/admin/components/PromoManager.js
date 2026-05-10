@@ -56,6 +56,8 @@ const blankForm = (channelScope) => ({
   usage_limit_per_user: '',
   minimum_subtotal: '',
   applies_to_sale_items: true,
+  customerScope: 'all',
+  customer_id: null,
   targetKind: 'all',
   product_ids: [],
   category_ids: [],
@@ -130,6 +132,9 @@ const toLegacyPercentPromoPayload = (payload = {}) => {
 };
 
 const getPromoSaveErrorMessage = (error, payload = {}) => {
+  if (isSchemaCacheMissingColumnError(error, ['customer_id'])) {
+    return 'Private customer promos need the latest promo database update before they can be saved. Please update the database, then try again.';
+  }
   if (isSchemaCacheMissingColumnError(error, ['discount_type', 'discount_amount'])) {
     if (normalizeDiscountType(payload.discount_type) === 'amount') {
       return 'Fixed amount promos need the latest promo database update before they can be saved. Please ask an admin to update the database, then try again.';
@@ -142,6 +147,22 @@ const getPromoSaveErrorMessage = (error, payload = {}) => {
 const getOptionValue = (option) => toText(option?.value ?? option?.id ?? option?.name ?? option?.label);
 const getOptionLabel = (option) => toText(option?.label ?? option?.name ?? option?.category_name ?? option?.value ?? option?.id);
 const normalizeDiscountType = (value) => (toText(value).toLowerCase() === 'amount' ? 'amount' : 'percent');
+const getCustomerName = (customer = {}) => (
+  toText(customer.name)
+  || [customer.first_name, customer.last_name].map(toText).filter(Boolean).join(' ')
+  || toText(customer.email)
+  || 'Customer'
+);
+const getCustomerEmail = (customer = {}) => toText(customer.email);
+const customerMatchesQuery = (customer = {}, query = '') => {
+  const normalizedQuery = toText(query).toLowerCase();
+  if (!normalizedQuery) return true;
+  return [
+    getCustomerName(customer),
+    getCustomerEmail(customer),
+    customer.phone,
+  ].some((value) => toText(value).toLowerCase().includes(normalizedQuery));
+};
 const formatPeso = (value) => {
   const amount = parseNumberOrNull(value) || 0;
   return `PHP ${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
@@ -150,7 +171,25 @@ const getPromoDiscountLabel = (promo = {}) => {
   if (normalizeDiscountType(promo.discount_type) === 'amount') {
     return `${formatPeso(promo.discount_amount)} off`;
   }
-  return `${parseNumberOrNull(promo.discount_percent) || 0}%`;
+  return `${parseNumberOrNull(promo.discount_percent) || 0}% off`;
+};
+const buildOptionLabelMap = (options = []) => new Map(
+  (Array.isArray(options) ? options : [])
+    .map((option) => [getOptionValue(option), getOptionLabel(option)])
+    .filter(([value, label]) => value && label)
+);
+const getTargetLabels = (values, labelMap) => toArray(values)
+  .map((value) => labelMap.get(toText(value)) || toText(value))
+  .filter(Boolean);
+const formatTargetLabelList = (labels = []) => {
+  const uniqueLabels = Array.from(new Set(labels.map(toText).filter(Boolean)));
+  if (uniqueLabels.length <= 3) return uniqueLabels.join(', ');
+  return `${uniqueLabels.slice(0, 3).join(', ')} and ${uniqueLabels.length - 3} more`;
+};
+const buildPrivatePromoMessage = (promo = {}, customer = {}, targetDescription = '') => {
+  const firstName = toText(customer.first_name) || getCustomerName(customer).split(/\s+/)[0] || 'there';
+  const targetText = targetDescription || `${CHANNEL_LABELS[promo.channel_scope] || 'shop'} items`;
+  return `Hi ${firstName}, you have a private promo code: ${normalizePromoCode(promo.code)}. Use it at checkout for ${getPromoDiscountLabel(promo)} on ${targetText}.`;
 };
 
 const inferTargetKind = (promo, channelScope) => {
@@ -209,6 +248,7 @@ const PromoManager = ({
   customizedTargetOptions = [],
   occasionOptions = [],
   arrangementOptions = [],
+  onMessageCustomer,
 }) => {
   const [promos, setPromos] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -219,6 +259,9 @@ const PromoManager = ({
   const [form, setForm] = useState(() => blankForm(channelScope));
   const [formError, setFormError] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
+  const [customerOptions, setCustomerOptions] = useState([]);
+  const [customersLoading, setCustomersLoading] = useState(false);
+  const [customerQuery, setCustomerQuery] = useState('');
 
   const targetChoices = useMemo(() => buildTargetChoices({
     channelScope,
@@ -228,6 +271,11 @@ const PromoManager = ({
     occasionOptions,
     arrangementOptions,
   }), [arrangementOptions, categoryOptions, channelScope, customizedTargetOptions, occasionOptions, productOptions]);
+  const productLabelById = useMemo(() => buildOptionLabelMap(productOptions), [productOptions]);
+  const categoryLabelById = useMemo(() => buildOptionLabelMap(categoryOptions), [categoryOptions]);
+  const customizedTargetLabelById = useMemo(() => buildOptionLabelMap(customizedTargetOptions), [customizedTargetOptions]);
+  const arrangementLabelById = useMemo(() => buildOptionLabelMap(arrangementOptions), [arrangementOptions]);
+  const occasionLabelById = useMemo(() => buildOptionLabelMap(occasionOptions), [occasionOptions]);
 
   const selectedOptions = targetChoices[form.targetKind]?.options || [];
   const selectedValues = (() => {
@@ -238,6 +286,84 @@ const PromoManager = ({
     if (form.targetKind === 'occasions') return form.occasion_targets;
     return [];
   })();
+  const customerById = useMemo(() => new Map(
+    customerOptions.map((customer) => [toText(customer.id), customer])
+  ), [customerOptions]);
+  const selectedCustomer = form.customer_id ? customerById.get(toText(form.customer_id)) : null;
+  const filteredCustomerOptions = useMemo(() => customerOptions
+    .filter((customer) => customerMatchesQuery(customer, customerQuery))
+    .slice(0, 30), [customerOptions, customerQuery]);
+  const getPrivatePromoLabel = (promo = {}) => {
+    if (!promo.customer_id) return '';
+    const customer = customerById.get(toText(promo.customer_id));
+    return customer ? `Private customer promo: ${getCustomerName(customer)}` : 'Private customer promo';
+  };
+  const getPromoTargetDescription = (promo = {}) => {
+    const promoChannel = toText(promo.channel_scope || channelScope);
+    const channelLabel = CHANNEL_LABELS[promoChannel] || 'shop';
+    const productLabels = getTargetLabels(promo.product_ids, productLabelById);
+    const categoryLabels = getTargetLabels(promo.category_ids, categoryLabelById);
+    const customizedLabels = getTargetLabels(promo.customized_item_targets, customizedTargetLabelById);
+    const arrangementLabels = getTargetLabels(promo.custom_order_arrangement_targets, arrangementLabelById);
+    const occasionLabels = getTargetLabels(promo.occasion_targets, occasionLabelById);
+
+    if (promoChannel === 'catalog') {
+      if (productLabels.length) {
+        return `selected ${channelLabel} ${productLabels.length === 1 ? 'product' : 'products'}: ${formatTargetLabelList(productLabels)}`;
+      }
+      if (categoryLabels.length) {
+        return `selected ${channelLabel} ${categoryLabels.length === 1 ? 'category' : 'categories'}: ${formatTargetLabelList(categoryLabels)}`;
+      }
+      return `all ${channelLabel} items`;
+    }
+
+    if (promoChannel === 'customized') {
+      if (customizedLabels.length) {
+        return `selected ${channelLabel} ${customizedLabels.length === 1 ? 'item' : 'items'}: ${formatTargetLabelList(customizedLabels)}`;
+      }
+      return `all ${channelLabel} items`;
+    }
+
+    if (promoChannel === 'custom_order') {
+      if (arrangementLabels.length) {
+        return `selected ${channelLabel} ${arrangementLabels.length === 1 ? 'arrangement' : 'arrangements'}: ${formatTargetLabelList(arrangementLabels)}`;
+      }
+      if (occasionLabels.length) {
+        return `selected ${channelLabel} ${occasionLabels.length === 1 ? 'occasion' : 'occasions'}: ${formatTargetLabelList(occasionLabels)}`;
+      }
+      return `all ${channelLabel} requests`;
+    }
+
+    return `${channelLabel} items`;
+  };
+  const messagePrivatePromoCustomer = (promo = {}) => {
+    if (!promo.customer_id || typeof onMessageCustomer !== 'function') return;
+    const customer = customerById.get(toText(promo.customer_id)) || {};
+    onMessageCustomer({
+      id: promo.customer_id,
+      name: getCustomerName(customer),
+      email: getCustomerEmail(customer),
+      initialMessage: buildPrivatePromoMessage(promo, customer, getPromoTargetDescription(promo)),
+    });
+  };
+
+  const loadCustomers = useCallback(async () => {
+    setCustomersLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('id, name, email, phone, first_name, last_name')
+        .eq('role', 'customer')
+        .order('name', { ascending: true });
+      if (error) throw error;
+      setCustomerOptions(data || []);
+    } catch (error) {
+      console.error('Error loading customers for promos:', error);
+      Alert.alert('Error', error.message || 'Failed to load customers for private promos.');
+    } finally {
+      setCustomersLoading(false);
+    }
+  }, []);
 
   const loadPromos = useCallback(async () => {
     setLoading(true);
@@ -255,6 +381,10 @@ const PromoManager = ({
   useEffect(() => {
     loadPromos();
   }, [loadPromos]);
+
+  useEffect(() => {
+    loadCustomers();
+  }, [loadCustomers]);
 
   const updateForm = (patch) => {
     setForm((current) => ({ ...current, ...patch }));
@@ -277,6 +407,7 @@ const PromoManager = ({
     setEditing(false);
     setFormError('');
     setFieldErrors({});
+    setCustomerQuery('');
     setForm(blankForm(channelScope));
   };
 
@@ -296,6 +427,8 @@ const PromoManager = ({
       usage_limit_total: normalized.usage_limit_total === null ? '' : toText(normalized.usage_limit_total),
       usage_limit_per_user: normalized.usage_limit_per_user === null ? '' : toText(normalized.usage_limit_per_user),
       minimum_subtotal: normalized.minimum_subtotal ? toText(normalized.minimum_subtotal) : '',
+      customerScope: normalized.customer_id ? 'specific' : 'all',
+      customer_id: normalized.customer_id || null,
       target_scope: 'order',
       targetKind: inferTargetKind(normalized, channelScope),
       product_ids: toArray(normalized.product_ids),
@@ -343,6 +476,7 @@ const PromoManager = ({
     const discountPercent = parseNumberOrNull(form.discount_percent);
     const discountAmount = parseNumberOrNull(form.discount_amount);
     const minimumSubtotal = parseNumberOrNull(form.minimum_subtotal) || 0;
+    const customerId = form.customerScope === 'specific' ? toText(form.customer_id) : null;
 
     if (!code) {
       throw createValidationError({ code: 'Promo code is required.' });
@@ -355,6 +489,9 @@ const PromoManager = ({
     }
     if (discountType === 'amount' && (!discountAmount || discountAmount <= 0)) {
       throw createValidationError({ discount_amount: 'Discount amount must be greater than 0.' });
+    }
+    if (form.customerScope === 'specific' && !customerId) {
+      throw createValidationError({ customer_id: 'Select one customer for this private promo.' });
     }
 
     let startsAt = null;
@@ -386,6 +523,7 @@ const PromoManager = ({
       usage_limit_total: parseIntegerOrNull(form.usage_limit_total),
       usage_limit_per_user: parseIntegerOrNull(form.usage_limit_per_user),
       minimum_subtotal: minimumSubtotal,
+      customer_id: customerId,
       occasion_targets: form.targetKind === 'occasions' ? toArray(form.occasion_targets) : [],
       product_ids: form.targetKind === 'products' ? toArray(form.product_ids) : [],
       category_ids: form.targetKind === 'categories' ? toArray(form.category_ids) : [],
@@ -594,6 +732,91 @@ const PromoManager = ({
           ))}
         </View>
 
+        <Text style={localStyles.label}>Customer</Text>
+        <View style={localStyles.chipRow}>
+          <TouchableOpacity
+            style={[localStyles.chip, form.customerScope !== 'specific' && localStyles.chipActive]}
+            onPress={() => updateForm({ customerScope: 'all', customer_id: null })}
+          >
+            <Text style={[localStyles.chipText, form.customerScope !== 'specific' && localStyles.chipTextActive]}>
+              All customers
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[localStyles.chip, form.customerScope === 'specific' && localStyles.chipActive]}
+            onPress={() => updateForm({ customerScope: 'specific' })}
+          >
+            <Text style={[localStyles.chipText, form.customerScope === 'specific' && localStyles.chipTextActive]}>
+              Specific customer
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {form.customerScope === 'specific' ? (
+          <View style={[localStyles.customerBox, fieldErrors.customer_id && localStyles.inputError]}>
+            <View style={localStyles.customerSearchRow}>
+              <Ionicons name="search" size={16} color="#9ca3af" />
+              <TextInput
+                style={localStyles.customerSearchInput}
+                value={customerQuery}
+                onChangeText={setCustomerQuery}
+                placeholder="Search customer name or email"
+                placeholderTextColor={PLACEHOLDER_TEXT_COLOR}
+              />
+              <TouchableOpacity onPress={loadCustomers} disabled={customersLoading}>
+                {customersLoading ? (
+                  <ActivityIndicator size="small" color="#ec4899" />
+                ) : (
+                  <Ionicons name="refresh" size={16} color="#ec4899" />
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {selectedCustomer ? (
+              <View style={localStyles.selectedCustomerRow}>
+                <View style={localStyles.selectedCustomerInfo}>
+                  <Text style={localStyles.selectedCustomerName}>{getCustomerName(selectedCustomer)}</Text>
+                  {getCustomerEmail(selectedCustomer) ? (
+                    <Text style={localStyles.selectedCustomerEmail}>{getCustomerEmail(selectedCustomer)}</Text>
+                  ) : null}
+                </View>
+                <TouchableOpacity onPress={() => updateForm({ customer_id: null })}>
+                  <Ionicons name="close-circle" size={18} color="#9ca3af" />
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
+            <View style={localStyles.customerOptions}>
+              {customersLoading && !customerOptions.length ? (
+                <Text style={localStyles.emptyText}>Loading customers...</Text>
+              ) : filteredCustomerOptions.length ? (
+                filteredCustomerOptions.map((customer) => {
+                  const selected = toText(form.customer_id) === toText(customer.id);
+                  return (
+                    <TouchableOpacity
+                      key={customer.id}
+                      style={[localStyles.customerOption, selected && localStyles.customerOptionSelected]}
+                      onPress={() => updateForm({ customer_id: customer.id })}
+                    >
+                      <Text style={[localStyles.customerOptionName, selected && localStyles.customerOptionTextSelected]}>
+                        {getCustomerName(customer)}
+                      </Text>
+                      {getCustomerEmail(customer) ? (
+                        <Text style={[localStyles.customerOptionEmail, selected && localStyles.customerOptionTextSelected]}>
+                          {getCustomerEmail(customer)}
+                        </Text>
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })
+              ) : (
+                <Text style={localStyles.emptyText}>No customers found.</Text>
+              )}
+            </View>
+            {fieldErrors.customer_id ? <Text style={localStyles.fieldErrorText}>{fieldErrors.customer_id}</Text> : null}
+          </View>
+        ) : null}
+
         <Text style={localStyles.label}>Targets</Text>
         <View style={localStyles.chipRow}>
           {Object.entries(targetChoices).map(([key, config]) => (
@@ -732,6 +955,20 @@ const PromoManager = ({
               <Text style={localStyles.promoMeta}>
                 Used {promo.total_redemptions || 0}{promo.usage_limit_total ? `/${promo.usage_limit_total}` : ''} times
               </Text>
+              {promo.customer_id ? (
+                <>
+                  <Text style={localStyles.promoPrivateMeta}>{getPrivatePromoLabel(promo)}</Text>
+                  {typeof onMessageCustomer === 'function' ? (
+                    <TouchableOpacity
+                      style={localStyles.messageCustomerButton}
+                      onPress={() => messagePrivatePromoCustomer(promo)}
+                    >
+                      <Ionicons name="chatbubble-ellipses-outline" size={14} color="#be185d" />
+                      <Text style={localStyles.messageCustomerText}>Message Customer</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </>
+              ) : null}
             </View>
             <View style={localStyles.promoActions}>
               <TouchableOpacity style={localStyles.smallIconButton} onPress={() => beginEdit(promo)}>
@@ -946,6 +1183,88 @@ const localStyles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
   },
+  customerBox: {
+    backgroundColor: '#f9fafb',
+    borderColor: '#e5e7eb',
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 8,
+  },
+  customerSearchRow: {
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderColor: '#e5e7eb',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    minHeight: 38,
+    paddingHorizontal: 9,
+  },
+  customerSearchInput: {
+    color: '#111827',
+    flex: 1,
+    fontSize: 13,
+    minHeight: 36,
+    paddingHorizontal: 8,
+  },
+  selectedCustomerRow: {
+    alignItems: 'center',
+    backgroundColor: '#fdf2f8',
+    borderColor: '#fbcfe8',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    marginTop: 8,
+    padding: 8,
+  },
+  selectedCustomerInfo: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  selectedCustomerName: {
+    color: '#9d174d',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  selectedCustomerEmail: {
+    color: '#be185d',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  customerOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 8,
+  },
+  customerOption: {
+    backgroundColor: '#fff',
+    borderColor: '#e5e7eb',
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 6,
+    marginRight: 6,
+    maxWidth: '100%',
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+  },
+  customerOptionSelected: {
+    backgroundColor: '#ec4899',
+    borderColor: '#ec4899',
+  },
+  customerOptionName: {
+    color: '#374151',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  customerOptionEmail: {
+    color: '#6b7280',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  customerOptionTextSelected: {
+    color: '#fff',
+  },
   switchRow: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -1015,6 +1334,30 @@ const localStyles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 11,
     marginTop: 2,
+  },
+  promoPrivateMeta: {
+    color: '#be185d',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  messageCustomerButton: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: '#fdf2f8',
+    borderColor: '#fbcfe8',
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    marginTop: 7,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+  messageCustomerText: {
+    color: '#be185d',
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 5,
   },
   promoActions: {
     flexDirection: 'row',

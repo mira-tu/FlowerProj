@@ -212,7 +212,7 @@ const buildDuplicateMessage = (type) => {
   return 'Another color palette already uses that internal value.';
 };
 
-const CustomOrderTab = () => {
+const CustomOrderTab = ({ handleSelectCustomerForMessage } = {}) => {
   const [catalog, setCatalog] = useState(() => normalizeCustomOrderAdminCatalog(DEFAULT_CUSTOM_ORDER_ADMIN_CATALOG));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -655,6 +655,7 @@ const CustomOrderTab = () => {
           id: item.value || item.id || item.label,
           label: item.label || item.value,
         }))}
+        onMessageCustomer={handleSelectCustomerForMessage}
       />
 
       <View style={[styles.riderSearchContainer, { marginHorizontal: 4, marginBottom: 14 }]}>

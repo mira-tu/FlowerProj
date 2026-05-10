@@ -72,6 +72,7 @@ const normalizeComparable = (value) => (
         .toLowerCase()
         .replace(/[\s_-]+/g, '-')
 );
+const normalizeId = (value) => String(value ?? '').trim().toLowerCase();
 
 const targetListHas = (targets, values = []) => {
     if (targets === null) return true;
@@ -115,6 +116,7 @@ export const normalizePromo = (promo = {}) => ({
     channel_scope: String(promo.channel_scope || 'all').trim(),
     discount_mode: String(promo.discount_mode || 'coupon_code').trim(),
     target_scope: String(promo.target_scope || 'order').trim(),
+    customer_id: promo.customer_id ? String(promo.customer_id).trim() : null,
     is_active: promo.is_active !== false,
     usage_limit_total: promo.usage_limit_total === null || promo.usage_limit_total === undefined
         ? null
@@ -133,16 +135,23 @@ export const normalizePromo = (promo = {}) => ({
     user_redemptions: Number.parseInt(promo.user_redemptions, 10) || 0,
 });
 
-export const fetchDiscountPromos = async (supabase, { channelScope } = {}) => {
+export const fetchDiscountPromos = async (supabase, { channelScope, customerId = null } = {}) => {
     if (!supabase || !channelScope) {
         return { promos: [], unavailable: true };
     }
 
     const channelValues = [channelScope, 'all'];
-    const { data, error } = await supabase
+    let query = supabase
         .from('discount_promos')
         .select('*')
         .in('channel_scope', channelValues);
+    const normalizedCustomerId = normalizeId(customerId);
+
+    if (normalizedCustomerId) {
+        query = query.or(`customer_id.is.null,customer_id.eq.${normalizedCustomerId}`);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
         if (isMissingPromoInfrastructureError(error)) {
@@ -240,6 +249,10 @@ const normalizeLine = (line = {}, index = 0) => {
 
 const promoMatchesChannel = (promo, channelScope) => (
     promo.channel_scope === 'all' || promo.channel_scope === channelScope
+);
+
+const promoMatchesCustomer = (promo, customerId = null) => (
+    !promo.customer_id || normalizeId(promo.customer_id) === normalizeId(customerId)
 );
 
 const getPromoAvailability = (promo, { now = new Date(), subtotalBeforeDiscount = 0 } = {}) => {
@@ -452,6 +465,7 @@ export const calculatePromoPricing = ({
     lines = [],
     promos = [],
     channelScope,
+    customerId = null,
     enteredCode = '',
     shippingFee = 0,
     occasions = [],
@@ -470,6 +484,7 @@ export const calculatePromoPricing = ({
 
     normalizedPromos.forEach((promo) => {
         if (!promoMatchesChannel(promo, channelScope)) return;
+        if (!promoMatchesCustomer(promo, customerId)) return;
         if (getPromoAvailability(promo, { now, subtotalBeforeDiscount }) !== 'available') return;
         if (!getPromoModeEligible(promo, { enteredCode: normalizedCode, channelScope, occasions })) return;
 
@@ -499,6 +514,7 @@ export const calculatePromoPricing = ({
         lines: normalizedLines,
         eligiblePromos: normalizedPromos.filter((promo) => (
             promoMatchesChannel(promo, channelScope)
+            && promoMatchesCustomer(promo, customerId)
             && getPromoAvailability(promo, { now, subtotalBeforeDiscount }) === 'available'
         )),
         chosenCandidate,
@@ -515,6 +531,7 @@ export const calculatePromoPricing = ({
             enteredCode: normalizedCode,
             chosenPromo,
             channelScope,
+            customerId,
             subtotalBeforeDiscount,
             now,
             occasions,
@@ -527,6 +544,7 @@ export const getEnteredPromoValidation = ({
     enteredCode = '',
     chosenPromo = null,
     channelScope,
+    customerId = null,
     subtotalBeforeDiscount = 0,
     now = new Date(),
     occasions = [],
@@ -540,6 +558,7 @@ export const getEnteredPromoValidation = ({
 
     if (!promo) return { status: 'invalid', promo: null };
     if (!promoMatchesChannel(promo, channelScope)) return { status: 'ineligible', promo };
+    if (!promoMatchesCustomer(promo, customerId)) return { status: 'customer', promo };
 
     const availability = getPromoAvailability(promo, { now, subtotalBeforeDiscount });
     if (availability !== 'available') return { status: availability, promo };
@@ -562,7 +581,7 @@ export const getPromoValidationMessage = (validation) => {
         case 'applied':
             return `${validation.promo?.name || validation.promo?.code || 'Discount'} applied.`;
         case 'invalid':
-            return 'That discount code was not found.';
+            return 'That discount code was not found or is not eligible for this account.';
         case 'inactive':
             return 'That discount code is inactive.';
         case 'scheduled':
@@ -577,6 +596,8 @@ export const getPromoValidationMessage = (validation) => {
             return `That discount requires a minimum subtotal of PHP ${roundCurrency(validation.promo?.minimum_subtotal).toLocaleString()}.`;
         case 'ineligible':
             return 'That discount code is not eligible for these items.';
+        case 'customer':
+            return 'That discount code is not eligible for this account.';
         case 'not_best':
             return 'That code is valid, but a better discount is already applied.';
         default:
@@ -599,6 +620,7 @@ export const buildDiscountSnapshot = (pricing) => {
         discount_amount: pricing.chosenPromo?.discount_amount || null,
         discount_mode: pricing.chosenPromo?.discount_mode || null,
         target_scope: pricing.chosenPromo?.target_scope || null,
+        customer_id: pricing.chosenPromo?.customer_id || null,
         channel_scope: pricing.channelScope,
         discount_total: pricing.discountTotal,
         subtotal_before_discount: pricing.subtotalBeforeDiscount,

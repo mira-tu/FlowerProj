@@ -58,7 +58,7 @@ const formatDiscountLabel = (value) => {
   return `${formattedValue}% OFF`;
 };
 
-const CatalogueTab = () => {
+const CatalogueTab = ({ handleSelectCustomerForMessage } = {}) => {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -501,6 +501,7 @@ const CatalogueTab = () => {
               title="Catalogue Promos"
               productOptions={cataloguePromoProductOptions}
               categoryOptions={cataloguePromoCategoryOptions}
+              onMessageCustomer={handleSelectCustomerForMessage}
             />
           </ScrollView>
         </KeyboardAvoidingView>

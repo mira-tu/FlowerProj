@@ -1496,6 +1496,7 @@ const resolveCustomOrderQuotePromoPricing = async ({
     try {
         const result = await fetchDiscountPromos(supabase, {
             channelScope: PROMO_CHANNELS.CUSTOM_ORDER,
+            customerId: existingRequest?.user_id,
         });
         promos = result.promos || [];
     } catch (error) {
@@ -1506,6 +1507,7 @@ const resolveCustomOrderQuotePromoPricing = async ({
         lines,
         promos,
         channelScope: PROMO_CHANNELS.CUSTOM_ORDER,
+        customerId: existingRequest?.user_id,
         enteredCode: promoCode,
         shippingFee: finalShippingFee,
         occasions,

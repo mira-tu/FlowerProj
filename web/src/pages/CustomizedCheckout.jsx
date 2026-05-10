@@ -329,6 +329,7 @@ const CustomizedCheckout = ({ user }) => {
             try {
                 const result = await fetchDiscountPromos(supabase, {
                     channelScope: PROMO_CHANNELS.CUSTOMIZED,
+                    customerId: user?.id,
                 });
                 if (isMounted) {
                     setPromoState({
@@ -522,9 +523,10 @@ const CustomizedCheckout = ({ user }) => {
         lines: promoLines,
         promos: promoState.promos,
         channelScope: PROMO_CHANNELS.CUSTOMIZED,
+        customerId: user?.id,
         enteredCode: appliedPromoCode,
         shippingFee,
-    }), [appliedPromoCode, promoLines, promoState.promos, shippingFee]);
+    }), [appliedPromoCode, promoLines, promoState.promos, shippingFee, user?.id]);
     const subtotal = promoPricing.subtotalBeforeDiscount || currentItemSubtotal;
     const discountTotal = promoPricing.discountTotal;
     const subtotalAfterDiscount = promoPricing.subtotalAfterDiscount;
