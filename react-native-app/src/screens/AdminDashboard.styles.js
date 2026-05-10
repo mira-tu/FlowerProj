@@ -160,6 +160,77 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 8,
   },
+  catalogueActionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+  },
+  catalogueActionButton: {
+    flex: 1,
+    height: 46,
+    marginBottom: 0,
+    paddingHorizontal: 6,
+    paddingVertical: 0,
+  },
+  catalogueManageButton: {
+    backgroundColor: '#6b7280',
+  },
+  catalogueActionButtonText: {
+    flexShrink: 1,
+    fontSize: 13,
+    lineHeight: 16,
+    marginLeft: 5,
+    textAlign: 'center',
+  },
+  catalogueSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f2f5',
+    borderRadius: 12,
+    minHeight: 40,
+    marginBottom: 8,
+    paddingHorizontal: 10,
+  },
+  catalogueSearchIcon: {
+    marginRight: 8,
+  },
+  catalogueSearchInput: {
+    flex: 1,
+    height: 38,
+    fontSize: 15,
+    color: '#333',
+  },
+  catalogueFilterContainer: {
+    marginBottom: 10,
+  },
+  catalogueCategoryScroll: {
+    maxHeight: 36,
+  },
+  catalogueCategoryScrollContent: {
+    paddingRight: 2,
+  },
+  catalogueCategoryChip: {
+    alignItems: 'center',
+    backgroundColor: '#e5e7eb',
+    borderRadius: 17,
+    height: 34,
+    justifyContent: 'center',
+    marginRight: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  catalogueCategoryChipActive: {
+    backgroundColor: '#ec4899',
+  },
+  catalogueCategoryChipText: {
+    color: '#666',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  catalogueCategoryChipTextActive: {
+    color: '#fff',
+    fontWeight: '600',
+  },
   filterLabel: {
     fontSize: 14,
     fontWeight: '600',

@@ -506,63 +506,68 @@ const CatalogueTab = () => {
         </KeyboardAvoidingView>
       ) : (
         <>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => {
-              resetForm();
-              setModalVisible(true);
-            }}
-          >
-            <Ionicons name="add" size={20} color="#fff" />
-            <Text style={styles.addButtonText}>Add Product</Text>
-          </TouchableOpacity>
+          <View style={styles.catalogueActionRow}>
+            <TouchableOpacity
+              style={[styles.addButton, styles.catalogueActionButton]}
+              onPress={() => {
+                resetForm();
+                setModalVisible(true);
+              }}
+            >
+              <Ionicons name="add" size={18} color="#fff" />
+              <Text style={[styles.addButtonText, styles.catalogueActionButtonText]}>Add Product</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.addButton, { backgroundColor: '#6b7280', marginTop: -5 }]}
-            onPress={() => setManageCategoriesVisible(true)}
-          >
-            <Ionicons name="list" size={20} color="#fff" />
-            <Text style={styles.addButtonText}>Manage Categories</Text>
-          </TouchableOpacity>
-
-          {/* Category Filter Container */}
-          <View style={styles.filterContainer}>
-            <Text style={styles.filterLabel}>Filter by Category:</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
-              {categories.map((cat) => (
-                <TouchableOpacity
-                  key={cat.id}
-                  style={[
-                    styles.categoryChip,
-                    selectedCategory === cat.name && styles.categoryChipActive
-                  ]}
-                  onPress={() => setSelectedCategory(cat.name)}
-                >
-                  <Text style={[
-                    styles.categoryChipText,
-                    selectedCategory === cat.name && styles.categoryChipTextActive
-                  ]}>
-                    {cat.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            <TouchableOpacity
+              style={[styles.addButton, styles.catalogueActionButton, styles.catalogueManageButton]}
+              onPress={() => setManageCategoriesVisible(true)}
+            >
+              <Ionicons name="list" size={18} color="#fff" />
+              <Text style={[styles.addButtonText, styles.catalogueActionButtonText]}>Manage Categories</Text>
+            </TouchableOpacity>
           </View>
 
-          <View style={styles.riderSearchContainer}>
-            <Ionicons name="search" size={20} color="#999" style={styles.riderSearchIcon} />
+          <View style={styles.catalogueSearchContainer}>
+            <Ionicons name="search" size={18} color="#999" style={styles.catalogueSearchIcon} />
             <TextInput
-              style={styles.riderSearchInput}
+              style={styles.catalogueSearchInput}
               placeholder="Search catalogue..."
               placeholderTextColor={ADMIN_PLACEHOLDER_TEXT_COLOR}
               value={searchQuery}
               onChangeText={setSearchQuery}
             />
             {searchQuery ? (
-              <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}>
                 <Ionicons name="close-circle" size={18} color="#9ca3af" />
               </TouchableOpacity>
             ) : null}
+          </View>
+
+          <View style={styles.catalogueFilterContainer}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.catalogueCategoryScroll}
+              contentContainerStyle={styles.catalogueCategoryScrollContent}
+            >
+              {categories.map((cat) => (
+                <TouchableOpacity
+                  key={cat.id}
+                  style={[
+                    styles.catalogueCategoryChip,
+                    selectedCategory === cat.name && styles.catalogueCategoryChipActive
+                  ]}
+                  onPress={() => setSelectedCategory(cat.name)}
+                >
+                  <Text style={[
+                    styles.catalogueCategoryChipText,
+                    selectedCategory === cat.name && styles.catalogueCategoryChipTextActive
+                  ]} numberOfLines={1}>
+                    {cat.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           </View>
 
           <FlatList
