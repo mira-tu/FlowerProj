@@ -1,4 +1,4 @@
-# 🌸 FlowerProj — Jocery's Flower Shop
+# FlowerProj — Jocery's Flower Shop
 
 A full-stack e-commerce platform for a flower shop, featuring a customer-facing web application and an admin mobile dashboard.
 
